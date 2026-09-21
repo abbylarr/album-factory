@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Album Factory — кабинет фотографа</title>
+  <link rel="icon" href="/static/assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="#home"><img src="/static/assets/logo.svg" alt=""><strong>ALBUM<br>FACTORY</strong></a>
+  <nav aria-label="Основное меню">
+    <a href="#home" data-nav="home"><img src="/static/assets/home.svg" alt="">Главная</a>
+    <a href="#upload" data-nav="upload"><img src="/static/assets/upload.svg" alt="">Загрузить фотографии</a>
+    <a href="#persons" data-nav="persons"><img src="/static/assets/portraits.svg" alt="">Персоны</a>
+    <button disabled title="Следующий этап разработки"><img src="/static/assets/layout.svg" alt="">Создать макет<span>Скоро</span></button>
+    <button disabled><img src="/static/assets/ready.svg" alt="">Готовые макеты</button>
+    <button disabled><img src="/static/assets/print.svg" alt="">Отправить в печать</button>
+    <button disabled><img src="/static/assets/delivery.svg" alt="">Доставка</button>
+    <button disabled><img src="/static/assets/archive.svg" alt="">Архив макетов</button>
+  </nav>
+  <div class="sidebar-bottom"><button class="create-button" data-action="new-order"><span class="plus">＋</span>Создать заказ</button><div class="account"><img src="/static/assets/account.svg" alt=""><span>Фотограф</span><small>Локально</small></div></div>
+</aside>
+<main id="main" tabindex="-1"></main>
+<dialog id="order-dialog" aria-labelledby="dialog-title">
+  <form id="order-form">
+    <div class="dialog-heading"><h2 id="dialog-title">Создать заказ</h2><button type="button" class="close" data-close="order-dialog" aria-label="Закрыть">×</button></div>
+    <p class="muted">Один класс — один общий альбом.</p>
+    <label>Школа<input name="school" maxlength="100" placeholder="Например, Школа № 20" required autofocus></label>
+    <div class="form-row"><label>Класс<input name="class_name" maxlength="30" placeholder="9 Б" required></label><label>Количество альбомов<input name="copies" type="number" min="1" max="1000" value="20" required></label></div>
+    <div class="form-row"><label>Дата съёмки<input name="shoot_date" type="date"></label><label>Цена альбома, ₽<input name="price" type="number" min="0" max="1000000" value="0" required></label></div>
+    <p class="muted small">Дату и цену можно оставить незаполненными. После создания можно сразу загрузить портреты.</p>
+    <p id="form-error" class="error" role="alert"></p>
+    <button class="primary wide" type="submit">Создать заказ</button>
+  </form>
+</dialog>
+<dialog id="person-dialog" aria-labelledby="person-title"><div id="person-content"></div></dialog>
+<dialog id="move-dialog" aria-labelledby="move-title"><form id="move-form"><div class="dialog-heading"><h2 id="move-title">Перенести фотографии</h2><button type="button" class="close" data-close="move-dialog" aria-label="Закрыть">×</button></div><label>Персона<select name="target" id="move-target"></select></label><p class="muted small">Выбранные фотографии будут собраны в одной группе.</p><button type="submit" class="primary wide">Перенести</button></form></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+</body></html>

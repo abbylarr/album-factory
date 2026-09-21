@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "order": {
+    "id": "demo-order",
+    "school": "Демонстрационная школа",
+    "class_name": "11 А",
+    "year": "2026",
+    "copies": 20
+  },
+  "people": [
+    {
+      "id": "person-1",
+      "first_name": "Анна",
+      "last_name": "Иванова",
+      "role": "student",
+      "quote": "Впереди много интересного",
+      "portrait": "photo-1"
+    },
+    {
+      "id": "person-2",
+      "first_name": "Михаил",
+      "last_name": "Петров",
+      "role": "student",
+      "quote": "Впереди много интересного",
+      "portrait": "photo-2"
+    },
+    {
+      "id": "person-3",
+      "first_name": "Мария",
+      "last_name": "Соколова",
+      "role": "student",
+      "quote": "Впереди много интересного",
+      "portrait": "photo-3"
+    },
+    {
+      "id": "person-4",
+      "first_name": "Александр",
+      "last_name": "Смирнов",
+      "role": "student",
+      "quote": "Впереди много интересного",
+      "portrait": "photo-4"
+    },
+    {
+      "id": "person-5",
+      "first_name": "Дарья",
+      "last_name": "Волкова",
+      "role": "student",
+      "quote": "Впереди много интересного",
+      "portrait": "photo-5"
+    },
+    {
+      "id": "person-6",
+      "first_name": "Илья",
+      "last_name": "Попов",
+      "role": "student",
+      "quote": "Впереди много интересного",
+      "portrait": "photo-6"
+    },
+    {
+      "id": "person-7",
+      "first_name": "Полина",
+      "last_name": "Козлова",
+      "role": "student",
+      "quote": "Впереди много интересного",
+      "portrait": "photo-7"
+    }
+  ],
+  "photos": [
+    {
+      "id": "photo-1",
+      "path": "images/photo-1.png",
+      "category": "portrait",
+      "people": [
+        "person-1"
+      ]
+    },
+    {
+      "id": "photo-2",
+      "path": "images/photo-2.png",
+      "category": "portrait",
+      "people": [
+        "person-2"
+      ]
+    },
+    {
+      "id": "photo-3",
+      "path": "images/photo-3.png",
+      "category": "portrait",
+      "people": [
+        "person-3"
+      ]
+    },
+    {
+      "id": "photo-4",
+      "path": "images/photo-4.png",
+      "category": "portrait",
+      "people": [
+        "person-4"
+      ]
+    },
+    {
+      "id": "photo-5",
+      "path": "images/photo-5.png",
+      "category": "portrait",
+      "people": [
+        "person-5"
+      ]
+    },
+    {
+      "id": "photo-6",
+      "path": "images/photo-6.png",
+      "category": "portrait",
+      "people": [
+        "person-6"
+      ]
+    },
+    {
+      "id": "photo-7",
+      "path": "images/photo-7.png",
+      "category": "portrait",
+      "people": [
+        "person-7"
+      ]
+    },
+    {
+      "id": "class-photo",
+      "path": "images/class.png",
+      "category": "class",
+      "people": [
+        "person-1",
+        "person-2",
+        "person-3",
+        "person-4",
+        "person-5",
+        "person-6",
+        "person-7"
+      ]
+    }
+  ],
+  "shared_photos": [
+    "class-photo"
+  ]
+}
