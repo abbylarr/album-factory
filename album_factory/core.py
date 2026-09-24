@@ -100,8 +100,8 @@ def compile_album(data: dict, root: Path) -> Album:
         raw_people, raw_photos = data["people"], data["photos"]
         if not isinstance(raw_people, list) or not 1 <= len(raw_people) <= 200:
             raise ValidationError("Требуется от 1 до 200 участников")
-        if not isinstance(raw_photos, list) or not 1 <= len(raw_photos) <= 1000:
-            raise ValidationError("Требуется от 1 до 1000 фотографий")
+        if not isinstance(raw_photos, list) or not 1 <= len(raw_photos) <= 3000:
+            raise ValidationError("Требуется от 1 до 3000 фотографий")
         people = tuple(Person(
             _text(p["id"], "person.id", 80),
             _text(p["first_name"], "first_name", 50),

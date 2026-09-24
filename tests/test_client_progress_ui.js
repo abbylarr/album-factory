@@ -1,0 +1,15 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const source=fs.readFileSync('web/v2.js','utf8');
+const names=['needsReview','stats','statusInfo','matchesFilter','clientProgress'];
+const context=vm.createContext({esc:s=>String(s)});
+for(const n of names)vm.runInContext(source.split('\n').find(l=>l.startsWith('function '+n+'(')),context);
+const o={id:'x',photo_count:100,pending:0,review_count:3,client_progress:{enabled:true,status:'in_progress',label:'Клиенты заполняют',completed:7,total:16,remaining:9}};
+context.o=o;
+assert.equal(vm.runInContext('statusInfo(o).label',context),'Клиенты заполняют');
+assert(vm.runInContext('clientProgress(o)',context).includes('Заполнено 7 из 16'));
+assert(vm.runInContext("matchesFilter(o,'client_filling')",context));
+assert(!vm.runInContext("matchesFilter(o,'ready')",context));
+o.pending=1;assert.equal(vm.runInContext('statusInfo(o).label',context),'Обрабатываются');
+o.pending=0;o.client_progress.status='complete';o.client_progress.label='Все участники заполнили';
+assert.equal(vm.runInContext('statusInfo(o).tab',context),'client');
+console.log('Photographer client status and progress: OK');

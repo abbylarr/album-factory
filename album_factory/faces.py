@@ -33,7 +33,7 @@ class FaceEngine:
         return "ready", (vector / norm).tolist()
 
 
-def choose_person(vector, groups):
+def choose_person(vector, groups, *, strong_match_threshold=None):
     """Conservative grouping: require best sample, mean support, and a clear margin.
 
     A new, uncertain group is preferable to silently merging different pupils.
@@ -50,6 +50,11 @@ def choose_person(vector, groups):
         return None, False
     best, average, person_id = ranked[0]
     runner_up = ranked[1][0] if len(ranked) > 1 else -1
+    # Production may accept a uniquely best, very strong individual match even
+    # when diverse poses lower the group mean or the usual margin is not met.
+    # Keep the historical behavior for laboratory versions unless opted in.
+    if strong_match_threshold is not None and best >= strong_match_threshold and best > runner_up:
+        return person_id, False
     if best >= 0.5 and average >= 0.45 and best - runner_up >= 0.07:
         return person_id, False
     return None, best >= 0.35

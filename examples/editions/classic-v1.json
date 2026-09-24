@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "id": "classic",
+  "version": 1,
+  "design": {"id": "classic", "title": "Классика"},
+  "page_size_mm": [210, 280],
+  "spreads": {"min": 5, "max": 8},
+  "capacity": {"students": [3, 54], "teachers": [0, 24]},
+  "teacher_variant": true,
+  "photo_roles": {
+    "main_portrait": {"chosen_by": "client", "owners": ["student", "teacher"]},
+    "class_photo": {"chosen_by": "photographer", "owners": ["order"]},
+    "group_photo": {"chosen_by": "photographer", "owners": ["order"]},
+    "teacher_variant_photo": {"chosen_by": "photographer", "owners": ["teacher_variant"]}
+  },
+  "print_spec": {
+    "id": "proof-rgb",
+    "version": 1,
+    "safe_mm": 10,
+    "min_dpi": 300,
+    "hard_min_dpi": 150,
+    "spine": {"base_mm": 4, "per_spread_mm": 1.2}
+  },
+  "cover": {"templates": {"student": "cover_student", "teacher_variant": "cover_teacher"}},
+  "sections": [
+    {"id": "intro", "title": "Вступление", "kind": "page", "template": "intro",
+     "requires": ["order.photo:class_photo"]},
+    {"id": "personal", "title": "Персональный разворот", "kind": "per_variant",
+     "templates": {"student": "personal_student", "teacher_variant": "personal_teacher"}},
+    {"id": "teachers", "title": "Учителя", "kind": "flow", "collection": "teachers",
+     "sort": "class_teacher_first", "optional": true, "max_spreads": 2, "template": "teachers_grid",
+     "states": [
+       {"id": "t1", "min": 1, "max": 1, "blocks": [{"box": [230, 40, 170, 220], "cols": 1, "rows": 1}]},
+       {"id": "t2", "min": 2, "max": 2, "blocks": [
+         {"box": [20, 40, 170, 220], "cols": 1, "rows": 1},
+         {"box": [230, 40, 170, 220], "cols": 1, "rows": 1}]},
+       {"id": "t3_4", "min": 3, "max": 4, "blocks": [
+         {"box": [20, 60, 170, 160], "cols": 2, "rows": 1, "gap": [10, 0]},
+         {"box": [230, 60, 170, 160], "cols": 2, "rows": 1, "gap": [10, 0]}]},
+       {"id": "t5_8", "min": 5, "max": 8, "blocks": [
+         {"box": [20, 40, 170, 226], "cols": 2, "rows": 2, "gap": [10, 8]},
+         {"box": [230, 40, 170, 226], "cols": 2, "rows": 2, "gap": [10, 8]}]},
+       {"id": "t9_12", "min": 9, "max": 12, "blocks": [
+         {"box": [20, 40, 170, 226], "cols": 3, "rows": 2, "gap": [8, 8]},
+         {"box": [230, 40, 170, 226], "cols": 3, "rows": 2, "gap": [8, 8]}]}
+     ]},
+    {"id": "students", "title": "Наш класс", "kind": "flow", "collection": "students",
+     "subject_first": true, "expandable": true, "max_spreads": 3, "template": "students_grid",
+     "states": [
+       {"id": "s3_8", "min": 3, "max": 8, "blocks": [
+         {"box": [20, 40, 170, 226], "cols": 2, "rows": 2, "gap": [10, 8]},
+         {"box": [230, 40, 170, 226], "cols": 2, "rows": 2, "gap": [10, 8]}]},
+       {"id": "s9_12", "min": 9, "max": 12, "blocks": [
+         {"box": [20, 40, 170, 226], "cols": 3, "rows": 2, "gap": [8, 8]},
+         {"box": [230, 40, 170, 226], "cols": 3, "rows": 2, "gap": [8, 8]}]},
+       {"id": "s13_18", "min": 13, "max": 18, "blocks": [
+         {"box": [20, 34, 170, 234], "cols": 3, "rows": 3, "gap": [6, 6]},
+         {"box": [230, 34, 170, 234], "cols": 3, "rows": 3, "gap": [6, 6]}]}
+     ]},
+    {"id": "moments", "title": "Школьные моменты", "kind": "page", "template": "moments",
+     "fill_to_min": true, "optional": true, "requires": [["order.photo:group_photo", "order.photo:class_photo"]]},
+    {"id": "final", "title": "Финальный разворот", "kind": "page", "template": "final"}
+  ],
+  "templates": {
+    "intro": {"elements": [
+      {"id": "bg", "type": "rect", "box": [0, 0, 420, 280], "fill": "#F5F1EA"},
+      {"id": "class_photo", "type": "photo", "box": [12, 12, 396, 188], "bind": "order.photo:class_photo", "required": true},
+      {"id": "accent", "type": "rect", "box": [20, 214, 5, 50], "fill": "#E9B949"},
+      {"id": "title", "type": "text", "box": [32, 210, 160, 30], "text": "Выпуск {order.year}", "size": 30, "min_size": 22},
+      {"id": "class", "type": "text", "box": [32, 242, 160, 26], "text": "{order.class_name} · {order.school}", "size": 14, "min_size": 10, "color": "#6B6F76"}
+    ]},
+    "personal_student": {"elements": [
+      {"id": "bg_left", "type": "rect", "box": [0, 0, 210, 280], "fill": "#F5F1EA"},
+      {"id": "bg_right", "type": "rect", "box": [210, 0, 210, 280], "fill": "#FFFFFF"},
+      {"id": "portrait", "type": "photo", "box": [20, 20, 170, 240], "bind": "variant.photo:main_portrait", "required": true, "face_scale": 0.3, "eye_line": 0.36},
+      {"id": "name", "type": "text", "box": [230, 36, 170, 50], "text": "{variant.first_name}\n{variant.last_name}", "size": 34, "min_size": 22},
+      {"id": "accent", "type": "rect", "box": [230, 92, 40, 3], "fill": "#E9B949"},
+      {"id": "quote", "type": "text", "box": [230, 104, 170, 88], "text": "«{variant.quote}»", "optional": true, "size": 16, "min_size": 10, "max_chars": 300, "color": "#3A3F45"},
+      {"id": "class_photo", "type": "photo", "box": [230, 200, 170, 64], "bind": "order.photo:class_photo"}
+    ]},
+    "personal_teacher": {"elements": [
+      {"id": "bg_left", "type": "rect", "box": [0, 0, 210, 280], "fill": "#F5F1EA"},
+      {"id": "bg_right", "type": "rect", "box": [210, 0, 210, 280], "fill": "#FFFFFF"},
+      {"id": "photo", "type": "photo", "box": [20, 20, 380, 176], "bind": ["variant.photo:teacher_variant_photo", "order.photo:class_photo"], "required": true, "face_scale": 0.45, "eye_line": 0.4},
+      {"id": "title", "type": "text", "box": [20, 210, 170, 56], "text": "Нашему классному руководителю", "size": 26, "min_size": 18},
+      {"id": "name", "type": "text", "box": [230, 212, 170, 20], "text": "{variant.name}", "optional": true, "size": 20, "min_size": 14},
+      {"id": "thanks", "type": "text", "box": [230, 238, 170, 24], "text": "С благодарностью от выпускников {order.class_name}", "size": 14, "min_size": 11, "color": "#3A3F45"}
+    ]},
+    "teachers_grid": {
+      "elements": [{"id": "bg", "type": "rect", "box": [0, 0, 420, 280], "fill": "#FFFFFF"}],
+      "first_elements": [{"id": "title", "type": "text", "box": [20, 14, 170, 18], "text": "Наши учителя", "size": 22, "min_size": 18}],
+      "cell": {"elements": [
+        {"id": "portrait", "type": "photo", "rel": [0.08, 0, 0.84, 0.72], "bind": "item.photo:main_portrait", "required": true, "face_scale": 0.42, "eye_line": 0.38},
+        {"id": "name", "type": "text", "rel": [0, 0.75, 1, 0.14], "text": "{item.name}", "size": 11, "min_size": 7.5, "align": "center"},
+        {"id": "subject", "type": "text", "rel": [0, 0.89, 1, 0.11], "text": "{item.school_subject}", "optional": true, "size": 9, "min_size": 7, "align": "center", "color": "#6B6F76"}
+      ]}
+    },
+    "students_grid": {
+      "elements": [
+        {"id": "bg", "type": "rect", "box": [0, 0, 420, 280], "fill": "#FFFFFF"},
+        {"id": "title", "type": "text", "box": [20, 12, 170, 18], "text": "Наш класс", "size": 22, "min_size": 18}
+      ],
+      "cell": {"elements": [
+        {"id": "portrait", "type": "photo", "rel": [0.06, 0, 0.88, 0.66], "bind": "item.photo:main_portrait", "required": true, "face_scale": 0.42, "eye_line": 0.38},
+        {"id": "name", "type": "text", "rel": [0, 0.68, 1, 0.13], "text": "{item.name}", "size": 10, "min_size": 7, "align": "center"},
+        {"id": "quote", "type": "text", "rel": [0, 0.81, 1, 0.19], "text": "«{item.quote}»", "optional": true, "size": 7.5, "min_size": 5.5, "max_chars": 180, "align": "center", "color": "#6B6F76"}
+      ]}
+    },
+    "moments": {"elements": [
+      {"id": "bg", "type": "rect", "box": [0, 0, 420, 280], "fill": "#F5F1EA"},
+      {"id": "title", "type": "text", "box": [20, 40, 170, 30], "text": "Школьные моменты", "size": 28, "min_size": 20},
+      {"id": "photo", "type": "photo", "box": [220, 20, 180, 240], "bind": ["order.photo:group_photo", "order.photo:class_photo"], "required": true}
+    ]},
+    "final": {"elements": [
+      {"id": "bg", "type": "rect", "box": [0, 0, 420, 280], "fill": "#1F2328"},
+      {"id": "thanks", "type": "text", "box": [230, 116, 170, 24], "text": "Спасибо, что были вместе", "size": 24, "min_size": 18, "color": "#FFFFFF"},
+      {"id": "studio", "type": "text", "box": [230, 146, 170, 12], "text": "Фотограф: {order.studio}", "optional": true, "size": 11, "color": "#E9B949"}
+    ]},
+    "cover_student": {"elements": [
+      {"id": "back", "type": "rect", "panel": "back", "box": "panel", "fill": "#1F2328"},
+      {"id": "spine", "type": "rect", "panel": "spine", "box": "panel", "fill": "#E9B949"},
+      {"id": "front", "type": "rect", "panel": "front", "box": "panel", "fill": "#F5F1EA"},
+      {"id": "portrait", "type": "photo", "panel": "front", "box": [45, 36, 120, 150], "mask": "ellipse", "bind": "variant.photo:main_portrait", "required": true, "face_scale": 0.42, "eye_line": 0.4},
+      {"id": "name", "type": "text", "panel": "front", "box": [20, 198, 170, 24], "text": "{variant.name}", "size": 24, "min_size": 16, "align": "center"},
+      {"id": "class", "type": "text", "panel": "front", "box": [20, 228, 170, 14], "text": "{order.class_name} · Выпуск {order.year}", "size": 13, "min_size": 10, "align": "center", "color": "#6B6F76"},
+      {"id": "school", "type": "text", "panel": "back", "box": [20, 246, 170, 12], "text": "{order.school}", "size": 10, "align": "center", "color": "#FFFFFF"}
+    ]},
+    "cover_teacher": {"elements": [
+      {"id": "back", "type": "rect", "panel": "back", "box": "panel", "fill": "#1F2328"},
+      {"id": "spine", "type": "rect", "panel": "spine", "box": "panel", "fill": "#E9B949"},
+      {"id": "front", "type": "rect", "panel": "front", "box": "panel", "fill": "#F5F1EA"},
+      {"id": "photo", "type": "photo", "panel": "front", "box": [15, 30, 180, 150], "bind": ["variant.photo:teacher_variant_photo", "order.photo:class_photo"], "required": true, "face_scale": 0.42},
+      {"id": "title", "type": "text", "panel": "front", "box": [20, 196, 170, 24], "text": "Выпускной альбом", "size": 24, "min_size": 16, "align": "center"},
+      {"id": "class", "type": "text", "panel": "front", "box": [20, 226, 170, 14], "text": "{order.class_name} · {order.year}", "size": 13, "align": "center", "color": "#6B6F76"},
+      {"id": "school", "type": "text", "panel": "back", "box": [20, 246, 170, 12], "text": "{order.school}", "size": 10, "align": "center", "color": "#FFFFFF"}
+    ]}
+  }
+}

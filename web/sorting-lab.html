@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Проба сортировки — Album Factory</title>
+<link rel="icon" href="/static/assets/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/sorting-lab.css">
+<script src="/static/sorting-lab.js" defer></script>
+</head>
+<body class="lab">
+<main>
+<header><a href="/v2">← К заказам</a><span>ALBUM FACTORY / ЛАБОРАТОРИЯ</span></header>
+<div class="intro"><span class="pill">Отдельная проба</span><h1>Сортировка: V1–V5</h1><p>Сравните скорость и группы на одних и тех же фотографиях. Рабочие персоны, имена и ручные исправления сохраняются без изменений.</p></div>
+<form id="trial-form" class="panel controls">
+<label>Заказ<select id="order" required aria-label="Заказ"></select></label>
+<label>Снимков<select id="limit"><option value="120">120 — быстрая проба</option><option value="300">300</option><option value="3000">Весь заказ</option></select></label>
+<label>Начать со снимка<input id="offset" type="number" value="1" min="1" max="3000"></label>
+<label>Алгоритм<select id="mode"><option value="compare_v4_v5">Сравнить V3, V4 и V5</option><option value="compare_v3">Сравнить V2 серии и V3</option><option value="compare">Сравнить все версии</option><option value="v1">V1 · исходный</option><option value="v2">V2 · быстрое чтение</option><option value="v2_series">V2 · чтение + серии</option><option value="v3">V3 · основной алгоритм</option><option value="v4">V4 · уменьшенный поиск лица</option><option value="v5">V5 · адаптивный шаг серии</option></select></label>
+<label>Поиск лица · V4/V5<select id="detection-size"><option value="960">960 пикселей</option><option value="1120">1120 пикселей</option></select></label>
+<label>Подготовка · V4/V5<select id="decode-workers"><option value="1">1 поток</option><option value="2">2 потока</option></select></label>
+<label>Вычисления · V4/V5<select id="opencv-threads"><option value="2">2 потока</option><option value="1">1 поток</option><option value="4">4 потока</option></select></label>
+<label>Максимальный шаг · V5<select id="max-step"><option value="4">4 · до 3 кадров между опорами</option><option value="3">3 · до 2 кадров между опорами</option></select></label>
+<button id="start" class="primary">Запустить пробу</button>
+</form>
+<p class="muted small">V4 добавляет к V3 поиск лица на меньшем изображении с возвратом к полному проходу при сомнении. Настройки потоков и размера применяются только к V4/V5. V5 постепенно увеличивает шаг опорных кадров с 2 до выбранного максимума; при расхождении проверяет промежуток и сбрасывает шаг. Назначения по серии — предположения, требующие проверки. V4 и V5 ещё не проверены и не замерены. Проба занимает обработчик; новые загрузки могут ожидать её завершения.</p>
+<div id="progress" role="status" aria-live="polite"></div><p id="error" role="alert"></p>
+<section id="results" hidden>
+<div class="section-head"><div><h2 id="result-title">Результат пробы</h2><p id="sample" class="muted"></p></div><a id="download" class="secondary">Скачать отчёт</a></div>
+<div id="variants" class="variants" aria-label="Переключить результат алгоритма"></div>
+<div id="metrics" class="lab-metrics"></div>
+<p id="comparison" class="notice"></p>
+<p class="muted small" id="method"></p>
+<div class="section-head"><h2>Пробные группы</h2><label><input type="checkbox" id="review-only"><span id="review-label"> Только предположения и расхождения с V1</span></label></div>
+<p class="muted small">Номера пробных групп могут различаться между алгоритмами. Расхождения считаются по составу групп, а не по их номерам. Базовый алгоритм тоже может ошибаться: это сравнение алгоритмов, не оценка точности по ручной разметке. V5 сравнивается с V4, V4 — с V3, V3 — с V2 серии, остальные варианты — с V1 при наличии.</p>
+<div id="groups"></div>
+</section>
+</main>
+</body></html>
