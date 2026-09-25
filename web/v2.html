@@ -2,18 +2,19 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Album Factory — Заказы · V2</title>
+  <title>Album Factory — Заказы</title>
   <link rel="icon" href="/static/assets/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/v2.css">
   <link rel="stylesheet" href="/static/person-picker.css">
+  <link rel="stylesheet" href="/static/layout.css">
   <script src="/static/person-picker.js" defer></script>
   <script src="/static/v2.js" defer></script>
+  <script src="/static/layout.js" defer></script>
 </head>
 <body class="v2">
 <aside class="sidebar">
   <a class="brand" href="#orders"><img src="/static/assets/logo.svg" alt=""><strong>ALBUM<br>FACTORY</strong></a>
-  <a href="/sorting-lab" style="display:block;padding:12px 16px;font-size:13px;color:#665500">Проба сортировки V1–V5 ↗</a>
-<div class="version-switch"><a id="version-v1" href="/">V1 · Классическая</a><span aria-current="page">V2</span></div><nav id="v2-nav" aria-label="Основное меню"></nav>
+  <nav id="v2-nav" aria-label="Основное меню"></nav>
   <div class="sidebar-bottom"><button class="create-button" data-action="new-order"><span class="plus">＋</span>Создать заказ</button><div class="account"><img src="/static/assets/account.svg" alt=""><span>Фотограф</span><small>Локально</small></div></div>
 </aside>
 <main id="main" tabindex="-1"></main>

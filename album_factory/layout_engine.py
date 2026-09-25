@@ -501,8 +501,6 @@ class LayoutEngine:
             return element
         if spec["type"] == "photo":
             photo, bind = self._resolve_photo(spec.get("bind"), scopes, key, snap)
-            if photo is None and not spec.get("required"):
-                return None
             element.update(photo=photo, base=photo, source=bind, mask=spec.get("mask", "rect"),
                            face_scale=spec.get("face_scale"), eye_line=spec.get("eye_line", 0.4),
                            required=bool(spec.get("required")))
@@ -588,7 +586,8 @@ class LayoutEngine:
                 key = element["key"]
                 if element["type"] == "photo":
                     if not element["photo"]:
-                        issues.append(_issue("error", "empty_slot", key, "Не выбрано обязательное фото"))
+                        if element.get("required"):
+                            issues.append(_issue("error", "empty_slot", key, "Не выбрано обязательное фото"))
                         continue
                     dpi = element["crop"][2] / (element["box"][2] / 25.4)
                     if dpi < spec["hard_min_dpi"]:

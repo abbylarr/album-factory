@@ -1,7 +1,7 @@
 """Read-only review hints. Similarity is a cosine score, never a probability."""
 import json
 import numpy as np
-from .sorting_v2 import ordered, sequence_key
+from .sorting_v3 import ordered, sequence_key
 
 
 def suggestions(rows, selected_ids):

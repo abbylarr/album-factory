@@ -36,12 +36,12 @@ class V2Tests(unittest.TestCase):
             Image.new('RGB',(10,10)).save(s.DATA/'photos'/(pid+suffix),format='JPEG')
         return pid
 
-    def test_both_versions_and_session(self):
-        self.assertEqual(self.client.get('/v2').status_code,200)
-        old=self.client.get('/').text
-        self.assertIn('/static/app.js',old)
-        self.assertIn('/v2',old)
-        self.assertIn('/static/v2.js',self.client.get('/v2').text)
+    def test_only_v2_frontend_and_session(self):
+        home=self.client.get('/')
+        self.assertEqual(home.status_code,200)
+        self.assertIn('/static/v2.js',home.text)
+        self.assertEqual(home.text,self.client.get('/v2').text)
+        self.assertEqual(self.client.get('/sorting-lab').status_code,404)
         self.assertEqual(self.client.get('/api/orders').status_code,200)
 
     def test_review_counters_and_cover(self):

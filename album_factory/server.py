@@ -78,6 +78,8 @@ def init_db():
         shoots.init(con)
         from .client_portal import init as init_client_portal
         init_client_portal(con)
+        from .layout_workspace import init as init_layout_workspace
+        init_layout_workspace(con)
         con.execute("UPDATE photos SET status='pending' WHERE status='processing'")
 
 
@@ -194,7 +196,7 @@ async def local_session(request: Request, call_next):
         response.headers["Cache-Control"] = "private, max-age=86400, immutable"
     else:
         response.headers["Cache-Control"] = "no-store"
-    if request.url.path in {"/", "/v2", "/v2/", "/sorting-lab"}:
+    if request.url.path in {"/", "/v2", "/v2/"}:
         response.set_cookie("album_session", app.state.token, httponly=True, samesite="strict")
     return response
 
@@ -515,16 +517,15 @@ def home_v2():
 
 @app.get("/")
 def home():
-    return FileResponse(ROOT / "web/index.html")
+    return FileResponse(ROOT / "web/v2.html")
 
 
 app.mount("/static", StaticFiles(directory=ROOT / "web"), name="static")
 
 
-# Experimental runs have separate outputs and never update production groups.
 import sys as _sys
-from .sorting_lab import install as _install_sorting_lab
-_install_sorting_lab(app, _sys.modules[__name__])
-
 from .client_portal import install as _install_client_portal
 _install_client_portal(app, _sys.modules[__name__])
+
+from .layout_workspace import install as _install_layout_workspace
+_install_layout_workspace(app, _sys.modules[__name__])

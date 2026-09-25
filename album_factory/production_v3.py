@@ -3,8 +3,7 @@ import json
 import time
 
 from .faces import choose_person
-from .sorting_v2 import ordered, preview, bridge_allowed
-from .sorting_v3 import PreparedImages
+from .sorting_v3 import PreparedImages, ordered, preview, bridge_allowed
 
 
 def process_batch(server, items, engine):

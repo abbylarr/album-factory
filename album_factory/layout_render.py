@@ -46,6 +46,8 @@ def _draw(pdf, spread, size, measurer, images):
             pdf.setFillColor(HexColor(element["fill"]))
             pdf.rect(x * mm, bottom * mm, w * mm, h * mm, stroke=0, fill=1)
         elif element["type"] == "photo":
+            if not element["photo"] and not element.get("required"):
+                continue
             path = pdf.beginPath()
             if element["mask"] == "ellipse":
                 path.ellipse(x * mm, bottom * mm, w * mm, h * mm)

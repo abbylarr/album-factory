@@ -1,11 +1,61 @@
-"""V3: bounded decode/resize prefetch, with V2-series decisions unchanged."""
+"""Production V3 sorting: numeric sequence rules and bounded image prefetch."""
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+import re
 import time
 
 import cv2
+import numpy as np
+from PIL import Image
 
-from .sorting_v2 import decode, ordered, run as run_v2
+
+def sequence_key(item):
+    stem = Path(item['filename']).stem
+    match = re.fullmatch(r'(.*?)(\d+)', stem)
+    return (match[1].casefold(), int(match[2])) if match else None
+
+
+def ordered(items):
+    return sorted(items, key=lambda p: (sequence_key(p) is None, sequence_key(p) or ('', 0), p['filename'], p['id']))
+
+
+def decode(path, fast=False):
+    if not fast:
+        with Image.open(path) as im:
+            return cv2.cvtColor(np.asarray(im.convert('RGB')), cv2.COLOR_RGB2BGR)
+    # Working files have already had EXIF rotation baked in by the uploader.
+    with Image.open(path) as im:
+        longest = max(im.size)
+        factor = 8 if longest >= 12800 else 4 if longest >= 6400 else 2 if longest >= 3200 else 1
+    flags = {1: cv2.IMREAD_COLOR, 2: cv2.IMREAD_REDUCED_COLOR_2,
+             4: cv2.IMREAD_REDUCED_COLOR_4, 8: cv2.IMREAD_REDUCED_COLOR_8}
+    pixels = cv2.imread(str(path), flags[factor] | cv2.IMREAD_IGNORE_ORIENTATION)
+    if pixels is None:
+        raise ValueError('Cannot decode image')
+    return pixels
+
+
+def preview(item):
+    path = item.get('thumbnail') or item['path']
+    with Image.open(path) as im:
+        aspect = im.width / im.height
+        im.draft('RGB', (64, 64))
+        pixels = np.asarray(im.convert('RGB').resize((32, 32)), dtype=np.float32) / 255
+    return aspect, pixels
+
+
+def bridge_allowed(left, middle, right, previews):
+    keys = [sequence_key(p) for p in (left, middle, right)]
+    if any(k is None for k in keys) or len({k[0] for k in keys}) != 1:
+        return False
+    # Only a single existing frame, bounded numeric gaps, no duplicate counters.
+    if not all(0 < b[1] - a[1] <= 3 for a, b in zip(keys, keys[1:])):
+        return False
+    values = [previews[p['id']] for p in (left, middle, right)]
+    if max(v[0] for v in values) - min(v[0] for v in values) > .02:
+        return False
+    return all(float(np.sqrt(np.mean((values[1][1] - v[1]) ** 2))) < .065 for v in (values[0], values[2]))
 
 
 class PreparedImages:
@@ -51,7 +101,7 @@ class PreparedImages:
         if not fast:
             return decode(path, False)
         key = str(path)
-        # V2 asks for endpoints first, then the middle. Filling three slots allows
+        # The worker asks for endpoints first, then the middle. Filling three slots allows
         # that lookahead without changing the order used to create face groups.
         if key not in self.futures:
             # Drop completed/skipped earlier frames, keeping memory bounded.
@@ -89,24 +139,3 @@ class PreparedImages:
                 self._collect(future, discard=True)
         self.futures.clear()
         self.sequence.clear()
-
-
-def run(items, engine, progress=lambda *args: None):
-    start = time.perf_counter()
-    prepared = PreparedImages(ordered(items))
-    try:
-        result = run_v2(items, engine, 'v2_series',
-                        lambda _mode, done, total: progress('v3', done, total),
-                        decoder=prepared)
-    finally:
-        prepared.close()
-    elapsed = time.perf_counter() - start
-    result.update(mode='v3', seconds=elapsed,
-                  photos_per_minute=60 * len(items) / elapsed if elapsed else 0)
-    result['pipeline'] = dict(workers=2, window=3, prepared=prepared.prepared,
-                              decode_work_seconds=prepared.decode_seconds,
-                              resize_work_seconds=prepared.resize_seconds,
-                              wait_seconds=prepared.wait_seconds)
-    # 'decode' in run_v2 measures the main thread's waits plus fallback decodes;
-    # worker CPU stage durations are separately reported, never added to wall time.
-    return result

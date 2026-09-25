@@ -1,0 +1,1294 @@
+{
+  "schema_version": 1,
+  "id": "editorial",
+  "version": 2,
+  "design": {
+    "id": "editorial",
+    "title": "Альбом · редакционная серия"
+  },
+  "page_size_mm": [
+    210,
+    280
+  ],
+  "spreads": {
+    "min": 7,
+    "max": 12
+  },
+  "capacity": {
+    "students": [
+      3,
+      54
+    ],
+    "teachers": [
+      0,
+      24
+    ]
+  },
+  "teacher_variant": true,
+  "photo_roles": {
+    "main_portrait": {
+      "chosen_by": "client",
+      "owners": [
+        "student",
+        "teacher"
+      ]
+    },
+    "class_photo": {
+      "chosen_by": "photographer",
+      "owners": [
+        "order"
+      ]
+    },
+    "group_photo": {
+      "chosen_by": "photographer",
+      "owners": [
+        "order"
+      ]
+    },
+    "teacher_variant_photo": {
+      "chosen_by": "photographer",
+      "owners": [
+        "teacher_variant"
+      ]
+    },
+    "alt_portrait": {
+      "chosen_by": "photographer",
+      "owners": [
+        "student"
+      ]
+    }
+  },
+  "print_spec": {
+    "id": "proof-rgb",
+    "version": 1,
+    "safe_mm": 10,
+    "min_dpi": 300,
+    "hard_min_dpi": 150,
+    "spine": {
+      "base_mm": 4,
+      "per_spread_mm": 1.2
+    }
+  },
+  "cover": {
+    "templates": {
+      "student": "cover_student",
+      "teacher_variant": "cover_teacher"
+    }
+  },
+  "sections": [
+    {
+      "id": "intro",
+      "title": "Наш выпуск",
+      "kind": "page",
+      "template": "intro"
+    },
+    {
+      "id": "personal",
+      "title": "Портрет",
+      "kind": "per_variant",
+      "templates": {
+        "student": "personal_student",
+        "teacher_variant": "personal_teacher"
+      }
+    },
+    {
+      "id": "teachers",
+      "title": "Наши учителя",
+      "kind": "page",
+      "template": "teachers"
+    },
+    {
+      "id": "students",
+      "title": "Наш класс",
+      "kind": "flow",
+      "collection": "students",
+      "subject_first": true,
+      "expandable": true,
+      "max_spreads": 3,
+      "template": "students_grid",
+      "states": [
+        {
+          "id": "s3",
+          "min": 3,
+          "max": 3,
+          "blocks": [
+            {
+              "box": [
+                8,
+                13,
+                194,
+                254
+              ],
+              "cols": 2,
+              "rows": 1,
+              "gap": [
+                7,
+                0
+              ]
+            },
+            {
+              "box": [
+                218,
+                13,
+                194,
+                254
+              ],
+              "cols": 1,
+              "rows": 1
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "min": 4,
+          "max": 4,
+          "blocks": [
+            {
+              "box": [
+                8,
+                13,
+                194,
+                254
+              ],
+              "cols": 2,
+              "rows": 1,
+              "gap": [
+                7,
+                0
+              ]
+            },
+            {
+              "box": [
+                218,
+                13,
+                194,
+                254
+              ],
+              "cols": 2,
+              "rows": 1,
+              "gap": [
+                7,
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s5_8",
+          "min": 5,
+          "max": 8,
+          "blocks": [
+            {
+              "box": [
+                20,
+                40,
+                170,
+                226
+              ],
+              "cols": 2,
+              "rows": 2,
+              "gap": [
+                10,
+                8
+              ]
+            },
+            {
+              "box": [
+                230,
+                40,
+                170,
+                226
+              ],
+              "cols": 2,
+              "rows": 2,
+              "gap": [
+                10,
+                8
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s9_12",
+          "min": 9,
+          "max": 12,
+          "blocks": [
+            {
+              "box": [
+                20,
+                40,
+                170,
+                226
+              ],
+              "cols": 3,
+              "rows": 2,
+              "gap": [
+                8,
+                8
+              ]
+            },
+            {
+              "box": [
+                230,
+                40,
+                170,
+                226
+              ],
+              "cols": 3,
+              "rows": 2,
+              "gap": [
+                8,
+                8
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s13_18",
+          "min": 13,
+          "max": 18,
+          "blocks": [
+            {
+              "box": [
+                20,
+                34,
+                170,
+                234
+              ],
+              "cols": 3,
+              "rows": 3,
+              "gap": [
+                6,
+                6
+              ]
+            },
+            {
+              "box": [
+                230,
+                34,
+                170,
+                234
+              ],
+              "cols": 3,
+              "rows": 3,
+              "gap": [
+                6,
+                6
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "moments",
+      "title": "Вместе",
+      "kind": "page",
+      "template": "moments"
+    },
+    {
+      "id": "story",
+      "title": "В деталях",
+      "kind": "page",
+      "template": "story"
+    },
+    {
+      "id": "final",
+      "title": "Финал",
+      "kind": "page",
+      "template": "final"
+    }
+  ],
+  "templates": {
+    "intro": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "class_photo",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            420,
+            218
+          ],
+          "required": true
+        },
+        {
+          "id": "band",
+          "type": "rect",
+          "box": [
+            0,
+            218,
+            420,
+            62
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "box": [
+            16,
+            231,
+            188,
+            31
+          ],
+          "text": "Наш выпуск",
+          "size": 30,
+          "color": "#F5F2EC",
+          "font": "display",
+          "min_size": 22
+        },
+        {
+          "id": "class",
+          "type": "text",
+          "box": [
+            226,
+            238,
+            176,
+            22
+          ],
+          "text": "{order.school}  /  {order.class_name}",
+          "size": 13,
+          "color": "#B7BEAC",
+          "font": "main",
+          "min_size": 9,
+          "align": "right"
+        }
+      ]
+    },
+    "personal_student": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "portrait",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            210,
+            224
+          ],
+          "bind": "variant.photo:main_portrait",
+          "required": true,
+          "face_scale": 0.36,
+          "eye_line": 0.38
+        },
+        {
+          "id": "second_portrait",
+          "type": "photo",
+          "box": [
+            210,
+            0,
+            210,
+            224
+          ],
+          "bind": [
+            "variant.photo:alt_portrait",
+            "variant.photo:main_portrait"
+          ],
+          "required": true,
+          "face_scale": 0.43,
+          "eye_line": 0.39
+        },
+        {
+          "id": "name_band",
+          "type": "rect",
+          "box": [
+            0,
+            224,
+            420,
+            56
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "name",
+          "type": "text",
+          "box": [
+            15,
+            234,
+            190,
+            30
+          ],
+          "text": "{variant.name}",
+          "size": 27,
+          "color": "#F5F2EC",
+          "font": "display",
+          "min_size": 16
+        },
+        {
+          "id": "quote",
+          "type": "text",
+          "box": [
+            226,
+            238,
+            178,
+            28
+          ],
+          "text": "«{variant.quote}»",
+          "size": 12,
+          "color": "#B7BEAC",
+          "font": "main",
+          "optional": true,
+          "min_size": 8,
+          "max_chars": 300,
+          "align": "right"
+        }
+      ]
+    },
+    "personal_teacher": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "portrait",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            210,
+            224
+          ],
+          "bind": "variant.photo:main_portrait",
+          "required": true,
+          "face_scale": 0.36,
+          "eye_line": 0.38
+        },
+        {
+          "id": "second_portrait",
+          "type": "photo",
+          "box": [
+            210,
+            0,
+            210,
+            224
+          ],
+          "bind": [
+            "variant.photo:alt_portrait",
+            "variant.photo:main_portrait"
+          ],
+          "required": true,
+          "face_scale": 0.43,
+          "eye_line": 0.39
+        },
+        {
+          "id": "name_band",
+          "type": "rect",
+          "box": [
+            0,
+            224,
+            420,
+            56
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "name",
+          "type": "text",
+          "box": [
+            15,
+            234,
+            190,
+            30
+          ],
+          "text": "{variant.name}",
+          "size": 27,
+          "color": "#F5F2EC",
+          "font": "display",
+          "min_size": 16
+        },
+        {
+          "id": "quote",
+          "type": "text",
+          "box": [
+            226,
+            238,
+            178,
+            28
+          ],
+          "text": "«{variant.quote}»",
+          "size": 12,
+          "color": "#B7BEAC",
+          "font": "main",
+          "optional": true,
+          "min_size": 8,
+          "max_chars": 300,
+          "align": "right"
+        }
+      ]
+    },
+    "teachers_grid": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#FFFFFF"
+        }
+      ],
+      "first_elements": [
+        {
+          "id": "title",
+          "type": "text",
+          "box": [
+            20,
+            14,
+            170,
+            18
+          ],
+          "text": "Наши учителя",
+          "size": 22,
+          "min_size": 18
+        }
+      ],
+      "cell": {
+        "elements": [
+          {
+            "id": "portrait",
+            "type": "photo",
+            "rel": [
+              0.08,
+              0,
+              0.84,
+              0.72
+            ],
+            "bind": "item.photo:main_portrait",
+            "required": true,
+            "face_scale": 0.42,
+            "eye_line": 0.38
+          },
+          {
+            "id": "name",
+            "type": "text",
+            "rel": [
+              0,
+              0.75,
+              1,
+              0.14
+            ],
+            "text": "{item.name}",
+            "size": 11,
+            "min_size": 7.5,
+            "align": "center"
+          },
+          {
+            "id": "subject",
+            "type": "text",
+            "rel": [
+              0,
+              0.89,
+              1,
+              0.11
+            ],
+            "text": "{item.school_subject}",
+            "optional": true,
+            "size": 9,
+            "min_size": 7,
+            "align": "center",
+            "color": "#6B6F76"
+          }
+        ]
+      }
+    },
+    "students_grid": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#F5F2EC"
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "box": [
+            9,
+            1,
+            192,
+            9
+          ],
+          "text": "Наш класс",
+          "size": 10,
+          "color": "#202A27",
+          "font": "display",
+          "min_size": 8
+        }
+      ],
+      "cell": {
+        "elements": [
+          {
+            "id": "portrait",
+            "type": "photo",
+            "rel": [
+              0.02,
+              0,
+              0.96,
+              0.9
+            ],
+            "bind": "item.photo:main_portrait",
+            "required": true,
+            "face_scale": 0.42,
+            "eye_line": 0.38
+          },
+          {
+            "id": "name",
+            "type": "text",
+            "rel": [
+              0,
+              0.92,
+              1,
+              0.08
+            ],
+            "text": "{item.name}",
+            "size": 11,
+            "min_size": 7,
+            "align": "center",
+            "font": "display"
+          }
+        ]
+      }
+    },
+    "moments": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#F5F2EC"
+        },
+        {
+          "id": "photo",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            248,
+            280
+          ],
+          "required": true
+        },
+        {
+          "id": "photo_right",
+          "type": "photo",
+          "box": [
+            254,
+            0,
+            166,
+            210
+          ],
+          "required": true
+        },
+        {
+          "id": "band",
+          "type": "rect",
+          "box": [
+            254,
+            210,
+            166,
+            70
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "box": [
+            268,
+            225,
+            137,
+            28
+          ],
+          "text": "Вместе",
+          "size": 28,
+          "color": "#F5F2EC",
+          "font": "display",
+          "min_size": 20
+        },
+        {
+          "id": "subtitle",
+          "type": "text",
+          "box": [
+            268,
+            257,
+            137,
+            12
+          ],
+          "text": "Наши моменты",
+          "size": 11,
+          "color": "#B7BEAC",
+          "font": "main",
+          "min_size": 8
+        }
+      ]
+    },
+    "final": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "photo",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            420,
+            215
+          ],
+          "required": true
+        },
+        {
+          "id": "band",
+          "type": "rect",
+          "box": [
+            0,
+            215,
+            420,
+            65
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "thanks",
+          "type": "text",
+          "box": [
+            17,
+            231,
+            386,
+            31
+          ],
+          "text": "История, которую мы сохраним",
+          "size": 25,
+          "color": "#F5F2EC",
+          "font": "display",
+          "min_size": 18
+        },
+        {
+          "id": "class",
+          "type": "text",
+          "box": [
+            17,
+            261,
+            386,
+            10
+          ],
+          "text": "{order.school}  ·  {order.class_name}  ·  {order.year}",
+          "size": 10,
+          "color": "#B7BEAC",
+          "font": "main",
+          "min_size": 8
+        }
+      ]
+    },
+    "cover_student": {
+      "elements": [
+        {
+          "id": "back",
+          "type": "rect",
+          "box": "panel",
+          "fill": "#F5F2EC",
+          "panel": "back"
+        },
+        {
+          "id": "spine",
+          "type": "rect",
+          "box": "panel",
+          "fill": "#202A27",
+          "panel": "spine"
+        },
+        {
+          "id": "front",
+          "type": "rect",
+          "box": "panel",
+          "fill": "#202A27",
+          "panel": "front"
+        },
+        {
+          "id": "portrait",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            210,
+            224
+          ],
+          "bind": "variant.photo:main_portrait",
+          "required": true,
+          "panel": "front",
+          "face_scale": 0.38,
+          "eye_line": 0.38
+        },
+        {
+          "id": "name_band",
+          "type": "rect",
+          "box": [
+            0,
+            224,
+            210,
+            56
+          ],
+          "fill": "#202A27",
+          "panel": "front"
+        },
+        {
+          "id": "name",
+          "type": "text",
+          "box": [
+            14,
+            232,
+            182,
+            28
+          ],
+          "text": "{variant.name}",
+          "size": 26,
+          "color": "#F5F2EC",
+          "font": "display",
+          "panel": "front",
+          "min_size": 15
+        },
+        {
+          "id": "class",
+          "type": "text",
+          "box": [
+            14,
+            262,
+            182,
+            10
+          ],
+          "text": "{order.class_name}  ·  {order.year}",
+          "size": 10,
+          "color": "#B7BEAC",
+          "font": "main",
+          "panel": "front",
+          "min_size": 8
+        },
+        {
+          "id": "year",
+          "type": "text",
+          "box": [
+            16,
+            29,
+            178,
+            52
+          ],
+          "text": "{order.year}",
+          "size": 46,
+          "color": "#202A27",
+          "font": "display",
+          "panel": "back",
+          "min_size": 36
+        },
+        {
+          "id": "back_rule",
+          "type": "rect",
+          "box": [
+            16,
+            91,
+            178,
+            1
+          ],
+          "fill": "#202A27",
+          "panel": "back"
+        },
+        {
+          "id": "class_back",
+          "type": "text",
+          "panel": "back",
+          "box": [
+            16,
+            112,
+            178,
+            68
+          ],
+          "text": "{order.class_name}",
+          "size": 54,
+          "min_size": 38,
+          "font": "display",
+          "color": "#202A27"
+        },
+        {
+          "id": "school",
+          "type": "text",
+          "box": [
+            16,
+            235,
+            178,
+            25
+          ],
+          "text": "{order.school}",
+          "size": 14,
+          "color": "#202A27",
+          "font": "display",
+          "panel": "back",
+          "min_size": 9
+        }
+      ]
+    },
+    "cover_teacher": {
+      "elements": [
+        {
+          "id": "back",
+          "type": "rect",
+          "box": "panel",
+          "fill": "#F5F2EC",
+          "panel": "back"
+        },
+        {
+          "id": "spine",
+          "type": "rect",
+          "box": "panel",
+          "fill": "#202A27",
+          "panel": "spine"
+        },
+        {
+          "id": "front",
+          "type": "rect",
+          "box": "panel",
+          "fill": "#202A27",
+          "panel": "front"
+        },
+        {
+          "id": "photo",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            210,
+            224
+          ],
+          "bind": [
+            "variant.photo:teacher_variant_photo",
+            "order.photo:class_photo"
+          ],
+          "required": false,
+          "panel": "front"
+        },
+        {
+          "id": "name_band",
+          "type": "rect",
+          "box": [
+            0,
+            224,
+            210,
+            56
+          ],
+          "fill": "#202A27",
+          "panel": "front"
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "box": [
+            14,
+            232,
+            182,
+            28
+          ],
+          "text": "Наш выпуск",
+          "size": 27,
+          "color": "#F5F2EC",
+          "font": "display",
+          "panel": "front",
+          "min_size": 18
+        },
+        {
+          "id": "class",
+          "type": "text",
+          "box": [
+            14,
+            262,
+            182,
+            10
+          ],
+          "text": "{order.class_name}  ·  {order.year}",
+          "size": 10,
+          "color": "#B7BEAC",
+          "font": "main",
+          "panel": "front",
+          "min_size": 8
+        },
+        {
+          "id": "year",
+          "type": "text",
+          "box": [
+            16,
+            29,
+            178,
+            52
+          ],
+          "text": "{order.year}",
+          "size": 46,
+          "color": "#202A27",
+          "font": "display",
+          "panel": "back",
+          "min_size": 36
+        },
+        {
+          "id": "class_back",
+          "type": "text",
+          "panel": "back",
+          "box": [
+            16,
+            112,
+            178,
+            68
+          ],
+          "text": "{order.class_name}",
+          "size": 54,
+          "min_size": 38,
+          "font": "display",
+          "color": "#202A27"
+        },
+        {
+          "id": "school",
+          "type": "text",
+          "box": [
+            16,
+            235,
+            178,
+            25
+          ],
+          "text": "{order.school}",
+          "size": 14,
+          "color": "#202A27",
+          "font": "display",
+          "panel": "back",
+          "min_size": 9
+        }
+      ]
+    },
+    "teachers": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#F5F2EC"
+        },
+        {
+          "id": "photo_left",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            210,
+            230
+          ],
+          "required": true
+        },
+        {
+          "id": "photo_right",
+          "type": "photo",
+          "box": [
+            210,
+            0,
+            210,
+            230
+          ],
+          "required": true
+        },
+        {
+          "id": "left_name_band",
+          "type": "rect",
+          "box": [
+            0,
+            200,
+            210,
+            30
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "right_name_band",
+          "type": "rect",
+          "box": [
+            210,
+            200,
+            210,
+            30
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "left_name",
+          "type": "text",
+          "box": [
+            14,
+            207,
+            182,
+            19
+          ],
+          "text": "",
+          "size": 15,
+          "min_size": 10,
+          "font": "display",
+          "color": "#F5F2EC"
+        },
+        {
+          "id": "right_name",
+          "type": "text",
+          "box": [
+            224,
+            207,
+            182,
+            19
+          ],
+          "text": "",
+          "size": 15,
+          "min_size": 10,
+          "font": "display",
+          "color": "#F5F2EC"
+        },
+        {
+          "id": "band",
+          "type": "rect",
+          "box": [
+            0,
+            230,
+            420,
+            50
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "box": [
+            16,
+            241,
+            182,
+            25
+          ],
+          "text": "Наши учителя",
+          "size": 25,
+          "color": "#F5F2EC",
+          "font": "display",
+          "min_size": 19
+        },
+        {
+          "id": "note",
+          "type": "text",
+          "box": [
+            229,
+            246,
+            173,
+            18
+          ],
+          "text": "Люди, которые были рядом",
+          "size": 12,
+          "color": "#B7BEAC",
+          "font": "main",
+          "align": "right",
+          "min_size": 9
+        }
+      ]
+    },
+    "story": {
+      "elements": [
+        {
+          "id": "bg",
+          "type": "rect",
+          "box": [
+            0,
+            0,
+            420,
+            280
+          ],
+          "fill": "#202A27"
+        },
+        {
+          "id": "hero",
+          "type": "photo",
+          "box": [
+            0,
+            0,
+            420,
+            192
+          ],
+          "required": true
+        },
+        {
+          "id": "detail_left",
+          "type": "photo",
+          "box": [
+            0,
+            199,
+            205,
+            81
+          ],
+          "required": true
+        },
+        {
+          "id": "detail_right",
+          "type": "photo",
+          "box": [
+            215,
+            199,
+            205,
+            81
+          ],
+          "required": true
+        }
+      ]
+    }
+  }
+}
