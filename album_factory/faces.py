@@ -32,6 +32,25 @@ class FaceEngine:
             raise ValueError("Invalid face embedding")
         return "ready", (vector / norm).tolist()
 
+    def frame(self, image):
+        """Normalised [x, y, w, h] of the only detected face, or None."""
+        height, width = image.shape[:2]
+        scale = min(1.0, 1600 / max(height, width))
+        if scale < 1:
+            image = cv2.resize(image, (round(width * scale), round(height * scale)))
+        self.detector.setInputSize((image.shape[1], image.shape[0]))
+        _, faces = self.detector.detect(image)
+        if faces is None or len(faces) != 1:
+            return None
+        face = faces[0]
+        image_h, image_w = image.shape[:2]
+        return [
+            float(face[0]) / image_w,
+            float(face[1]) / image_h,
+            float(face[2]) / image_w,
+            float(face[3]) / image_h,
+        ]
+
 
 def choose_person(vector, groups, *, strong_match_threshold=None):
     """Conservative grouping: require best sample, mean support, and a clear margin.

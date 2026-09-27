@@ -15,7 +15,7 @@
 <aside class="sidebar">
   <a class="brand" href="#orders"><img src="/static/assets/logo.svg" alt=""><strong>ALBUM<br>FACTORY</strong></a>
   <nav id="v2-nav" aria-label="Основное меню"></nav>
-  <div class="sidebar-bottom"><button class="create-button" data-action="new-order"><span class="plus">＋</span>Создать заказ</button><div class="account"><img src="/static/assets/account.svg" alt=""><span>Фотограф</span><small>Локально</small></div></div>
+  <div class="sidebar-bottom"><button class="create-button" data-action="new-order"><span class="plus">＋</span>Создать заказ</button><a class="account" href="#settings"><img src="/static/assets/account.svg" alt=""><span>Фотограф</span><small>Локально</small></a></div>
 </aside>
 <main id="main" tabindex="-1"></main>
 <dialog id="order-dialog" aria-labelledby="dialog-title">
@@ -25,6 +25,9 @@
     <label>Школа<input name="school" maxlength="100" placeholder="Например, Школа № 20" required autofocus></label>
     <div class="form-row"><label>Класс<input name="class_name" maxlength="30" placeholder="9 Б" required></label><label>Количество альбомов<input name="copies" type="number" min="1" max="1000" value="20" required></label></div>
     <div class="form-row"><label>Дата съёмки<input name="shoot_date" type="date"></label><label>Цена альбома, ₽<input name="price" type="number" min="0" max="1000000" value="0" required></label></div>
+    <label>Заказчик<input name="customer_name" maxlength="120" placeholder="ФИО ответственного" autocomplete="name"></label>
+    <div class="form-row"><label>Контакт<input name="customer_contact" maxlength="120" placeholder="Телефон или почта"></label><label>Учеников<input name="student_count" type="number" min="1" max="1000" inputmode="numeric"></label></div>
+    <label>Комплектация<select id="offer-id" name="offer_id"><option value="">Не выбрана</option></select></label>
     <p class="muted small">Дату и цену можно оставить незаполненными. После создания можно сразу загрузить портреты.</p>
     <p id="form-error" class="error" role="alert"></p>
     <button class="primary wide" type="submit">Создать заказ</button>

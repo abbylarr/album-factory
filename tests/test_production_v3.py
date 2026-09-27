@@ -103,6 +103,38 @@ class ProductionV3Tests(unittest.TestCase):
         self.assertEqual({p['status'] for p in self.rows().values()},{'ready'})
         self.assertEqual(len(self.rows()),2)
 
+    def test_face_box_saved_from_the_same_pixels(self):
+        with s.db() as con:
+            con.execute('CREATE TABLE IF NOT EXISTS photo_frames (photo_id TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL)')
+        self.photo(1)
+        seen=[]
+        class Engine:
+            def extract(self, pixels):
+                seen.append(pixels)
+                return 'ready',[1.,0.]
+            def frame(self, pixels):
+                seen.append(pixels)
+                return [0.1,0.2,0.3,0.4]
+        with patch.object(s,'engine',Engine()): s.process_pending()
+        self.assertIs(seen[0], seen[1])
+        with s.db() as con:
+            row=con.execute("SELECT x,y,w,h FROM photo_frames WHERE photo_id='1'").fetchone()
+        self.assertEqual([row['x'],row['y'],row['w'],row['h']],[0.1,0.2,0.3,0.4])
+
+    def test_missing_face_box_is_skipped(self):
+        with s.db() as con:
+            con.execute('CREATE TABLE IF NOT EXISTS photo_frames (photo_id TEXT PRIMARY KEY, x REAL, y REAL, w REAL, h REAL)')
+        self.photo(1)
+        class Engine:
+            def extract(self, pixels):
+                return 'ready',[1.,0.]
+            def frame(self, pixels):
+                return None
+        with patch.object(s,'engine',Engine()): s.process_pending()
+        self.assertEqual(self.rows()['1']['status'],'ready')
+        with s.db() as con:
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM photo_frames').fetchone()[0],0)
+
     def test_returning_person_keeps_identity(self):
         for i,c in [(1,100),(2,100),(3,100),(4,200),(5,200),(6,200),(7,100)]: self.photo(i,color=c)
         self.process()

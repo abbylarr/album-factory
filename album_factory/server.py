@@ -80,6 +80,10 @@ def init_db():
         init_client_portal(con)
         from .layout_workspace import init as init_layout_workspace
         init_layout_workspace(con)
+        from .mvp import init as init_mvp
+        init_mvp(con)
+        from .master_templates import init as init_masters
+        init_masters(con)
         con.execute("UPDATE photos SET status='pending' WHERE status='processing'")
 
 
@@ -134,6 +138,11 @@ def require_order(con, order_id):
     row = con.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "Заказ не найден")
+    from . import mvp
+    studio = mvp.studio_ctx.get()
+    if studio is not None and con.execute(
+            "SELECT 1 FROM order_membership WHERE order_id=? AND studio_id=?", (order_id, studio)).fetchone() is None:
+        raise HTTPException(404, "Заказ не найден")
     return row
 
 
@@ -180,14 +189,25 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost
 @app.middleware("http")
 async def local_session(request: Request, call_next):
     # A page-generated local session plus same-origin checks protect mutations.
-    if request.url.path.startswith("/api/") or request.url.path.startswith("/media/"):
-        if request.cookies.get("album_session") != getattr(app.state, "token", None):
+    from . import mvp
+    path = request.url.path
+    token = request.cookies.get("album_session")
+    studio = None
+    open_api = path in {"/api/login", "/api/register"}
+    if (path.startswith("/api/") or path.startswith("/media/")) and not open_api:
+        with db() as con:
+            studio = mvp.studio_for_cookie(con, token, getattr(app.state, "token", None))
+        if studio is None:
             return JSONResponse({"detail": "Откройте главную страницу приложения"}, status_code=401)
-    if request.method not in {"GET", "HEAD", "OPTIONS"}:
-        origin = request.headers.get("origin", "")
-        if origin != str(request.base_url).rstrip("/"):
-            return JSONResponse({"detail": "Недопустимый источник запроса"}, status_code=403)
-    response = await call_next(request)
+    ctx = mvp.studio_ctx.set(studio)
+    try:
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("origin", "")
+            if origin != str(request.base_url).rstrip("/"):
+                return JSONResponse({"detail": "Недопустимый источник запроса"}, status_code=403)
+        response = await call_next(request)
+    finally:
+        mvp.studio_ctx.reset(ctx)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
@@ -196,8 +216,11 @@ async def local_session(request: Request, call_next):
         response.headers["Cache-Control"] = "private, max-age=86400, immutable"
     else:
         response.headers["Cache-Control"] = "no-store"
-    if request.url.path in {"/", "/v2", "/v2/"}:
-        response.set_cookie("album_session", app.state.token, httponly=True, samesite="strict")
+    if path in {"/", "/v2", "/v2/"}:
+        with db() as con:
+            page_studio = mvp.studio_for_cookie(con, token, getattr(app.state, "token", None))
+        if page_studio is None or token == getattr(app.state, "token", None):
+            response.set_cookie("album_session", app.state.token, httponly=True, samesite="strict", path="/")
     return response
 
 
@@ -207,6 +230,11 @@ class OrderInput(BaseModel):
     copies: int = Field(ge=1, le=1000)
     price: int = Field(default=0, ge=0, le=1_000_000)
     shoot_date: str = ""
+    customer_name: str = ""
+    customer_contact: str = ""
+    offer_id: str | None = None
+    school_id: str | None = None
+    student_count: int | None = Field(default=None, ge=1, le=1000)
 
 
 @app.get("/api/status")
@@ -217,13 +245,19 @@ def system_status():
 @app.get("/api/orders")
 def list_orders():
     with db() as con:
-        rows = con.execute("""SELECT o.*,
+        from . import mvp
+        studio = mvp.studio_ctx.get()
+        where, args = "", ()
+        if studio is not None:
+            where = "WHERE EXISTS (SELECT 1 FROM order_membership m WHERE m.order_id=o.id AND m.studio_id=?)"
+            args = (studio,)
+        rows = con.execute(f"""SELECT o.*,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id) AS photo_count,
           (SELECT COUNT(*) FROM persons p WHERE p.order_id=o.id) AS person_count,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status IN ('pending','processing')) AS pending,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status NOT IN ('pending','processing') AND NOT EXISTS (SELECT 1 FROM shoots s WHERE s.id=p.shoot_id AND s.kind='general') AND (p.status!='ready' OR p.uncertain=1 OR p.person_id IS NULL)) AS review_count,
           COALESCE((SELECT photo_id FROM order_covers WHERE order_id=o.id), (SELECT id FROM photos p WHERE p.order_id=o.id ORDER BY created_at,id LIMIT 1)) AS cover_id
-          FROM orders o ORDER BY created_at DESC""").fetchall()
+          FROM orders o {where} ORDER BY created_at DESC""", args).fetchall()
         from .client_portal import progress_by_order
         progress = progress_by_order(con)
         return [dict(row, client_progress=progress[row["id"]]) for row in rows]
@@ -243,6 +277,8 @@ def create_order(payload: OrderInput):
     order_id = uid()
     with db() as con:
         con.execute("INSERT INTO orders VALUES (?,?,?,?,?,?,?,?)", (order_id, values["school"], values["class_name"], values["copies"], values["price"], values["shoot_date"], "scheduled" if values["shoot_date"] else "planned", now()))
+        from . import mvp
+        mvp.attach_order(con, order_id, mvp.studio_ctx.get(), values)
     return {"id": order_id}
 
 
@@ -350,7 +386,8 @@ def media(photo_id: str, variant: str):
     if variant not in {"thumb", "full"}:
         raise HTTPException(404)
     with db() as con:
-        if not con.execute("SELECT 1 FROM photos WHERE id=?", (photo_id,)).fetchone():
+        from . import mvp
+        if not mvp.photo_visible(con, photo_id):
             raise HTTPException(404)
     path = DATA / "photos" / (photo_id + (".thumb.jpg" if variant == "thumb" else ".jpg"))
     return FileResponse(path, media_type="image/jpeg")
@@ -473,6 +510,8 @@ def delete_order(order_id: str):
         con.execute("DELETE FROM persons WHERE order_id=?", (order_id,))
         con.execute("DELETE FROM order_covers WHERE order_id=?", (order_id,))
         con.execute("DELETE FROM shoots WHERE order_id=?", (order_id,))
+        from . import mvp
+        mvp.forget(con, order_id)
         con.execute("DELETE FROM orders WHERE id=?", (order_id,))
     remove_photo_files(ids)
     return {"ok": True}
@@ -529,3 +568,14 @@ _install_client_portal(app, _sys.modules[__name__])
 
 from .layout_workspace import install as _install_layout_workspace
 _install_layout_workspace(app, _sys.modules[__name__])
+
+from .mvp import install as _install_mvp
+_install_mvp(app, _sys.modules[__name__])
+
+from .master_templates import install as _install_masters
+_install_masters(app, _sys.modules[__name__])
+
+@app.get('/master-editor.html')
+def master_editor_entry():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse('/static/master-editor.html?new=1')

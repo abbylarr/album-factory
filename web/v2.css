@@ -14,3 +14,13 @@
 #shoot-form{display:grid;gap:16px}#shoot-form label,#new-shoot-fields{display:grid;gap:10px}#new-shoot-fields[hidden]{display:none}#shoot-form select{width:100%;padding:12px;border:1px solid #deded6;border-radius:10px;background:#fff;font:inherit}#shoot-form input[type=file]{max-width:100%}
 @media(max-width:650px){.shoot-section>div:not([hidden]){padding:12px}.shoot-heading{padding:14px;gap:8px}.shoot-heading .muted{width:calc(100% - 24px);margin-left:22px}.shoot-status{margin-left:22px}.shoot-section .section-head{flex-wrap:wrap}}
 .shoot-section.expanded{border-color:#b7b38b;background:#faf9ee}.shoot-section.expanded>.shoot-heading{border-bottom:0}.shoot-content:not([hidden]){margin-top:22px}.shoot-content .upload-panel{margin-top:0}
+.settings-form{max-width:520px;margin-top:8px}.settings-form select{display:block;width:100%;margin-top:8px;padding:12px;border:1px solid #ddd;border-radius:9px;background:#fff}.settings-form .check{display:flex;align-items:center;gap:10px;margin:18px 0;font-size:15px}.settings-form .check input{width:18px;height:18px;margin:0}
+#mvp-deal{margin:8px 0 20px}
+#mvp-deal h3{font-size:16px;margin:14px 0 8px}
+#mvp-deal dl{display:grid;grid-template-columns:minmax(120px,170px) 1fr;gap:4px 12px;font-size:13px;margin:0 0 12px}
+#mvp-deal dt{color:#81827d}
+#mvp-deal dd{margin:0}
+.mvp-pins{background:#fff6cc;border-radius:10px;padding:12px 14px;margin:10px 0 14px;font-size:13px;line-height:1.55}
+.mvp-pins p{margin:0 0 6px}
+.mvp-actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.mvp-files{font-size:13px;line-height:1.5;margin:8px 0 8px 18px}

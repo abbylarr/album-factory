@@ -42,22 +42,40 @@ def _draw(pdf, spread, size, measurer, images):
             continue
         x, top, w, h = element["box"]
         bottom = height - top - h
-        if element["type"] == "rect":
+        pdf.saveState()
+        pdf.setFillAlpha(element.get("opacity",100)/100)
+        pdf.setStrokeAlpha(element.get("opacity",100)/100)
+        if element.get('angle'):
+            cx,cy=element.get('rotation_center',[x+w/2,top+h/2])
+            pdf.translate(cx*mm,(height-cy)*mm)
+            pdf.rotate(-element['angle'])
+            pdf.translate(-cx*mm,-(height-cy)*mm)
+        stroke_width=element.get('strokeWidth',0)
+        pdf.setStrokeColor(HexColor(element.get('stroke','#333333')))
+        pdf.setLineWidth(stroke_width*mm)
+        if element["type"] in {"rect", "line", "ellipse"}:
             pdf.setFillColor(HexColor(element["fill"]))
-            pdf.rect(x * mm, bottom * mm, w * mm, h * mm, stroke=0, fill=1)
+            if element["type"] == "ellipse":
+                pdf.ellipse(x*mm,bottom*mm,(x+w)*mm,(bottom+h)*mm,stroke=bool(stroke_width),fill=1)
+            else:
+                pdf.roundRect(x*mm,bottom*mm,w*mm,h*mm,min(element.get('radius',0),w/2,h/2)*mm,stroke=bool(stroke_width),fill=1)
         elif element["type"] == "photo":
             if not element["photo"] and not element.get("required"):
+                pdf.restoreState()
                 continue
             path = pdf.beginPath()
             if element["mask"] == "ellipse":
                 path.ellipse(x * mm, bottom * mm, w * mm, h * mm)
             else:
-                path.rect(x * mm, bottom * mm, w * mm, h * mm)
+                radius=min(element.get('radius',0),w/2,h/2)*mm
+                if radius: path.roundRect(x*mm,bottom*mm,w*mm,h*mm,radius)
+                else: path.rect(x * mm, bottom * mm, w * mm, h * mm)
             pdf.saveState()
             if element["photo"]:
                 pdf.clipPath(path, stroke=0, fill=0)
                 pdf.drawImage(images.get(element["photo"], element["crop"], w, h),
                               x * mm, bottom * mm, w * mm, h * mm)
+                if stroke_width: pdf.drawPath(path,stroke=1,fill=0)
             else:
                 pdf.setFillColor(HexColor("#D9D9D9"))
                 pdf.setStrokeColor(HexColor("#C0392B"))
@@ -70,6 +88,7 @@ def _draw(pdf, spread, size, measurer, images):
             _, used = paragraph.wrap(w * mm, 100000)
             offset = {"top": 0, "middle": (h * mm - used) / 2, "bottom": h * mm - used}[element["valign"]]
             paragraph.drawOn(pdf, x * mm, (height - top) * mm - offset - used)
+        pdf.restoreState()
 
 
 def render_variant(document: dict, owner: str, snapshot: dict, root: Path,

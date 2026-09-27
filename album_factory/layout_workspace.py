@@ -20,7 +20,7 @@ DISPLAY_FONT = Path('/System/Library/Fonts/Supplemental/Georgia.ttf')
 
 
 def measurer():
-    return ReportLabMeasurer({'main': FONT, 'display': DISPLAY_FONT})
+    return ReportLabMeasurer({'main': FONT, 'display': DISPLAY_FONT, 'times': Path('/System/Library/Fonts/Supplemental/Times New Roman.ttf')})
 
 
 class Edit(BaseModel):
@@ -55,7 +55,7 @@ def edition(root):
     return deepcopy(load_edition(root / 'examples/editions/editorial-v2.json'))
 
 
-def snapshot_for(con, order, data):
+def snapshot_for(con, order, data, master=False):
     photos = {}
     for photo in data['photos']:
         if photo['status'] != 'ready':
@@ -71,22 +71,25 @@ def snapshot_for(con, order, data):
     students, selections = [], []
     for index, person in enumerate(data['persons'], 1):
         choices = [p for p in data['photos'] if p['person_id'] == person['id'] and p['id'] in photos and p['shoot_type'] == 'portrait']
-        if not choices:
+        if not choices and not master:
             continue
         choice = selected.get(person['id'])
-        chosen_id = choice['photo_id'] if choice and choice['photo_id'] in {p['id'] for p in choices} else choices[0]['id']
+        chosen_id = choice['photo_id'] if choice and choice['photo_id'] in {p['id'] for p in choices} else choices[0]['id'] if choices else None
         name = (choice['first_name'] + ' ' + choice['last_name']) if choice else (person['name'] or f'Участник {index}')
         parts = name.strip().split(maxsplit=1)
         students.append({'id': person['id'], 'first_name': parts[0], 'last_name': parts[1] if len(parts)>1 else '', 'quote': choice['quote'] if choice else ''})
+        if chosen_id is None:
+            continue
         selections.append({'owner': 'student:' + person['id'], 'role': 'main_portrait', 'photo': chosen_id})
         alternate = next((p['id'] for p in choices if p['id'] != chosen_id), chosen_id)
         selections.append({'owner': 'student:' + person['id'], 'role': 'alt_portrait', 'photo': alternate})
-    if len(students) < 3:
+    if not master and len(students) < 3:
         raise HTTPException(409, 'Для макета нужны портреты минимум трёх персон. Проверьте группы фотографий.')
     return {'schema_version': 2,
             'order': {'id': order['id'], 'school': order['school'], 'class_name': order['class_name'],
                       'year': str(datetime.now().year), 'studio': ''},
             'students': students, 'teachers': [], 'photos': photos, 'selections': selections,
+            'general_photos': [p['id'] for p in data['photos'] if p['id'] in photos and p['shoot_type'] == 'general'],
             'teacher_variant': {'enabled': False}}
 
 
@@ -106,7 +109,10 @@ def install(app, s):
                             'person_id': p['person_id'],
                             'width': layout['snapshot']['photos'][id]['width'],
                             'height': layout['snapshot']['photos'][id]['height']}
-                           for id, p in layout['photo_info'].items() if id in layout['snapshot']['photos']]}
+                           for id, p in layout['photo_info'].items() if id in layout['snapshot']['photos']] + [
+                    {'id': key, 'filename': 'Изображение мастер-макета', 'shoot_type': 'general', 'person_id': None,
+                     'width': p['width'], 'height': p['height'], 'url': p['url']}
+                    for key,p in layout['snapshot']['photos'].items() if p.get('url')]}
 
     def enrich(con, order_id, layout):
         layout['photo_info'] = {r['id']: dict(r) for r in con.execute('''SELECT p.id,p.filename,p.person_id,s.kind AS shoot_type
@@ -125,7 +131,7 @@ def install(app, s):
         with s.db() as con:
             s.require_order(con, order_id)
             layout = read_layout(con, order_id)
-            if layout['document'].get('edition') != {'id': 'editorial', 'version': 2}:
+            if not layout['document'].get('master_template') and layout['document'].get('edition') != {'id': 'editorial', 'version': 2}:
                 try:
                     document = LayoutEngine(edition(s.ROOT), measurer()).generate(layout['snapshot'], layout['overrides'])
                     document = merge_custom(document, layout['document'])
@@ -143,11 +149,14 @@ def install(app, s):
                     'photos': [dict(r) for r in con.execute('''SELECT p.id,p.person_id,p.status,s.kind AS shoot_type
                         FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? ORDER BY p.created_at,p.id''', (order_id,))],
                     'data_root': s.DATA}
-            snapshot = snapshot_for(con, order, data)
+            selected_edition = order_edition(con, order_id, s.ROOT)
+            snapshot = snapshot_for(con, order, data, master='master' in selected_edition)
+            if 'master' in selected_edition:
+                enrich_master_snapshot(con, order_id, snapshot, selected_edition, s.DATA)
             old = con.execute('SELECT overrides,document FROM order_layouts WHERE order_id=?', (order_id,)).fetchone()
             overrides = json.loads(old['overrides']) if old else []
             try:
-                document = LayoutEngine(edition(s.ROOT), measurer()).generate(snapshot, overrides)
+                document = generate_document(selected_edition, snapshot, overrides)
                 document = merge_custom(document, json.loads(old['document']) if old else None)
             except LayoutError as exc:
                 raise HTTPException(409, str(exc)) from exc
@@ -186,7 +195,7 @@ def install(app, s):
             overrides = [o for o in layout['overrides'] if o['key'] != payload.key]
             overrides.append({'key': payload.key, 'type': payload.type, 'value': payload.value, 'base': element['base']})
             try:
-                document = LayoutEngine(edition(s.ROOT), measurer()).generate(layout['snapshot'], overrides)
+                document = generate_document(order_edition(con, order_id, s.ROOT), layout['snapshot'], overrides)
                 document = merge_custom(document, layout['document'])
             except LayoutError as exc:
                 raise HTTPException(409, str(exc)) from exc
@@ -202,8 +211,8 @@ def install(app, s):
             document = layout['document']
             if payload.revision != document['revision']:
                 raise HTTPException(409, 'Макет изменился. Обновите страницу.')
-            if document['spread_count'] >= 30:
-                raise HTTPException(409, 'В альбоме уже 30 разворотов')
+            if document['spread_count'] >= (1000 if document.get('master_template') else 30):
+                raise HTTPException(409, 'Достигнут предел числа разворотов')
             key = 'custom:' + s.uid()
             add_spread(document, key, payload.after_index)
             con.execute('UPDATE order_layouts SET document=? WHERE order_id=?', (json.dumps(document), order_id))
@@ -258,3 +267,53 @@ def install(app, s):
             except (LayoutError, OSError) as exc:
                 raise HTTPException(409, 'Не удалось создать PDF: ' + str(exc)) from exc
         return FileResponse(destination, media_type='application/pdf', filename=variant_filename(1, next(v for v in document['variants'] if v['owner']==owner)))
+
+
+def order_edition(con, order_id, root):
+    row = con.execute('SELECT edition_json FROM order_terms WHERE order_id=?', (order_id,)).fetchone()
+    if row and row['edition_json']:
+        chosen = json.loads(row['edition_json'])
+        if 'master' in chosen:
+            return chosen
+    return edition(root)
+
+
+def generate_document(selected, snapshot, overrides):
+    if 'master' in selected:
+        from .master_layout import generate
+        return generate(selected, snapshot, measurer(), overrides)
+    return LayoutEngine(selected, measurer()).generate(snapshot, overrides)
+
+
+def enrich_master_snapshot(con, order_id, snapshot, selected, data_root):
+    import base64
+    import hashlib
+    from io import BytesIO
+    from .master_templates import validate
+    validate(selected['master'])
+    snapshot['master_assets'] = {}
+    def asset(raw):
+        key = 'master-' + hashlib.sha256(raw).hexdigest()
+        path = data_root / 'photos' / (key + '.jpg')
+        with Image.open(BytesIO(raw)) as image:
+            image.convert('RGB').save(path, 'JPEG', quality=95)
+            width, height = image.size
+        encoded = base64.b64encode(path.read_bytes()).decode()
+        snapshot['photos'][key] = {'path':str(path),'width':width,'height':height,'url':'data:image/jpeg;base64,'+encoded}
+        return key
+    for section in selected['master']['sections']:
+        for spread in section['spreads']:
+            for page in spread['pages']:
+                for layer in page['layers']:
+                    if layer['type']=='photo' and layer.get('dataUrl'):
+                        snapshot['master_assets'][layer['id']] = asset(base64.b64decode(layer['dataUrl'].split(',',1)[1]))
+    terms = con.execute('SELECT school_id FROM order_terms WHERE order_id=?', (order_id,)).fetchone()
+    if terms and terms['school_id']:
+        for row in con.execute('SELECT * FROM teachers WHERE school_id=? ORDER BY id', (terms['school_id'],)):
+            teacher = dict(row)
+            snapshot['teachers'].append(teacher)
+            if teacher['portrait_path']:
+                path = (data_root / teacher['portrait_path']).resolve()
+                if path.is_relative_to(data_root.resolve()) and path.is_file():
+                    key = asset(path.read_bytes())
+                    snapshot['selections'].append({'owner':'teacher:'+teacher['id'],'role':'main_portrait','photo':key})

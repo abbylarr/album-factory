@@ -30,7 +30,9 @@ def process_batch(server, items, engine):
             pixels = prepared(p['path'], True)
             status, vector = engine.extract(pixels)
             if vector is None:
-                status, vector = engine.extract(prepared(p['path'], False))
+                pixels = prepared(p['path'], False)
+                status, vector = engine.extract(pixels)
+            box = _face_frame(server, engine, pixels, vector)
             with server.db() as con:
                 con.execute('BEGIN IMMEDIATE')
                 current = con.execute('SELECT status FROM photos WHERE id=?', (p['id'],)).fetchone()
@@ -49,6 +51,9 @@ def process_batch(server, items, engine):
                         con.execute('INSERT INTO persons VALUES (?,?,?,?)', (person, p['order_id'], '', server.now()))
                 con.execute("UPDATE photos SET status=?,person_id=?,embedding=?,uncertain=?,error='' WHERE id=?",
                             (status, person, json.dumps(vector) if vector is not None else None, int(uncertain), p['id']))
+                if box is not None:
+                    con.execute('INSERT OR REPLACE INTO photo_frames (photo_id, x, y, w, h) VALUES (?,?,?,?,?)',
+                                (p['id'], *box))
                 save_metadata(con, p['id'], 'face')
         except Exception:
             server.log.exception('V3 processing failed: %s', p['id'])
@@ -101,3 +106,16 @@ def process_batch(server, items, engine):
                 recognize(rows[index + 1])
     finally:
         prepared.close()
+
+
+def _face_frame(server, engine, pixels, vector):
+    # photo_frames is created elsewhere. Never call the detector unless that table is present.
+    if vector is None or not hasattr(engine, "frame"):
+        return None
+    with server.db() as con:
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='photo_frames'").fetchone() is None:
+            return None
+    box = engine.frame(pixels)
+    if box is None:
+        return None
+    return tuple(float(value) for value in box)

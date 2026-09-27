@@ -9,8 +9,11 @@ class ClientPortalTests(unittest.TestCase):
     photo = test_server_v2.V2Tests.photo
 
     def link(self, order=None):
-        url = self.client.post(f'/api/orders/{order or self.order}/client-link').json()['url']
-        return '/client-api/' + url.rsplit('/', 1)[1]
+        data = self.client.post(f'/api/orders/{order or self.order}/client-link').json()
+        token = data['url'].rsplit('/', 1)[1]
+        if data.get('entry_pin'):
+            self.client.post('/client-api/' + token + '/enter', json={'pin': data['entry_pin']})
+        return '/client-api/' + token
 
     def test_save_reload_and_replace(self):
         a = self.photo()
@@ -24,9 +27,12 @@ class ClientPortalTests(unittest.TestCase):
         self.assertEqual(saved['persons'][0]['first_name'], 'Анна')
         self.assertEqual(saved['persons'][0]['quote'], 'Моя цитата')
         payload['photo_id'] = b
-        self.client.put(base+'/persons/person', json=payload)
-        self.assertEqual(self.client.get(base).json()['persons'][0]['photo_id'], b)
-        self.client.post(f'/api/orders/{self.order}/move',json={'photo_ids':[b]})
+        self.assertEqual(self.client.put(base+'/persons/person', json=payload).status_code, 409)
+        self.assertEqual(self.client.get(base).json()['persons'][0]['photo_id'], a)
+        payload['photo_id'] = a
+        payload['quote'] = 'Новая цитата'
+        self.assertEqual(self.client.put(base+'/persons/person', json=payload).status_code, 200)
+        self.client.post(f'/api/orders/{self.order}/move',json={'photo_ids':[a]})
         self.assertEqual(self.client.get(base).json()['completed'], 0)
 
     def test_scope_and_validation(self):
@@ -43,7 +49,7 @@ class ClientPortalTests(unittest.TestCase):
         payload.update(first_name='Анна', quote='я'*301)
         self.assertEqual(self.client.put(base+'/persons/person', json=payload).status_code, 422)
         guest = TestClient(self.client.app)
-        self.assertEqual(guest.get(base).status_code, 200)
+        self.assertEqual(guest.get(base).status_code, 401)
         self.assertEqual(guest.get('/api/orders').status_code, 401)
         self.assertEqual(guest.put(base+'/persons/person', json=payload).status_code, 403)
 
