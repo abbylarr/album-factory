@@ -10,6 +10,7 @@ from PIL import Image
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from .layout_engine import canonical_hash, LayoutError
+from .svg_draw import svg_is_safe
 
 
 def init(con):
@@ -42,6 +43,9 @@ def validate(document):
     check(document.get('schemaVersion') == 1, 'Неизвестная версия мастер-макета')
     check(isinstance(document.get('name'), str) and 0 < len(document['name'].strip()) <= 80, 'Укажите название до 80 символов')
     check(document.get('personalMode') in {'all', 'owner', 'off'}, 'Неверный режим личных разворотов')
+    size = document.get('pageSize', [210, 280])
+    check(isinstance(size, list) and len(size) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 50 <= v <= 500 for v in size), 'Неверный размер макета')
+    page_width, page_height = size
     sections = document.get('sections')
     check(isinstance(sections, list) and 1 <= len(sections) <= 30, 'Нужно от 1 до 30 разделов')
     ids = set()
@@ -51,10 +55,74 @@ def validate(document):
         ids.add(key)
     def number(value, low, high):
         return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and low <= value <= high
+    def safety(value, width, height):
+        check(isinstance(value, dict), 'Неверные линии безопасности')
+        limit = min(width, height) / 2
+        for key in ('safe', 'bleed', 'spine', 'gap'):
+            check(number(value.get(key, 0), 0, limit if key != 'bleed' else 30), 'Неверные линии безопасности')
+        check(value.get('safe', 0) + value.get('bleed', 0) < limit, 'Зона безопасности не помещается')
+    if 'safety' in document:
+        safety(document['safety'], page_width, page_height)
     def color(value):
         return isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value)
+    def image_data(value):
+        try:
+            header, content = value.split(',', 1)
+            assert header in {'data:image/png;base64','data:image/jpeg;base64','data:image/webp;base64'}
+            raw = base64.b64decode(content, validate=True)
+            assert len(raw) <= 1_000_000
+            with Image.open(BytesIO(raw)) as image:
+                assert image.width * image.height <= 25_000_000
+                image.verify()
+        except Exception as exc:
+            raise HTTPException(422, 'Повреждённое изображение или размер больше 1 МБ') from exc
+    def font_data(value):
+        try:
+            header, content = str(value).split(',', 1)
+            assert header in {'data:font/ttf;base64', 'data:font/otf;base64'}
+            raw = base64.b64decode(content, validate=True)
+            assert 80 <= len(raw) <= 1_500_000
+            assert raw[:4] in {b'\x00\x01\x00\x00', b'OTTO', b'true', b'typ1'}
+            if header == 'data:font/otf;base64':
+                assert raw[:4] == b'OTTO'
+            else:
+                assert raw[:4] != b'OTTO'
+        except Exception as exc:
+            raise HTTPException(422, 'Повреждённый шрифт или файл больше 1,5 МБ') from exc
+    fonts = document.get('fonts', [])
+    check(isinstance(fonts, list) and len(fonts) <= 12, 'Можно сохранить не больше 12 шрифтов')
+    known_fonts = {'Georgia', 'Arial', 'Times New Roman'}
+    for font in fonts:
+        check(isinstance(font, dict), 'Неверный шрифт')
+        identity(font)
+        check(isinstance(font.get('name'), str) and 0 < len(font['name'].strip()) <= 60, 'Неверное название шрифта')
+        font_data(font.get('dataUrl'))
+        known_fonts.add(font['id'])
+    text_styles = document.get('textStyles', [])
+    check(isinstance(text_styles, list) and len(text_styles) <= 50, 'Можно сохранить не больше 50 стилей текста')
+    known_styles = set()
+    for style in text_styles:
+        check(isinstance(style, dict), 'Неверный стиль текста')
+        identity(style)
+        known_styles.add(style['id'])
+        check(isinstance(style.get('name'), str) and 0 < len(style['name'].strip()) <= 60, 'Неверное название стиля')
+        check(style.get('font') in known_fonts and number(style.get('fontSize'), 4, 120) and color(style.get('color')), 'Неверный стиль текста')
+        check(style.get('align') in {'left', 'center', 'right', 'justify'}, 'Неверное выравнивание стиля')
+        check(number(style.get('lineHeight'), 0.8, 3) and number(style.get('letterSpacing'), -20, 80), 'Неверные интервалы стиля')
+        for flag in ('bold', 'italic', 'underline', 'strike'):
+            check(isinstance(style.get(flag), bool), 'Неверное начертание стиля')
     for section in sections:
         check(isinstance(section, dict), 'Неверный раздел'); identity(section)
+        if section.get('cover'):
+            check(section is sections[0] and sum(bool(s.get('cover')) for s in sections) == 1, 'Обложка должна быть первой и единственной')
+            check(section.get('kind') == 'fixed' and isinstance(section.get('spreads'), list) and len(section['spreads']) == 1, 'Обложка содержит один разворот')
+            cover_size = section.get('pageSize')
+            check(isinstance(cover_size, list) and len(cover_size) == 2 and all(number(v, 50, 500) for v in cover_size), 'Неверный размер обложки')
+            page_width, page_height = cover_size
+            safety(section.get('safety', {}), page_width, page_height)
+        else:
+            check('pageSize' not in section, 'Все внутренние страницы используют общий размер макета')
+            page_width, page_height = size
         check(section.get('kind') in {'fixed', 'flow', 'repeat'}, 'Неверное правило раздела')
         check(isinstance(section.get('name'), str) and len(section['name']) <= 100, 'Неверное название раздела')
         check(number(section.get('target', 1), 1, 100), 'Неверный ориентир объёма')
@@ -72,38 +140,81 @@ def validate(document):
                 for layer in page['layers']:
                     check(isinstance(layer, dict), 'Неверный слой'); identity(layer)
                     kind = layer.get('type')
-                    check(kind in {'text', 'photo', 'rect', 'ellipse', 'line', 'grid'}, 'Неизвестный инструмент')
+                    check(kind in {'text', 'photo', 'rect', 'ellipse', 'line', 'grid', 'collage', 'svg'}, 'Неизвестный инструмент')
                     b = layer.get('box', {})
-                    check(isinstance(b, dict) and all(number(b.get(k), 0 if k in 'xy' else .1, 280) for k in ('x','y','w','h')), 'Неверные размеры слоя')
-                    check(b['x'] + b['w'] <= 210.01 and b['y'] + b['h'] <= 280.01, 'Слой выходит за страницу')
+                    check(isinstance(b, dict) and all(number(b.get(k), 0 if k in 'xy' else .1, max(page_width, page_height)) for k in ('x','y','w','h')), 'Неверные размеры слоя')
+                    check(b['x'] + b['w'] <= page_width + .01 and b['y'] + b['h'] <= page_height + .01, 'Слой выходит за страницу')
                     check(number(layer.get('opacity', 100), 0, 100), 'Неверная прозрачность')
                     check(number(layer.get('angle', 0), -180, 180), 'Неверный угол поворота')
                     check(number(layer.get('radius', 0), 0, 100), 'Неверный радиус')
                     check(number(layer.get('strokeWidth', 0), 0, 10), 'Неверная толщина обводки')
                     check(color(layer.get('stroke', '#333333')), 'Неверный цвет обводки')
-                    if kind in {'rect','ellipse','line'}:
+                    if 'strokeDash' in layer:
+                        check(layer['strokeDash'] in {'solid', 'dashed', 'dotted'}, 'Неверный штрих обводки')
+                    if 'strokeAlign' in layer:
+                        check(layer['strokeAlign'] in {'center', 'inside', 'outside'}, 'Неверное положение обводки')
+                    if 'strokeCap' in layer:
+                        check(layer['strokeCap'] in {'butt', 'round', 'square'}, 'Неверные концы обводки')
+                    if 'strokeJoin' in layer:
+                        check(layer['strokeJoin'] in {'miter', 'round', 'bevel'}, 'Неверные стыки обводки')
+                    if 'strokeOn' in layer:
+                        check(isinstance(layer['strokeOn'], bool), 'Неверная обводка')
+                    if layer.get('shadow') is not None:
+                        shadow = layer['shadow']
+                        check(isinstance(shadow, dict) and color(shadow.get('color')) and number(shadow.get('offsetX', 0), -30, 30) and number(shadow.get('offsetY', 0), -30, 30) and number(shadow.get('blur', 0), 0, 40) and number(shadow.get('opacity', 40), 0, 100), 'Неверная тень')
+                    if kind in {'rect','ellipse','line','svg'}:
                         check(color(layer.get('fill')), 'Неверная заливка')
+                    if kind == 'svg':
+                        check(svg_is_safe(layer.get('svg')), 'Неверный SVG')
+                        check(layer.get('fillMode', 'original') in {'original', 'color', 'none'}, 'Неверная заливка SVG')
+                        check(layer.get('strokeMode', 'original') in {'original', 'color', 'none'}, 'Неверная обводка SVG')
                     if kind in {'text','grid'}:
-                        check(layer.get('font') in {'Georgia','Arial','Times New Roman'}, 'Неизвестный шрифт')
+                        check(layer.get('font') in known_fonts, 'Неизвестный шрифт')
                         check(number(layer.get('fontSize'), 4, 120) and color(layer.get('color')), 'Неверный стиль текста')
+                        for flag in ('bold', 'italic', 'underline', 'strike'):
+                            if flag in layer:
+                                check(isinstance(layer[flag], bool), 'Неверное начертание')
+                        check(number(layer.get('lineHeight', 1.25), 0.8, 3), 'Неверный интерлиньяж')
+                        check(number(layer.get('letterSpacing', 0), -20, 80), 'Неверный межбуквенный интервал')
                     if kind == 'text':
+                        if layer.get('styleId'):
+                            check(layer['styleId'] in known_styles, 'Неизвестный стиль текста')
                         check(isinstance(layer.get('text'), str) and len(layer['text']) <= 2000, 'Текст длиннее 2000 символов')
                         check(layer.get('binding') in {'static','owner.name','item.name','lead.name','class','year'}, 'Неверное поле текста')
-                        check(layer.get('align') in {'left','center','right'}, 'Неверное выравнивание')
+                        check(layer.get('align') in {'left','center','right','justify'}, 'Неверное выравнивание')
                     if kind == 'photo':
                         check(layer.get('source') in {'lead','owner','item','class','custom'}, 'Неверный источник фото')
                         check(all(number(layer.get(k,50),0,100) for k in ('cropX','cropY')), 'Неверное кадрирование')
                         if layer.get('dataUrl'):
-                            try:
-                                header, content = layer['dataUrl'].split(',', 1)
-                                assert header in {'data:image/png;base64','data:image/jpeg;base64','data:image/webp;base64'}
-                                raw = base64.b64decode(content, validate=True)
-                                assert len(raw) <= 1_000_000
-                                with Image.open(BytesIO(raw)) as image:
-                                    assert image.width * image.height <= 25_000_000
-                                    image.verify()
-                            except Exception as exc:
-                                raise HTTPException(422, 'Повреждённое изображение или размер больше 1 МБ') from exc
+                            image_data(layer['dataUrl'])
+                    if kind == 'collage':
+                        check(number(layer.get('gapX', 4), 0, 40) and number(layer.get('gapY', 4), 0, 40), 'Неверные зазоры коллажа')
+                        check(color(layer.get('fill', '#e6e1ea')), 'Неверная заливка коллажа')
+                        rows = layer.get('rows')
+                        check(isinstance(rows, list) and 1 <= len(rows) <= 8, 'В коллаже от 1 до 8 рядов')
+                        leaves = 0
+                        def check_cell(cell, depth=0):
+                            nonlocal leaves
+                            check(isinstance(cell, dict), 'Неверный кадр коллажа')
+                            identity(cell)
+                            check(depth <= 4, 'Слишком глубокое деление кадра')
+                            if cell.get('split'):
+                                check(cell.get('split') in {'h', 'v'}, 'Неверное деление кадра')
+                                children = cell.get('cells')
+                                check(isinstance(children, list) and 2 <= len(children) <= 8, 'В делении нужно от 2 до 8 кадров')
+                                for child in children:
+                                    check_cell(child, depth + 1)
+                            else:
+                                leaves += 1
+                                check(cell.get('source', 'class') in {'lead', 'owner', 'item', 'class', 'custom'}, 'Неверный источник фото')
+                                check(all(number(cell.get(k, 50), 0, 100) for k in ('cropX', 'cropY')), 'Неверное кадрирование')
+                                if cell.get('dataUrl'):
+                                    image_data(cell['dataUrl'])
+                        for row in rows:
+                            check(isinstance(row, list) and 1 <= len(row) <= 8, 'В ряду коллажа от 1 до 8 кадров')
+                            for cell in row:
+                                check_cell(cell)
+                        check(1 <= leaves <= 48, 'Слишком много кадров коллажа')
                     if kind == 'grid':
                         check(section['kind'] == 'flow', 'Автовиньетка требует расширяемого раздела')
                         check(layer.get('source') in {'students','teachers'}, 'Неверный список виньеток')

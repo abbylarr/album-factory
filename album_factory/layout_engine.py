@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import re
+import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -39,13 +40,20 @@ class TextMeasurer(Protocol):
 class ReportLabMeasurer:
     """Measures with the same Paragraph engine the renderer draws with."""
 
-    def __init__(self, fonts: dict[str, Path]):
+    def __init__(self, fonts: dict):
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
         self._pdfmetrics = pdfmetrics
         self.names = {}
-        for name, path in fonts.items():
-            path = Path(path)
+        cache = Path(tempfile.gettempdir()) / 'album-factory-fonts'
+        for name, source in fonts.items():
+            if isinstance(source, (bytes, bytearray)):
+                cache.mkdir(exist_ok=True)
+                path = cache / (hashlib.sha1(source).hexdigest() + '.ttf')
+                if not path.is_file() or path.stat().st_size != len(source):
+                    path.write_bytes(source)
+            else:
+                path = Path(source)
             rl_name = f"AF-{name}-{hashlib.sha1(str(path.resolve()).encode()).hexdigest()[:8]}"
             if rl_name not in pdfmetrics.getRegisteredFontNames():
                 pdfmetrics.registerFont(TTFont(rl_name, str(path)))
@@ -56,19 +64,34 @@ class ReportLabMeasurer:
             raise LayoutError(f"Шрифт {font!r} не передан генератору")
         return self.names[font]
 
-    def paragraph(self, text, font, size, leading, align="left", color="#1D1D1D"):
+    def paragraph(self, text, font, size, leading, align="left", color="#1D1D1D", letter=0, render_mode=0, underline=False, strike=False):
         from xml.sax.saxutils import escape
         from reportlab.lib.colors import HexColor
         from reportlab.lib.styles import ParagraphStyle
         from reportlab.platypus import Paragraph
+        body = escape(text).replace("\n", "<br/>")
+        if strike:
+            body = f"<strike>{body}</strike>"
+        if underline:
+            body = f"<u>{body}</u>"
         style = ParagraphStyle("AF", fontName=self._font(font), fontSize=size, leading=leading,
                                textColor=HexColor(color), splitLongWords=True,
-                               alignment={"left": 0, "center": 1, "right": 2}[align])
-        return Paragraph(escape(text).replace("\n", "<br/>"), style)
+                               alignment={"left": 0, "center": 1, "right": 2, "justify": 4}[align])
+        char_space = size * float(letter or 0) / 100
 
-    def height(self, text, font, size, leading, width):
+        class Styled(Paragraph):
+            def beginText(self, x, y):
+                tx = Paragraph.beginText(self, x, y)
+                if char_space:
+                    tx.setCharSpace(char_space)
+                tx.setTextRenderMode(render_mode or 0)
+                return tx
+
+        return Styled(body, style)
+
+    def height(self, text, font, size, leading, width, letter=0):
         from reportlab.lib.units import mm
-        _, used = self.paragraph(text, font, size, leading).wrap(width * mm, 100000)
+        _, used = self.paragraph(text, font, size, leading, letter=letter).wrap(width * mm, 100000)
         return used / mm
 
     def missing_glyphs(self, text, font):

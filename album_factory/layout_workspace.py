@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
+import base64
 import json
 from pathlib import Path
 
@@ -15,12 +16,35 @@ from .layout_engine import LayoutEngine, LayoutError, ReportLabMeasurer, load_ed
 from .layout_render import render_variant, variant_filename
 from .layout_custom import PAGE_TEMPLATES, add_spread, edit_element, merge_custom, remove_spread, set_page_template
 
-FONT = Path('/System/Library/Fonts/Supplemental/Arial.ttf')
-DISPLAY_FONT = Path('/System/Library/Fonts/Supplemental/Georgia.ttf')
+FONT_DIR = Path('/System/Library/Fonts/Supplemental')
+FAMILIES = {
+    'main': ('Arial.ttf', 'Arial Bold.ttf', 'Arial Italic.ttf', 'Arial Bold Italic.ttf'),
+    'display': ('Georgia.ttf', 'Georgia Bold.ttf', 'Georgia Italic.ttf', 'Georgia Bold Italic.ttf'),
+    'times': ('Times New Roman.ttf', 'Times New Roman Bold.ttf', 'Times New Roman Italic.ttf', 'Times New Roman Bold Italic.ttf'),
+}
+STYLE_SUFFIX = ('', '-bold', '-italic', '-bolditalic')
 
 
-def measurer():
-    return ReportLabMeasurer({'main': FONT, 'display': DISPLAY_FONT, 'times': Path('/System/Library/Fonts/Supplemental/Times New Roman.ttf')})
+def font_bundle(edition=None):
+    fonts = {}
+    for key, files in FAMILIES.items():
+        regular = FONT_DIR / files[0]
+        for suffix, name in zip(STYLE_SUFFIX, files):
+            path = FONT_DIR / name
+            fonts[key + suffix] = path if path.is_file() else regular
+    master = edition.get('master') if isinstance(edition, dict) else None
+    for font in (master or {}).get('fonts') or []:
+        data = font.get('dataUrl') or ''
+        if ',' not in data:
+            continue
+        fonts_bytes = base64.b64decode(data.split(',', 1)[1])
+        for suffix in STYLE_SUFFIX:
+            fonts['custom-' + font['id'] + suffix] = fonts_bytes
+    return fonts
+
+
+def measurer(edition=None):
+    return ReportLabMeasurer(font_bundle(edition))
 
 
 class Edit(BaseModel):
@@ -253,6 +277,7 @@ def install(app, s):
         with s.db() as con:
             s.require_order(con, order_id)
             layout = read_layout(con, order_id)
+            edition = order_edition(con, order_id, s.DATA)
         document = layout['document']
         if owner not in {v['owner'] for v in document['variants']}:
             raise HTTPException(404, 'Вариант не найден')
@@ -263,7 +288,7 @@ def install(app, s):
             destination.parent.mkdir(parents=True, exist_ok=True)
             try:
                 render_variant(document, owner, layout['snapshot'], s.DATA,
-                               measurer(), destination)
+                               measurer(edition), destination)
             except (LayoutError, OSError) as exc:
                 raise HTTPException(409, 'Не удалось создать PDF: ' + str(exc)) from exc
         return FileResponse(destination, media_type='application/pdf', filename=variant_filename(1, next(v for v in document['variants'] if v['owner']==owner)))
@@ -281,7 +306,7 @@ def order_edition(con, order_id, root):
 def generate_document(selected, snapshot, overrides):
     if 'master' in selected:
         from .master_layout import generate
-        return generate(selected, snapshot, measurer(), overrides)
+        return generate(selected, snapshot, measurer(selected), overrides)
     return LayoutEngine(selected, measurer()).generate(snapshot, overrides)
 
 
@@ -307,6 +332,15 @@ def enrich_master_snapshot(con, order_id, snapshot, selected, data_root):
                 for layer in page['layers']:
                     if layer['type']=='photo' and layer.get('dataUrl'):
                         snapshot['master_assets'][layer['id']] = asset(base64.b64decode(layer['dataUrl'].split(',',1)[1]))
+                    if layer['type']=='collage':
+                        def walk(cell):
+                            if cell.get('dataUrl'):
+                                snapshot['master_assets'][cell['id']] = asset(base64.b64decode(cell['dataUrl'].split(',',1)[1]))
+                            for child in cell.get('cells') or []:
+                                walk(child)
+                        for row in layer.get('rows') or []:
+                            for cell in row:
+                                walk(cell)
     terms = con.execute('SELECT school_id FROM order_terms WHERE order_id=?', (order_id,)).fetchone()
     if terms and terms['school_id']:
         for row in con.execute('SELECT * FROM teachers WHERE school_id=? ORDER BY id', (terms['school_id'],)):

@@ -318,7 +318,7 @@ def summary_body(con, order, public=True):
     return body
 
 
-_PUBLIC_ELEMENT = ("type", "box", "photo", "crop", "mask", "text", "size", "color", "font", "align", "fill", "opacity", "angle", "rotation_center", "radius", "stroke", "strokeWidth", "valign")
+_PUBLIC_ELEMENT = ("type", "box", "photo", "crop", "mask", "text", "size", "color", "font", "align", "fill", "opacity", "angle", "rotation_center", "radius", "stroke", "strokeWidth", "strokeDash", "strokeAlign", "strokeCap", "strokeJoin", "valign", "svg", "flipX", "flipY")
 
 
 def publication_photo_ids(document):

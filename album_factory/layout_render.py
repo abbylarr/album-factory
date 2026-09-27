@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import math
 from pathlib import Path
 import re
 
@@ -12,6 +13,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from .layout_engine import LayoutError, ReportLabMeasurer
+from .svg_draw import draw_svg
 
 TARGET_DPI = 300
 
@@ -35,6 +37,31 @@ class _Images:
         return self.cache[key]
 
 
+def _shadow_offsets(shadow):
+    ox, oy = float(shadow.get('offsetX') or 0), float(shadow.get('offsetY') or 0)
+    blur = max(0, float(shadow.get('blur') or 0))
+    if blur < 0.2:
+        return [(ox, oy, 1)]
+    return [(ox + math.cos(i * math.pi / 4) * blur * 0.45, oy + math.sin(i * math.pi / 4) * blur * 0.45, 0.45) for i in range(8)] + [(ox, oy, 0.8)]
+
+
+def _cast_shadow(pdf, element, paint):
+    shadow = element.get('shadow')
+    if not isinstance(shadow, dict):
+        return
+    base = element.get('opacity', 100) / 100 * float(shadow.get('opacity', 40)) / 100
+    if base <= 0:
+        return
+    for ox, oy, weight in _shadow_offsets(shadow):
+        pdf.saveState()
+        alpha = min(1, base * weight)
+        pdf.setFillAlpha(alpha)
+        pdf.setStrokeAlpha(0)
+        pdf.translate(ox * mm, -oy * mm)
+        paint(shadow.get('color') or '#000000')
+        pdf.restoreState()
+
+
 def _draw(pdf, spread, size, measurer, images):
     _, height = size
     for element in spread["elements"]:
@@ -50,15 +77,74 @@ def _draw(pdf, spread, size, measurer, images):
             pdf.translate(cx*mm,(height-cy)*mm)
             pdf.rotate(-element['angle'])
             pdf.translate(-cx*mm,-(height-cy)*mm)
-        stroke_width=element.get('strokeWidth',0)
+        stroke_width=element.get('strokeWidth',0) or 0
+        stroke_alpha=element.get("opacity",100)/100 * element.get('strokeOpacity',100)/100
+        pdf.setStrokeAlpha(stroke_alpha)
         pdf.setStrokeColor(HexColor(element.get('stroke','#333333')))
+        dash=element.get('strokeDash') or 'solid'
+        if dash=='dashed': pdf.setDash(1.8*mm, 1.15*mm)
+        elif dash=='dotted': pdf.setDash(0.4*mm, 1.15*mm)
         pdf.setLineWidth(stroke_width*mm)
+        pdf.setLineCap({"butt": 0, "round": 1, "square": 2}.get(element.get("strokeCap"), 0))
+        pdf.setLineJoin({"miter": 0, "round": 1, "bevel": 2}.get(element.get("strokeJoin"), 0))
         if element["type"] in {"rect", "line", "ellipse"}:
-            pdf.setFillColor(HexColor(element["fill"]))
-            if element["type"] == "ellipse":
-                pdf.ellipse(x*mm,bottom*mm,(x+w)*mm,(bottom+h)*mm,stroke=bool(stroke_width),fill=1)
+            radius=min(element.get('radius',0),w/2,h/2)*mm
+            def paint_shape(color, stroked):
+                pdf.setFillColor(HexColor(color))
+                if element["type"] == "ellipse":
+                    pdf.ellipse(x*mm,bottom*mm,(x+w)*mm,(bottom+h)*mm,stroke=stroked,fill=1)
+                else:
+                    pdf.roundRect(x*mm,bottom*mm,w*mm,h*mm,radius,stroke=stroked,fill=1)
+            _cast_shadow(pdf, element, lambda color: paint_shape(color, False))
+            outside=element.get('strokeAlign')=='outside' and stroke_width and element["type"]!='line'
+            inside=element.get('strokeAlign')=='inside' and stroke_width and element["type"]!='line'
+            if outside:
+                pdf.setLineWidth(stroke_width*2*mm)
+                pdf.setFillColor(HexColor(element["fill"]))
+                if element["type"]=="ellipse":
+                    pdf.ellipse(x*mm,bottom*mm,(x+w)*mm,(bottom+h)*mm,stroke=1,fill=0)
+                    pdf.ellipse(x*mm,bottom*mm,(x+w)*mm,(bottom+h)*mm,stroke=0,fill=1)
+                else:
+                    pdf.roundRect(x*mm,bottom*mm,w*mm,h*mm,radius,stroke=1,fill=0)
+                    pdf.roundRect(x*mm,bottom*mm,w*mm,h*mm,radius,stroke=0,fill=1)
+            elif inside:
+                pdf.saveState()
+                clip=pdf.beginPath()
+                if element["type"]=="ellipse": clip.ellipse(x*mm,bottom*mm,(x+w)*mm,(bottom+h)*mm)
+                else: clip.roundRect(x*mm,bottom*mm,w*mm,h*mm,radius)
+                pdf.clipPath(clip, stroke=0, fill=0)
+                pdf.setLineWidth(stroke_width*2*mm)
+                paint_shape(element["fill"], True)
+                pdf.restoreState()
             else:
-                pdf.roundRect(x*mm,bottom*mm,w*mm,h*mm,min(element.get('radius',0),w/2,h/2)*mm,stroke=bool(stroke_width),fill=1)
+                paint_shape(element["fill"], bool(stroke_width))
+        elif element["type"] == "frame" and stroke_width:
+            path = pdf.beginPath()
+            radius = min(element.get('radius', 0), w / 2, h / 2) * mm
+            if radius:
+                path.roundRect(x * mm, bottom * mm, w * mm, h * mm, radius)
+            else:
+                path.rect(x * mm, bottom * mm, w * mm, h * mm)
+            align = element.get('strokeAlign') or 'center'
+            if align in {'inside', 'outside'}:
+                pdf.setLineWidth(stroke_width * 2 * mm)
+            if align == 'inside':
+                pdf.saveState()
+                pdf.clipPath(path, stroke=0, fill=0)
+                pdf.drawPath(path, stroke=1, fill=0)
+                pdf.restoreState()
+            else:
+                pdf.drawPath(path, stroke=1, fill=0)
+        elif element["type"]=="svg" and element.get("svg"):
+            flipped=element.get("flipX") or element.get("flipY")
+            if flipped:
+                pdf.saveState()
+                cx,cy=(x+w/2)*mm,(bottom+h/2)*mm
+                pdf.translate(cx,cy)
+                pdf.scale(-1 if element.get("flipX") else 1, -1 if element.get("flipY") else 1)
+                pdf.translate(-cx,-cy)
+            draw_svg(pdf, element["svg"], x*mm, bottom*mm, w*mm, h*mm, element.get("strokeAlign") or "center")
+            if flipped: pdf.restoreState()
         elif element["type"] == "photo":
             if not element["photo"] and not element.get("required"):
                 pdf.restoreState()
@@ -70,24 +156,51 @@ def _draw(pdf, spread, size, measurer, images):
                 radius=min(element.get('radius',0),w/2,h/2)*mm
                 if radius: path.roundRect(x*mm,bottom*mm,w*mm,h*mm,radius)
                 else: path.rect(x * mm, bottom * mm, w * mm, h * mm)
+            def paint_photo_shadow(color):
+                pdf.setFillColor(HexColor(color))
+                pdf.drawPath(path, stroke=0, fill=1)
+            _cast_shadow(pdf, element, paint_photo_shadow)
+            align = element.get('strokeAlign') or 'center'
+            if stroke_width and align == 'outside' and element['photo']:
+                pdf.setLineWidth(stroke_width * 2 * mm)
+                pdf.drawPath(path, stroke=1, fill=0)
             pdf.saveState()
             if element["photo"]:
                 pdf.clipPath(path, stroke=0, fill=0)
                 pdf.drawImage(images.get(element["photo"], element["crop"], w, h),
                               x * mm, bottom * mm, w * mm, h * mm)
-                if stroke_width: pdf.drawPath(path,stroke=1,fill=0)
+                if stroke_width and align == 'inside':
+                    pdf.setLineWidth(stroke_width * 2 * mm)
+                    pdf.drawPath(path, stroke=1, fill=0)
             else:
                 pdf.setFillColor(HexColor("#D9D9D9"))
                 pdf.setStrokeColor(HexColor("#C0392B"))
                 pdf.setDash(4, 3)
                 pdf.drawPath(path, stroke=1, fill=1)
             pdf.restoreState()
+            if stroke_width and align == 'center' and element['photo']:
+                pdf.drawPath(path, stroke=1, fill=0)
         elif element["type"] == "text" and element["text"]:
-            paragraph = measurer.paragraph(element["text"], element["font"], element["size"],
-                                           element["leading"], element["align"], element["color"])
-            _, used = paragraph.wrap(w * mm, 100000)
-            offset = {"top": 0, "middle": (h * mm - used) / 2, "bottom": h * mm - used}[element["valign"]]
-            paragraph.drawOn(pdf, x * mm, (height - top) * mm - offset - used)
+            def draw_text(color, mode=0, width_scale=1):
+                if width_scale!=1:
+                    pdf.setLineWidth(stroke_width*width_scale*mm)
+                paragraph = measurer.paragraph(element["text"], element["font"], element["size"],
+                                               element["leading"], element.get("align","left"), color,
+                                               letter=element.get("letterSpacing") or 0, render_mode=mode,
+                                               underline=bool(element.get("underline")), strike=bool(element.get("strike")))
+                _, used = paragraph.wrap(w * mm, 100000)
+                offset = {"top": 0, "middle": (h * mm - used) / 2, "bottom": h * mm - used}[element["valign"]]
+                paragraph.drawOn(pdf, x * mm, (height - top) * mm - offset - used)
+            def paint_text_shadow(color):
+                draw_text(color, 0, 1)
+            _cast_shadow(pdf, element, paint_text_shadow)
+            if stroke_width and element.get('strokeAlign')=='outside':
+                draw_text(element["color"], 1, 2)
+                draw_text(element["color"], 0, 1)
+            elif stroke_width:
+                draw_text(element["color"], 2, 1)
+            else:
+                draw_text(element["color"])
         pdf.restoreState()
 
 

@@ -26,6 +26,106 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(response.status_code,201,response.text)
         return response.json()
 
+    def test_shared_text_style_controls_compiled_text(self):
+        doc=master()
+        doc['textStyles']=[{'id':'text-title','name':'Заголовок','font':'Georgia','fontSize':34,
+                            'color':'#112233','align':'center','bold':True,'italic':False,
+                            'underline':False,'strike':False,'lineHeight':1.2,'letterSpacing':0}]
+        title=doc['sections'][0]['spreads'][0]['pages'][1]['layers'][0]
+        title['styleId']='text-title'
+        saved=self.client.post('/api/master-templates',json={'document':doc})
+        self.assertEqual(saved.status_code,201,saved.text)
+        snapshot={'students':[{'id':'1','first_name':'Ученик','last_name':'Один'}],
+                  'teachers':[],'photos':{},'selections':[],
+                  'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        text=next(e for spread in compiled['variant_spreads']['student:1'].values()
+                  for e in spread['elements'] if e['type']=='text' and e['text']=='Наш класс')
+        self.assertEqual((text['size'],text['color'],text['align']),(34,'#112233','center'))
+        title['styleId']='missing-style'
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,422)
+
+    def test_custom_page_size_is_validated_and_compiled(self):
+        doc=master()
+        doc['pageSize']=[300,400]
+        response=self.client.post('/api/master-templates',json={'document':doc})
+        self.assertEqual(response.status_code,201,response.text)
+        snapshot={'students':[{'id':'1','first_name':'Ученик','last_name':'Один'}],
+                  'teachers':[],'photos':{},'selections':[],
+                  'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        self.assertEqual(compiled['spread_size_mm'],[600,400])
+        self.assertEqual(compiled['cover_size_mm'],[600,400])
+        first=next(iter(compiled['variant_spreads']['student:1'].values()))
+        backgrounds=[e['box'] for e in first['elements'] if e['key'].endswith('/background')]
+        self.assertEqual(backgrounds,[[0,0,300,400],[300,0,300,400]])
+        doc['pageSize']=[40,400]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,422)
+        doc=master()
+        doc['sections'][0]['pageSize']=[180,240]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,422)
+
+    def test_cover_has_independent_size_and_is_first_pdf_page(self):
+        from io import BytesIO
+        from pypdf import PdfReader
+        doc=master()
+        doc['sections']=doc['sections'][1:2]
+        doc['sections'][0]['spreads']=doc['sections'][0]['spreads'][:1]
+        doc['pageSize']=[210,280]
+        doc['safety']={'safe':5,'bleed':3}
+        cover={'id':'cover','name':'Обложка','cover':True,'kind':'fixed',
+               'pageSize':[225,290], 'safety':{'safe':8,'bleed':4,'spine':10,'gap':2},
+               'spreads':[{'id':'cover-spread','pages':[
+                   {'id':'cover-back','background':'#ffffff','layers':[]},
+                   {'id':'cover-front','background':'#ffffff','layers':[
+                       {'id':'cover-title','type':'text','box':{'x':20,'y':20,'w':180,'h':30},
+                        'text':'Моя обложка','binding':'static','font':'Arial','fontSize':24,
+                        'color':'#333333','align':'left'}]}]}]}
+        doc['sections'].insert(0,cover)
+        draft=self.client.post('/api/master-templates',json={'document':doc})
+        self.assertEqual(draft.status_code,201,draft.text)
+        pub=self.client.post(f'/api/master-templates/{draft.json()["id"]}/publish',json={'revision':1}).json()
+        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
+        response=self.client.post(f'/api/orders/{order}/layout')
+        self.assertEqual(response.status_code,200,response.text)
+        generated=response.json()['document']
+        self.assertEqual(generated['cover_size_mm'],[450,290])
+        self.assertEqual(generated['spread_size_mm'],[420,280])
+        self.assertEqual(generated['variants'][0]['sequence'][0],'cover[student:class]')
+        self.assertEqual(generated['covers']['student:class']['section'],'cover')
+        pdf_response=self.client.get(f'/api/orders/{order}/layout/pdf/student:class')
+        self.assertEqual(pdf_response.status_code,200,pdf_response.text[:100] if pdf_response.status_code!=200 else '')
+        pdf=PdfReader(BytesIO(pdf_response.content))
+        self.assertEqual(len(pdf.pages),2)
+        self.assertAlmostEqual(float(pdf.pages[0].mediabox.width),450*72/25.4,delta=1)
+        self.assertAlmostEqual(float(pdf.pages[1].mediabox.width),420*72/25.4,delta=1)
+        self.assertIn('Моя обложка',pdf.pages[0].extract_text())
+
+        bad=deepcopy(doc)
+        bad['sections'][0]['safety']['safe']=-1
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+
+    def test_grid_effects_wrap_grid_instead_of_each_portrait(self):
+        doc=master()
+        grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        grid.update(strokeOn=True, strokeWidth=1.2, stroke='#663399', strokeAlign='outside',
+                    shadow={'color':'#000000','offsetX':2,'offsetY':3,'blur':4,'opacity':40})
+        snapshot={'students':[{'id':'1','first_name':'Ученик','last_name':'Один'}],
+                  'teachers':[],'photos':{},'selections':[],
+                  'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        first=next(iter(compiled['variant_spreads']['student:1'].values()))['elements']
+        grid_items=[e for e in first if '/grid/' in e['key']]
+        self.assertEqual([e['type'] for e in grid_items[:2]],['frame','rect'])
+        self.assertEqual(grid_items[0]['strokeAlign'],'outside')
+        self.assertIn('shadow',grid_items[1])
+        self.assertTrue(all(e.get('strokeWidth',0)==0 and not e.get('shadow') for e in grid_items[2:]))
+        grid['strokeOn']=False
+        grid.pop('shadow')
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        first=next(iter(compiled['variant_spreads']['student:1'].values()))['elements']
+        self.assertFalse(any('/grid/outline' in e['key'] or '/grid/backing' in e['key'] for e in first))
+
     def test_versions_and_conflict_and_isolation(self):
         draft=self.create();key=draft['id']
         published=self.client.post(f'/api/master-templates/{key}/publish',json={'revision':1,'price':1700}).json()
@@ -152,3 +252,75 @@ class MasterTests(unittest.TestCase):
         other.post('/api/register',json={'email':'design@other.test','password':'secret-pass','studio_name':'Другая'})
         self.assertEqual(other.get(f'/api/designs/{first["id"]}').status_code,404)
         self.assertEqual(other.post(f'/api/designs/{first["id"]}/blocks',json={'name':'Шаблон','section':master()['sections'][0]}).status_code,404)
+
+    def test_collage_splits_rows_independently(self):
+        from fastapi import HTTPException
+        from album_factory.master_templates import validate
+        from album_factory.master_layout import collage_frames
+        doc=master()
+        collage={'id':'col','type':'collage','box':{'x':10,'y':10,'w':100,'h':80},'gapX':4,'gapY':6,'fill':'#e6e1ea','opacity':100,'rows':[
+            [{'id':'a','source':'class'},{'id':'split','split':'v','cells':[{'id':'b','source':'class'},{'id':'c','source':'class'}]}],
+            [{'id':'d','source':'class'}]]}
+        doc['sections'][1]['spreads'][0]['pages'][0]['layers']=[collage]
+        validate(doc)
+        frames=collage_frames(collage)
+        self.assertEqual([f['cell']['id'] for f in frames], ['a','b','c','d'])
+        self.assertEqual([round(f['w'],1) for f in frames], [48,48,48,100])
+        self.assertEqual([round(f['h'],1) for f in frames], [37,15.5,15.5,37])
+        broken=master();broken['sections'][0]['spreads'][0]['pages'][0]['layers'].append({'id':'bad','type':'collage','box':{'x':1,'y':1,'w':20,'h':20},'rows':[]})
+        with self.assertRaises(HTTPException):
+            validate(broken)
+
+    def test_svg_shape_is_saved_and_drawn(self):
+        from pypdf import PdfReader
+        from io import BytesIO
+        svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#e23b3b"/><path d="M10 80 H90 V90 H10 Z" fill="#112233"/></svg>'
+        doc=master();doc['sections']=doc['sections'][1:2];doc['sections'][0]['spreads']=doc['sections'][0]['spreads'][:1]
+        doc['sections'][0]['spreads'][0]['pages'][0]['layers']=[{
+            'id':'mark','type':'svg','name':'Метка','box':{'x':20,'y':20,'w':40,'h':40},'opacity':100,'fill':'#29282d','fillMode':'color','stroke':'#111111','strokeMode':'color','strokeWidth':0.6,'strokeAlign':'center','strokeCap':'round','strokeJoin':'round','strokeDash':'solid','svg':svg}]
+        draft=self.client.post('/api/master-templates',json={'document':doc})
+        self.assertEqual(draft.status_code,201,draft.text)
+        pub=self.client.post(f'/api/master-templates/{draft.json()["id"]}/publish',json={'revision':1})
+        self.assertLess(pub.status_code,300,pub.text)
+        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub.json()['offer_id']}).json()['id']
+        generated=self.client.post(f'/api/orders/{order}/layout')
+        self.assertEqual(generated.status_code,200,generated.text)
+        element=next(e for spread in generated.json()['document']['variant_spreads']['student:class'].values() for e in spread['elements'] if e['type']=='svg')
+        self.assertIn('#29282d', element['svg'].lower())
+        pdf=self.client.get(f'/api/orders/{order}/layout/pdf/student:class')
+        self.assertEqual(pdf.status_code,200,pdf.text[:120] if pdf.status_code!=200 else '')
+        self.assertEqual(len(PdfReader(BytesIO(pdf.content)).pages),1)
+        hostile=master();hostile['sections'][1]['spreads'][0]['pages'][0]['layers']=[{'id':'x','type':'svg','box':{'x':1,'y':1,'w':20,'h':20},'fill':'#111111','svg':'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'}]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':hostile}).status_code,422)
+
+    def test_text_styles_custom_font_stroke_and_shadow(self):
+        import base64
+        from io import BytesIO
+        from pathlib import Path
+        from pypdf import PdfReader
+        raw=Path('/System/Library/Fonts/Supplemental/Georgia.ttf').read_bytes()
+        data='data:font/ttf;base64,'+base64.b64encode(raw).decode()
+        doc=master();doc['fonts']=[{'id':'font-demo','name':'Мой шрифт','dataUrl':data}]
+        doc['sections']=doc['sections'][1:2];doc['sections'][0]['spreads']=doc['sections'][0]['spreads'][:1]
+        doc['sections'][0]['spreads'][0]['pages'][0]['layers']=[{
+            'id':'caption','type':'text','box':{'x':10,'y':20,'w':180,'h':40},'text':'Свой шрифт','binding':'static',
+            'font':'font-demo','fontSize':28,'align':'center','color':'#222222','bold':True,'italic':True,'underline':True,
+            'lineHeight':1.3,'letterSpacing':2,'stroke':'#7712b3','strokeWidth':0.4,'strokeOn':True,'strokeAlign':'outside','strokeDash':'solid',
+            'shadow':{'color':'#000000','opacity':40,'blur':1.2,'offsetX':0.4,'offsetY':0.8}}]
+        saved=self.client.post('/api/master-templates',json={'document':doc})
+        self.assertEqual(saved.status_code,201,saved.text)
+        unknown=master();unknown['sections'][1]['spreads'][0]['pages'][0]['layers']=[{'id':'t','type':'text','box':{'x':10,'y':10,'w':40,'h':12},'text':'А','binding':'static','font':'Comic Sans','fontSize':12,'align':'left','color':'#333333'}]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':unknown}).status_code,422)
+        broken=master();broken['fonts']=[{'id':'font-bad','name':'Битый','dataUrl':'data:font/ttf;base64,AAAA'}]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422)
+        pub=self.client.post(f'/api/master-templates/{saved.json()["id"]}/publish',json={'revision':1})
+        self.assertLess(pub.status_code,300,pub.text)
+        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub.json()['offer_id']}).json()['id']
+        generated=self.client.post(f'/api/orders/{order}/layout')
+        self.assertEqual(generated.status_code,200,generated.text)
+        text=next(e for spread in generated.json()['document']['variant_spreads']['student:class'].values() for e in spread['elements'] if e['type']=='text' and e.get('text')=='Свой шрифт')
+        self.assertTrue(text['font'].startswith('custom-font-demo'))
+        self.assertIn('shadow', text)
+        pdf=self.client.get(f'/api/orders/{order}/layout/pdf/student:class')
+        self.assertEqual(pdf.status_code,200,pdf.text[:160] if pdf.status_code!=200 else '')
+        self.assertIn('Свой шрифт', PdfReader(BytesIO(pdf.content)).pages[0].extract_text())
