@@ -2,7 +2,9 @@
 from copy import deepcopy
 import math
 import re
+from itertools import permutations
 from .layout_engine import canonical_hash
+from .master_plan import ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people
 from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, categories_of, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
 
@@ -40,6 +42,54 @@ def collage_frames(layer):
         for index, cell in enumerate(row):
             place(cell, index * (cell_w + gap_x), y, cell_w, row_h)
     return frames
+
+
+def flex_frames(w, h, aspects, gap_x=4, gap_y=4):
+    """Frames of a flexible collage, one per photo in the order of ``aspects`` (width / height).
+
+    Rows or columns of one to three equal frames; the arrangement (and, up to four photos, the order) whose
+    frames crop the photos least wins. Mirrors flexFrames in web/collage-core.js.
+    """
+    n = len(aspects)
+    if not n or w <= 0 or h <= 0:
+        return []
+    shapes = []
+    def compose(left, parts):
+        if not left:
+            shapes.append(parts)
+            return
+        for k in range(1, min(3, left) + 1):
+            if len(parts) < 3:
+                compose(left - k, parts + [k])
+    compose(n, [])
+    orders = list(permutations(range(n))) if n <= 4 else [tuple(range(n))]
+    best = None
+    for shape in shapes:
+        for axis in ('rows', 'cols'):
+            lines, out = len(shape), []
+            for li, k in enumerate(shape):
+                if axis == 'rows':
+                    lh = (h - gap_y * (lines - 1)) / lines
+                    fw = (w - gap_x * (k - 1)) / k
+                    out += [{'x': i * (fw + gap_x), 'y': li * (lh + gap_y), 'w': fw, 'h': lh} for i in range(k)]
+                else:
+                    lw = (w - gap_x * (lines - 1)) / lines
+                    fh = (h - gap_y * (k - 1)) / k
+                    out += [{'x': li * (lw + gap_x), 'y': i * (fh + gap_y), 'w': lw, 'h': fh} for i in range(k)]
+            if any(f['w'] < 1 or f['h'] < 1 for f in out):
+                continue
+            for order in orders:
+                cost = 0
+                for i, f in enumerate(out):
+                    cost += abs(math.log((f['w'] / f['h']) / (aspects[order[i]] or 1.5)))
+                if best is None or cost < best[0] - 1e-9:
+                    best = (cost, out, order)
+    if best is None:
+        return []
+    result = [None] * n
+    for i, f in enumerate(best[1]):
+        result[best[2][i]] = f
+    return result
 
 
 def geometry(count, layer):
@@ -105,6 +155,51 @@ def pages_for(section, master, snapshot, owner, issue):
             result.append((p,None,chunks[used],max(counts))); used += 1; insert_at = len(result)
     while used < slots:
         result.insert(insert_at,(grids[-1],None,chunks[used],max(counts))); used += 1; insert_at += 1
+    return result
+
+
+def list_capacity(section):
+    """Cards that fit on the tightest vignette page of a list block (rulesVersion 2)."""
+    settings = section.get('list') or {}
+    grids = [l for s in section['spreads'] for p in s['pages'] for l in p['layers'] if l['type'] == 'grid']
+    if not grids:
+        return 0
+    return min(max((n for n in range(1, int(settings.get('max', 12)) + 1) if geometry(n, l)), default=0) for l in grids)
+
+
+def blocks_pages(section, snapshot, owner, issue):
+    """Pages of one block for the album of ``owner`` (rulesVersion 2): (page, person, records, layout_count)."""
+    pages = {p['id']: p for s in section['spreads'] for p in s['pages']}
+    if section.get('cover') or section['kind'] == 'fixed':
+        return [(p, None, None, 0) for s in section['spreads'] for p in s['pages']]
+    if section['kind'] == 'repeat':
+        by_id = {s['id']: s for s in snapshot['students']}
+        ids = block_people(section, [s['id'] for s in snapshot['students']], owner['id'] if owner else None)
+        return [(p, by_id[i], None, 0) for i in ids for s in section['spreads'] for p in s['pages']]
+    settings = section['list']
+    records = snapshot[settings['source']][:]
+    if settings['source'] == 'teachers' and settings.get('excludeLead') and any(
+            l['type'] == 'photo' and not l.get('hidden') and l['source'] == 'lead' for p in pages.values() for l in p['layers']):
+        records = records[1:]
+    plan = list_plan(section, len(records), list_capacity(section))
+    for code in plan['issues']:
+        level, message = PLAN_ISSUES[code]
+        if code == 'below-min' and settings.get('strictMin'):
+            level = 'error'
+        issue(level, section['id'], message)
+    chunks, offset = [], 0
+    for count in plan['counts']:
+        chunks.append(records[offset:offset + count])
+        offset += count
+    layout_count = max(plan['counts'], default=0)
+    result = []
+    for spread in plan['spreads']:
+        for item in spread['pages']:
+            page = pages[item['page']]
+            if item['part'] is not None:
+                result.append((page, None, chunks[item['part']], layout_count))
+            else:
+                result.append((page, None, [] if has_grid(page) else None, 0))
     return result
 
 
@@ -174,15 +269,26 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 'owner': owner['id'], 'target': target, 'pick': pick, 'mm': [bounds[2], bounds[3]],
                 'aspect_key': round(bounds[2] / bounds[3], 3), 'section': section['id'],
                 'spread': spread_key if personal else re.sub(r'\[student:[^\]]*\]', '[*]', spread_key)}
+    v2 = master.get('rulesVersion') == 2
+    book = v2 and master.get('layout') == 'book'
+    flex_groups = []
     for owner in owners:
         owner_key = 'student:'+owner['id']; group = {}; sequence=[]; slot_order=0
+        planned = []
         for section in master['sections']:
-            page_width, page_height = section.get('pageSize', master.get('pageSize', [210, 280])) if section.get('cover') else master.get('pageSize', [210, 280])
-            pages = pages_for(section,master,snapshot,owner,issue)
+            pages = blocks_pages(section,snapshot,owner,issue) if v2 else pages_for(section,master,snapshot,owner,issue)
             if len(pages)%2:
                 pages.append((None,None,None,0))
             if len(pages)>2000:
                 raise ValueError('Раздел превышает 1000 разворотов')
+            planned.append((section, pages))
+        # A book starts on a right page and ends on a left one: the outer pages of the inner block are not printed.
+        blanks = set()
+        inner = [(section['id'], len(pages)) for section, pages in planned if not section.get('cover') and pages]
+        if book and inner:
+            blanks = {(inner[0][0], 0), (inner[-1][0], inner[-1][1] - 1)}
+        for section, pages in planned:
+            page_width, page_height = section.get('pageSize', master.get('pageSize', [210, 280])) if section.get('cover') else master.get('pageSize', [210, 280])
             if owner is owners[0]:
                 plans.append({'section':section['id'],'spreads':len(pages)//2})
             for index in range(0,len(pages),2):
@@ -214,7 +320,10 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                         issue('error',e['key'],'Не выбрано обязательное фото')
                     if e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
                         issue('error',e['key'],'Текст выходит за границы рамки')
+                blank_sides = []
                 for side,(page, item, records, layout_count) in enumerate(pages[index:index+2]):
+                    if (section['id'], index + side) in blanks:
+                        blank_sides.append(side); continue
                     if page is None: continue
                     appearance={}
                     prefix=f'{spread_key}/{side}'
@@ -223,6 +332,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                     styles = {style['id']: style for style in master.get('textStyles', [])}
                     for layer in page['layers']:
                         if layer.get('hidden'): continue
+                        if layer['type'] == 'grid' and v2 and section.get('list'):
+                            layer = {**layer, 'source': section['list']['source']}
                         if layer.get('type') == 'text' and layer.get('styleId') in styles:
                             layer = {**layer, **{key: value for key, value in styles[layer['styleId']].items() if key not in {'id', 'name'}}}
                         b=layer['box']; bounds=[b['x']+side*page_width,b['y'],b['w'],b['h']]; key=prefix+'/'+layer['id']
@@ -258,6 +369,21 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                             elif source=='custom': photo=snapshot.get('master_assets',{}).get(layer['id'])
                             else: photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
                             add(photo_element(key,bounds,photo))
+                        elif layer['type']=='collage' and layer.get('flex'):
+                            # Flexible collage: one slot per possible photo; slots past the minimum take only photos
+                            # that fit without concessions, and the frames are laid out once the photos are known.
+                            flex = layer['flex']; low = int(flex.get('min', 1)); high = int(flex.get('max', 4))
+                            gx, gy = float(layer.get('gapX', 4)), float(layer.get('gapY', 4))
+                            cols = math.ceil(math.sqrt(high)); rows = math.ceil(high / cols)
+                            approx = [bounds[0], bounds[1], max((bounds[2] - gx * (cols - 1)) / cols, 1), max((bounds[3] - gy * (rows - 1)) / rows, 1)]
+                            flex_group = {'origin': bounds, 'gap': (gx, gy), 'elements': elements, 'slots': []}
+                            flex_groups.append(flex_group)
+                            for i in range(high):
+                                cell_key = f'{key}/flex{i}'
+                                slot = {**slot_for(cell_key, spread_key, approx, layer.get('pick'), section, owner, item),
+                                        'optional': i >= low, 'flex': flex_group, 'crop_pref': (50, 50, 1)}
+                                flex_group['slots'].append(slot)
+                                add({'key': cell_key, 'box': list(approx), 'opacity': layer.get('opacity', 100), 'type': 'photo', 'photo': None, 'crop': None, 'mask': 'rect', 'required': True}, slot=slot)
                         elif layer['type']=='collage':
                             for frame in collage_frames(layer):
                                 cell=frame['cell']
@@ -312,6 +438,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                         else:
                             add({**common,'type':layer['type'],'fill':layer['fill']})
                 spread={'key':spread_key,'section':'cover' if section.get('cover') else section['id'],'elements':elements}
+                if blank_sides:
+                    spread['blank'] = blank_sides
                 if section.get('cover'):
                     covers[owner_key] = spread
                 else:
@@ -322,7 +450,25 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         report = Picker(entries, snapshot['photos'], rules_of(master), students, categories).assign(slots)
     else:
         report = _legacy_assign(slots, snapshot.get('general_photos', []))
+    for flex_group in flex_groups:
+        # Keep the required frames and the optional ones that found a photo, then lay them out by the photos' shapes.
+        keep = [slot for slot in flex_group['slots'] if slot.get('result') or not slot['optional']]
+        for slot in flex_group['slots']:
+            if slot not in keep:
+                slot['dropped'] = True
+                flex_group['elements'].remove(slot['element'])
+        aspects = []
+        for slot in keep:
+            meta = snapshot['photos'].get(slot['result']['photo']) if slot.get('result') else None
+            aspects.append(meta['width'] / meta['height'] if meta and meta.get('height') else 1.5)
+        ox, oy, ow, oh = flex_group['origin']
+        for slot, frame in zip(keep, flex_frames(ow, oh, aspects, *flex_group['gap'])):
+            slot['element']['box'] = [ox + frame['x'], oy + frame['y'], frame['w'], frame['h']]
+            if slot.get('result'):
+                slot['result'] = {**slot['result'], 'crop': None}
     for slot in slots:
+        if slot.get('dropped'):
+            continue
         e, result = slot['element'], slot.get('result')
         if 'general' in snapshot:
             e['slot'] = slot['ident']  # legacy snapshots keep their element fingerprints
@@ -347,6 +493,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     inner_width, inner_height = master.get('pageSize', [210, 280])
     cover_section = next((s for s in master['sections'] if s.get('cover')), None)
     cover_width, cover_height = cover_section.get('pageSize', [inner_width, inner_height]) if cover_section else (inner_width, inner_height)
-    document={'schema_version':1,'master_template':True,'edition':{'id':edition['id'],'version':edition['version']},'input_hash':canonical_hash(snapshot),'spread_count':count,'page_count':count*2,'spread_size_mm':[2*inner_width,inner_height],'cover_size_mm':[2*cover_width,cover_height],'covers':covers,'shared_spreads':{},'variant_spreads':groups,'variants':variants,'plan':plans,'issues':issues,'overrides':{'applied':applied,'conflicts':conflicts},'photo_report':report}
+    document={'schema_version':1,'master_template':True,'edition':{'id':edition['id'],'version':edition['version']},'input_hash':canonical_hash(snapshot),'spread_count':count,'page_count':count*2-(2 if book and count>1 else 0),'spread_size_mm':[2*inner_width,inner_height],'cover_size_mm':[2*cover_width,cover_height],'covers':covers,'shared_spreads':{},'variant_spreads':groups,'variants':variants,'plan':plans,'issues':issues,'overrides':{'applied':applied,'conflicts':conflicts},'photo_report':report}
+    if book:
+        document['layout'] = 'book'
     document['revision']=canonical_hash(document)
     return document

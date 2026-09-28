@@ -13,37 +13,35 @@ let planning=[];
   function distribute(count,max,preferred,min){if(count===0)return [];const slots=Math.max(Math.ceil(count/max),Math.min(preferred,Math.max(1,Math.floor(count/min)))),base=Math.floor(count/slots),extra=count%slots;return Array.from({length:slots},(_,i)=>base+(i<extra?1:0));}
   const measure=document.createElement('canvas').getContext('2d');
   function nameLines(name,width,fontSize,font,style){measure.font=`${style?.italic?'italic ':''}${style?.bold?'700 ':''}${fontSize*96/72}px "${font||'Arial'}"`;const widthPx=width*96/25.4,lines=[];let current='';for(const word of name.split(' ')){if(measure.measureText(word).width>widthPx)return null;const next=current?current+' '+word:word;if(measure.measureText(next).width>widthPx){lines.push(current);current=word}else current=next;}if(current)lines.push(current);return lines;}
+  /* Cards that fit on the tightest vignette of a list block. */
+  function listCapacity(section){const list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},grids=templatePages(section).flatMap(p=>p.layers.filter(l=>l.type==='grid'));return grids.length?Math.min(...grids.map(l=>capacity({...l,max:list.max}))):0;}
+  const PLAN_TEXT={'no-grid':['warning','В блоке «по списку» нет виньетки — развороты выводятся по одному разу.'],'no-fit':['error','Карточки не помещаются при заданной ширине фото и отступах.'],'no-repeat':['error','Список не помещается: добавьте разворот с ролью «Повторяемый».'],'half':['warning','Список закончился на середине разворота — добавьте шаблон «Последний неполный».'],'below-min':['warning','На странице меньше карточек, чем минимум блока.'],'overflow':['error','Карточки не помещаются на страницу.']};
   function planSection(section){const original=templatePages(section),issues=[];let generated=[];
-    if(section.kind==='repeat'){
-      const ids=documentModel.personalMode==='all'?people('students').map(person=>person.id):documentModel.personalMode==='owner'?[view.owner]:[];
+    if(section.cover||section.kind==='fixed')generated=original.map(template=>({templateId:template.id,records:null,source:'fixed'}));
+    else if(section.kind==='repeat'){
+      const ids=MasterPlan.people(section,people('students').map(person=>person.id),view.owner);
       ids.forEach(personId=>original.forEach(template=>generated.push({templateId:template.id,personId,records:null,source:'repeat'})));
     }else{
-      const gridTemplates=original.filter(p=>p.layers.some(item=>item.type==='grid'));
-      if(!gridTemplates.length)generated=original.map(template=>({templateId:template.id,records:null,source:'fixed'}));
-      else{
-        const settings=gridTemplates[0].layers.find(item=>item.type==='grid'),source=settings.source,list=people(source).filter(person=>!(source==='teachers'&&settings.excludeLead&&original.some(p=>p.layers.some(item=>item.type==='photo'&&!item.hidden&&item.source==='lead'))&&person.id==='t0'));
-        if(settings.min>settings.max)issues.push({severity:'error',text:'Минимум карточек больше максимума.'});
-        if(settings.minFontSize>settings.fontSize)issues.push({severity:'error',text:'Минимальный кегль больше основного.'});
-        const fixedCount=original.length-gridTemplates.length,preferred=Math.max(1,(section.target||section.spreads.length)*2-fixedCount),max=Math.min(...gridTemplates.map(p=>capacity(p.layers.find(l=>l.type==='grid')))),counts=max?distribute(list.length,max,preferred,settings.min):[];
-        if(!max)issues.push({severity:'error',text:'Карточки не помещаются при заданной ширине фото и отступах.'});
-        if(max&&max<settings.max)issues.push({severity:'warning',text:`По размерам фото на страницу помещается ${max} вместо максимума ${settings.max}.`});
-        if(counts.some(n=>n<settings.min))issues.push({severity:settings.strictMin?'error':'warning',text:`Последняя страница содержит меньше ${settings.min} карточек.`});
-        if(list.some(person=>person.missing))issues.push({severity:'error',text:'У участника отсутствует обязательный портрет.'});
-        const layout=counts.length?gridGeometry(Math.max(...counts),settings):null;let actualFont=settings.fontSize;
-        if(layout){const fits=size=>list.every(person=>{const lines=nameLines(person.name,layout.cellW*.97,size,settings.font,settings);return lines&&lines.length<=2;});while(actualFont>settings.minFontSize&&!fits(actualFont))actualFont=Math.max(settings.minFontSize,actualFont-.5);if(!fits(actualFont))issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
-        let used=0,index=0,offset=0;
-        for(const template of original){const hasGrid=template.layers.some(item=>item.type==='grid');if(!hasGrid){generated.push({templateId:template.id,records:null,source:'fixed'});continue;}if(used>=counts.length)continue;
-          const records=list.slice(offset,offset+counts[used]);generated.push({templateId:template.id,records,source,actualFont,layoutCount:Math.max(...counts),part:used+1,parts:counts.length});offset+=counts[used];used++;index=generated.length;
-        }
-        const repeatTemplate=gridTemplates.at(-1);while(used<counts.length){const records=list.slice(offset,offset+counts[used]);generated.splice(index,0,{templateId:repeatTemplate.id,records,source,actualFont,layoutCount:Math.max(...counts),part:used+1,parts:counts.length});offset+=counts[used];used++;index++;}
-        if(!counts.length&&gridTemplates.length){const template=gridTemplates[0];generated.push({templateId:template.id,records:[],source,actualFont:settings.fontSize,part:1,parts:1});}
-      }
+      const list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},source=list.source,grids=original.flatMap(p=>p.layers.filter(l=>l.type==='grid')),settings={...(grids[0]||{}),...list};
+      const everyone=people(source).filter(person=>!(source==='teachers'&&list.excludeLead&&original.some(p=>p.layers.some(item=>item.type==='photo'&&!item.hidden&&item.source==='lead'))&&person.id==='t0'));
+      if(list.min>list.max)issues.push({severity:'error',text:'Минимум карточек больше максимума.'});
+      if(grids[0]&&settings.minFontSize>settings.fontSize)issues.push({severity:'error',text:'Минимальный кегль больше основного.'});
+      const cap=listCapacity(section),result=MasterPlan.listPlan(section,everyone.length,cap),counts=result.counts,layoutCount=Math.max(0,...counts);
+      if(cap&&cap<list.max)issues.push({severity:'warning',text:`По размерам фото на страницу помещается ${cap} вместо максимума ${list.max}.`});
+      for(const code of result.issues){const [level,text]=PLAN_TEXT[code];issues.push({severity:code==='below-min'&&list.strictMin?'error':level,text});}
+      if(everyone.some(person=>person.missing))issues.push({severity:'error',text:'У участника отсутствует обязательный портрет.'});
+      const chunks=[];let offset=0;for(const count of counts){chunks.push(everyone.slice(offset,offset+count));offset+=count;}
+      const layout=layoutCount&&grids[0]?gridGeometry(layoutCount,settings):null;let actualFont=settings.fontSize;
+      if(layout){const fits=size=>everyone.every(person=>{const lines=nameLines(person.name,layout.cellW*.97,size,settings.font,settings);return lines&&lines.length<=2;});while(actualFont>settings.minFontSize&&!fits(actualFont))actualFont=Math.max(settings.minFontSize,actualFont-.5);if(!fits(actualFont))issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
+      for(const spread of result.spreads)for(const item of spread.pages){const template=getTemplatePage(item.page),grid=template.layers.some(l=>l.type==='grid');generated.push(item.part==null?{templateId:item.page,records:grid?[]:null,source:grid?source:'fixed',role:spread.role,actualFont,layoutCount}:{templateId:item.page,records:chunks[item.part],source,actualFont,layoutCount,part:item.part+1,parts:counts.length,role:spread.role});}
     }
     const checked=new Set();for(const generatedPage of generated){const template=getTemplatePage(generatedPage.templateId);for(const item of template?.layers||[]){const checkKey=item.id+(item.source==='item'?':'+generatedPage.personId:'');if(item.type!=='photo'||item.hidden||checked.has(checkKey))continue;checked.add(checkKey);if(item.source==='custom'&&!item.dataUrl)issues.push({severity:'error',text:`«${item.name}»: загруженная фотография не выбрана.`});if(['lead','owner','item'].includes(item.source)&&(!photoPerson(item.source,generatedPage.personId)||photoPerson(item.source,generatedPage.personId).missing))issues.push({severity:'error',text:`«${item.name}»: источник фотографии пуст.`});}}
     if(generated.length%2)generated.push({templateId:null,records:null,source:'padding'});
     return {sectionId:section.id,pages:generated,spreads:generated.length/2,issues};
   }
-  function plan(){planning=documentModel.sections.map(planSection);return planning;}
+  /* In a book the first inner page stands alone on the right and the last one on the left: those pages are not printed. */
+  function markBook(planning){if(documentModel.layout!=='book')return;const inner=planning.filter(p=>!getSection(p.sectionId)?.cover&&p.pages.length);if(!inner.length)return;inner[0].pages[0].blank=true;inner.at(-1).pages.at(-1).blank=true;}
+  function plan(){planning=documentModel.sections.map(planSection);markBook(planning);return planning;}
   function sectionPlan(key){return planning.find(p=>p.sectionId===key);}
   function currentPagePlan(){return sectionPlan(view.section)?.pages[view.spread*2+view.side];}
   function currentTemplatePage(){return getTemplatePage(currentPagePlan()?.templateId);}
@@ -55,5 +53,5 @@ let planning=[];
   function resolvedPhoto(item,generated){if(item.source==='custom')return item.dataUrl||null;if(item.source==='class')return placeholderSvg(null,true);const person=photoPerson(item.source,generated.personId);return person&&!person.missing?placeholderSvg(person):null;}
   function resolvedText(item,generated){if(item.binding==='static')return item.text;const person=photoPerson(item.binding.startsWith('item')?'item':item.binding.startsWith('lead')?'lead':'owner',generated.personId);if(item.binding.endsWith('.name'))return person?.name||'Нет данных';if(item.binding==='class')return '11 «А»';if(item.binding==='year')return '2026';return item.text;}
 
-return {plan,people,gridGeometry,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage};
+return {plan,people,gridGeometry,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
 };

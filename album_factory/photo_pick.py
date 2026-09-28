@@ -317,10 +317,14 @@ class Picker:
             c0 = resolve(slot['pick'], self.categories)
             relaxed, choice = [], None
             for step, c in self.steps(c0):
+                if step and slot.get('optional'):
+                    break  # an optional frame of a flexible collage stays out rather than take a weaker photo
                 if step and step not in relaxed:
                     relaxed.append(step)
                 blocked = set() if step == 'reuse' or self.rules['reuse'] == 'allow' else (
                     used if self.rules['reuse'] == 'album' else section_used.setdefault(slot['section'], set()))
+                if slot.get('flex'):  # frames of one flexible collage never repeat a photo
+                    blocked = blocked | {s['result']['photo'] for s in slot['flex']['slots'] if s is not slot and s.get('result')}
                 best = None
                 for entry in self.entries:
                     if entry['id'] in blocked:

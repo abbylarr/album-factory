@@ -46,7 +46,13 @@ def validate(document):
     check(len(json.dumps(document)) <= 8_000_000, 'Макет превышает 8 МБ')
     check(document.get('schemaVersion') == 1, 'Неизвестная версия мастер-макета')
     check(isinstance(document.get('name'), str) and 0 < len(document['name'].strip()) <= 80, 'Укажите название до 80 символов')
-    check(document.get('personalMode') in {'all', 'owner', 'off'}, 'Неверный режим личных разворотов')
+    v2 = document.get('rulesVersion', 1) == 2
+    check(document.get('rulesVersion', 1) in {1, 2}, 'Неизвестная версия правил макета')
+    if v2:
+        # Block rules live on blocks: list settings on list blocks, whom personal spreads are for on personal blocks.
+        check(document.get('layout', 'spreads') in {'spreads', 'book'}, 'Неверная вёрстка альбома')
+    else:
+        check(document.get('personalMode') in {'all', 'owner', 'off'}, 'Неверный режим личных разворотов')
     size = document.get('pageSize', [210, 280])
     check(isinstance(size, list) and len(size) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 50 <= v <= 500 for v in size), 'Неверный размер макета')
     page_width, page_height = size
@@ -170,9 +176,21 @@ def validate(document):
         check(number(section.get('target', 1), 1, 100), 'Неверный ориентир объёма')
         spreads = section.get('spreads')
         check(isinstance(spreads, list) and 1 <= len(spreads) <= 100, 'Нужно от 1 до 100 шаблонов разворотов')
+        block_list = None
+        if v2 and not section.get('cover'):
+            if section['kind'] == 'flow':
+                block_list = section.get('list')
+                check(isinstance(block_list, dict) and set(block_list) <= {'source', 'min', 'max', 'strictMin', 'excludeLead'}, 'Нужны настройки списка блока')
+                check(block_list.get('source') in {'students', 'teachers'}, 'Неверный список блока')
+                check(number(block_list.get('min'), 1, 100) and number(block_list.get('max'), 1, 100) and block_list['min'] <= block_list['max'], 'Неверные границы карточек на странице')
+                check(all(isinstance(block_list.get(k, False), bool) for k in ('strictMin', 'excludeLead')), 'Неверные настройки списка блока')
+                check(sum(s.get('role') == 'last' for s in spreads if isinstance(s, dict)) <= 1, 'В блоке может быть один последний неполный разворот')
+            if section['kind'] == 'repeat':
+                check(section.get('people', 'all') in {'all', 'others', 'owner', 'off'}, 'Неверный выбор, для кого личные развороты')
         grid_sources = set()
         for spread in spreads:
             check(isinstance(spread, dict), 'Неверный разворот'); identity(spread)
+            check(spread.get('role', 'repeat') in {'intro', 'repeat', 'last', 'outro'}, 'Неверная роль разворота')
             check(isinstance(spread.get('pages'), list) and len(spread['pages']) == 2, 'В развороте две страницы')
             for page in spread['pages']:
                 check(isinstance(page, dict), 'Неверная страница'); identity(page)
@@ -234,6 +252,11 @@ def validate(document):
                             image_data(layer['dataUrl'])
                     if kind == 'collage':
                         check(number(layer.get('gapX', 4), 0, 40) and number(layer.get('gapY', 4), 0, 40), 'Неверные зазоры коллажа')
+                        if layer.get('flex') is not None:
+                            flex = layer['flex']
+                            check(isinstance(flex, dict) and set(flex) <= {'min', 'max'} and isinstance(flex.get('min'), int) and isinstance(flex.get('max'), int)
+                                  and 1 <= flex['min'] <= flex['max'] <= 6, 'Гибкий коллаж: от 1 до 6 фото, минимум не больше максимума')
+                            pick(layer.get('pick') or {'category': 'any'}, section)
                         check(isinstance(layer.get('gapLinked', True), bool), 'Неверная связь зазоров коллажа')
                         check(color(layer.get('fill', '#e6e1ea')), 'Неверная заливка коллажа')
                         rows = layer.get('rows')
@@ -274,7 +297,10 @@ def validate(document):
                         for flag in ('detailBold','detailItalic','detailUnderline','detailStrike'):
                             if flag in layer: check(isinstance(layer[flag], bool), 'Неверное начертание дополнительной подписи')
                         grid_sources.add(layer['source'])
-                        check(number(layer.get('min'),1,100) and number(layer.get('max'),1,100) and layer['min'] <= layer['max'], 'Неверные границы виньеток')
+                        if block_list is not None:
+                            check(layer['source'] == block_list['source'], 'Список виньетки должен совпадать со списком блока')
+                        else:
+                            check(number(layer.get('min'),1,100) and number(layer.get('max'),1,100) and layer['min'] <= layer['max'], 'Неверные границы виньеток')
                         check(number(layer.get('gap'),0,30) and number(layer.get('minPhotoWidth'),5,180), 'Неверные отступы или ширина фото')
                         check(number(layer.get('minPhotoWidth'),5,180) and number(layer.get('photoWidth', 85),5,180) and layer['minPhotoWidth'] <= layer.get('photoWidth', 85), 'Неверный диапазон ширины фото')
                         check(number(layer.get('photoNameGap',3),0,20) and number(layer.get('nameDetailGap',2),0,20), 'Неверное расстояние между фото и подписями')
@@ -612,7 +638,9 @@ def install(app, s):
 
     @app.post('/api/designs/{key}/blocks', status_code=201)
     def save_block(key: str, payload: BlockInput):
-        validate({'schemaVersion':1,'name':payload.name,'personalMode':'all','sections':[payload.section]})
+        section = payload.section
+        v2 = isinstance(section, dict) and ('list' in section or 'people' in section or any(isinstance(sp, dict) and 'role' in sp for sp in section.get('spreads') or []))
+        validate({'schemaVersion':1,'name':payload.name,**({'rulesVersion':2} if v2 else {'personalMode':'all'}),'sections':[section]})
         with s.db() as con:
             design_owned(con,key)
             block_id=s.uid()

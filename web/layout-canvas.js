@@ -33,5 +33,7 @@ function layoutCanvas(spread,doc,photos,interactive=true,full=interactive){
     const label=side==='left'?'левой':'правой';
     return `<button type="button" class="layout-page-hit${blank?' is-blank':''}" data-layout-page="${side}" aria-label="Выбрать шаблон ${label} страницы" style="left:${side==='right'?'50%':'0'}">${blank?'<img class="layout-add-icon" src="/static/assets/layout-add.svg" alt="">':''}</button>${blank?'':`<button type="button" class="layout-page-change" data-layout-page="${side}" aria-label="Сменить шаблон ${label} страницы"></button>`}`;
   }).join(''):'';
-  return `<div class="layout-canvas${spread.section==='custom'?' is-custom':''}" style="aspect-ratio:${width}/${height}">${pages}${markup}${interactive&&spread.section!=='cover'?'<img class="layout-divider" src="/static/assets/layout-divider.svg" alt="">':''}</div>`;
+  // A book starts on a right page and ends on a left one: those pages of the first and last spread are not printed.
+  const unprinted=(spread.blank||[]).map(side=>`<div class="layout-unprinted" style="left:${side?50:0}%"><span>Не печатается</span></div>`).join('');
+  return `<div class="layout-canvas${spread.section==='custom'?' is-custom':''}" style="aspect-ratio:${width}/${height}">${pages}${markup}${unprinted}${interactive&&spread.section!=='cover'?'<img class="layout-divider" src="/static/assets/layout-divider.svg" alt="">':''}</div>`;
 }

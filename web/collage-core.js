@@ -131,5 +131,26 @@
     return Math.max(0,limit);
   }
 
-  root.CollageCore={layout,frames,locate,leaves,leaf,content,setSource,kind,can,split,remove,removeRow,addRow,addColumn,reidentify,gapsLinked,maxGap,PORTRAITS,MAX_GAP};
+  /* Flexible collage: as many frames as photos were found. Rows or columns of one to three equal frames;
+     the arrangement (and, up to four photos, the order) whose frames crop the photos least wins.
+     aspects — width / height of each photo; the result lists one frame per photo in the same order.
+     Mirrors flex_frames in album_factory/master_layout.py. */
+  const FLEX_MAX=6;
+  function flexFrames(w,h,aspects,gapX=4,gapY=4){
+    const n=aspects.length;if(!n||w<=0||h<=0)return [];
+    const shapes=[],compose=(left,parts)=>{if(!left){shapes.push(parts);return;}for(let k=1;k<=Math.min(3,left);k++)if(parts.length<3)compose(left-k,parts.concat(k));};compose(n,[]);
+    const orders=[],permute=(done,rest)=>{if(!rest.length){orders.push(done);return;}rest.forEach((v,i)=>permute(done.concat(v),rest.slice(0,i).concat(rest.slice(i+1))));};
+    if(n<=4)permute([],[...Array(n).keys()]);else orders.push([...Array(n).keys()]);
+    let best=null;
+    for(const shape of shapes)for(const axis of ['rows','cols']){
+      const lines=shape.length,out=[];
+      shape.forEach((k,li)=>{if(axis==='rows'){const lh=(h-gapY*(lines-1))/lines,fw=(w-gapX*(k-1))/k;for(let i=0;i<k;i++)out.push({x:i*(fw+gapX),y:li*(lh+gapY),w:fw,h:lh});}else{const lw=(w-gapX*(lines-1))/lines,fh=(h-gapY*(k-1))/k;for(let i=0;i<k;i++)out.push({x:li*(lw+gapX),y:i*(fh+gapY),w:lw,h:fh});}});
+      if(out.some(f=>f.w<1||f.h<1))continue;
+      for(const order of orders){let cost=0;out.forEach((f,i)=>{cost+=Math.abs(Math.log((f.w/f.h)/(aspects[order[i]]||1.5)));});if(!best||cost<best.cost-1e-9)best={cost,out,order};}
+    }
+    if(!best)return [];
+    const result=new Array(n);best.out.forEach((f,i)=>{result[best.order[i]]=f;});return result;
+  }
+
+  root.CollageCore={layout,frames,locate,leaves,leaf,content,setSource,kind,can,split,remove,removeRow,addRow,addColumn,reidentify,gapsLinked,maxGap,flexFrames,FLEX_MAX,PORTRAITS,MAX_GAP};
 })(typeof window!=='undefined'?window:globalThis);
