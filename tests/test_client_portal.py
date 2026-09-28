@@ -123,3 +123,70 @@ class ClientPortalTests(unittest.TestCase):
         self.assertEqual(self.client.get(base).json()['completed'], 1)
         self.assertEqual(self.client.delete(f'/api/orders/{self.order}').status_code, 200)
         self.assertEqual(self.client.get(base).status_code, 404)
+
+
+class LayoutCorrectionTests(unittest.TestCase):
+    setUp = test_server_v2.V2Tests.setUp
+    photo = test_server_v2.V2Tests.photo
+
+    def publish(self, revision):
+        import json
+        from album_factory import server as s
+        document = {"revision": revision, "spread_size_mm": [200, 100],
+                    "variants": [{"owner": "class", "name": "11А", "sequence": ["a", "b"]}],
+                    "shared_spreads": {"a": {"key": "a", "section": "students", "elements": []},
+                                       "b": {"key": "b", "section": "moments", "elements": []}},
+                    "covers": {}, "variant_spreads": {}}
+        with s.db() as con:
+            con.execute("INSERT OR REPLACE INTO order_layouts VALUES (?,?,?,?,?)", (self.order, "{}", json.dumps(document), "[]", s.now()))
+        self.assertEqual(self.client.post(f"/api/orders/{self.order}/layout/publish").status_code, 200)
+
+    def test_customer_sends_and_photographer_resolves_corrections(self):
+        photo = self.photo()
+        data = self.client.post(f'/api/orders/{self.order}/client-link').json()
+        token = data['url'].rsplit('/', 1)[1]
+        base = '/client-api/' + token
+        self.client.post(base + '/enter', json={'pin': data['entry_pin']})
+        self.client.put(base + '/persons/person', json=dict(photo_id=photo, first_name='Ана', last_name='Иванова'))
+        detail = self.client.get(base).json()
+        self.assertEqual((detail['stage'], detail['manager']), ('selection', False))
+        name_fix = dict(person_id='person', first_name='Анна', last_name='Иванова')
+        self.assertEqual(self.client.post(base + '/corrections/name', json=name_fix).status_code, 401)
+        self.client.post(base + '/manage', json={'pin': data['manage_pin']})
+        self.assertTrue(self.client.get(base).json()['manager'])
+        self.assertEqual(self.client.post(base + '/corrections/name', json=name_fix).status_code, 409)
+        self.publish('rev-1')
+        self.assertEqual(self.client.get(base).json()['stage'], 'approval')
+        self.assertEqual(self.client.post(base + '/corrections/name', json=name_fix).status_code, 201)
+        spread = self.client.post(base + '/corrections/spread', json=dict(variant='class', index=1, comment='Поменять фото'))
+        self.assertEqual(spread.status_code, 201)
+        self.assertEqual(self.client.post(base + '/corrections/spread', json=dict(variant='class', index=5, comment='x')).status_code, 404)
+        self.assertEqual(self.client.post(base + '/corrections/spread', json=dict(variant='class', index=0, comment=' ')).status_code, 422)
+        fixes = self.client.get(base).json()['corrections']
+        self.assertEqual([(f['kind'], f['old_name'], f['new_name']) for f in fixes][0], ('name', 'Ана Иванова', 'Анна Иванова'))
+        self.assertEqual(fixes[1]['spread_label'], 'Разворот 2 из 2')
+        self.assertEqual(self.client.get(base).json()['persons'][0]['first_name'], 'Анна')
+        order = self.client.get(f'/api/orders/{self.order}').json()
+        self.assertEqual(order['corrections_open'], 2)
+        listing = next(o for o in self.client.get('/api/orders').json() if o['id'] == self.order)
+        self.assertEqual(listing['corrections_open'], 2)
+        summary = self.client.get(base + '/summary').json()
+        self.assertEqual(self.client.post(base + '/approve', json={'hash': summary['hash']}).status_code, 409)
+        self.assertEqual(self.client.delete(base + '/corrections/' + fixes[1]['id']).status_code, 200)
+        self.assertEqual(self.client.post(f"/api/orders/{self.order}/corrections/{fixes[0]['id']}/resolve").status_code, 200)
+        self.assertEqual(self.client.get(f'/api/orders/{self.order}').json()['corrections_open'], 0)
+        self.client.post(base + '/corrections/spread', json=dict(variant='class', index=0, comment='Ещё'))
+        self.publish('rev-2')
+        self.assertEqual(self.client.get(base).json()['corrections'], [])
+        self.client.post(base + '/manage/logout')
+        self.assertFalse(self.client.get(base).json()['manager'])
+
+    def test_photos_link(self):
+        url = f'/api/orders/{self.order}/photos-link'
+        self.assertEqual(self.client.put(url, json={'url': 'javascript:alert(1)'}).status_code, 422)
+        self.assertEqual(self.client.put(url, json={'url': 'https://disk.yandex.ru/d/abc'}).status_code, 200)
+        self.assertEqual(self.client.get(url).json()['url'], 'https://disk.yandex.ru/d/abc')
+        data = self.client.post(f'/api/orders/{self.order}/client-link').json()
+        token = data['url'].rsplit('/', 1)[1]
+        self.client.post('/client-api/' + token + '/enter', json={'pin': data['entry_pin']})
+        self.assertEqual(self.client.get('/client-api/' + token).json()['photos_url'], 'https://disk.yandex.ru/d/abc')

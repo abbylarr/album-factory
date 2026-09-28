@@ -102,3 +102,4 @@
 .discard-warn button.danger .ico{color:#a14331}
 .discard-warn button.danger:hover,.discard-warn button.danger:focus-visible{background:#fcf0ed}
 @keyframes discard-in{from{opacity:0;transform:translateY(-4px)}}
+.corrections{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:8px;max-width:760px}.corrections li{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #efe1c7;border-radius:10px;padding:12px 14px}.corrections li>div{flex:1;min-width:0;display:grid;gap:3px}.corrections strong{font-size:13px}.corrections span{font-size:13px;color:#4d5046;overflow-wrap:anywhere}.corrections small{font-size:11px;color:#8b8e82}.photos-link{display:flex;gap:10px}.photos-link input{flex:1;margin:0!important}

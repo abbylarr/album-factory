@@ -308,7 +308,9 @@ def list_orders():
           FROM orders o {where} ORDER BY created_at DESC""".replace("{APPROVED}", APPROVED), args).fetchall()
         from .client_portal import progress_by_order
         progress = progress_by_order(con)
-        return [dict(row, client_progress=progress[row["id"]]) for row in rows]
+        from .client_portal import open_counts
+        fixes = open_counts(con)
+        return [dict(row, client_progress=progress[row["id"]], corrections_open=fixes.get(row["id"], 0)) for row in rows]
 
 
 def school_name(con, school_id):
@@ -375,6 +377,9 @@ def get_order(order_id: str):
         order["persons"] = [dict(row) for row in con.execute("SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id", (order_id,))]
         from .client_portal import progress_by_order
         order["client_progress"] = progress_by_order(con, order_id)[order_id]
+        from .client_portal import open_corrections
+        order["corrections"] = open_corrections(con, order_id)
+        order["corrections_open"] = len(order["corrections"])
         order["max_photos"] = MAX_PHOTOS
         order["cover_id"] = next((r[0] for r in con.execute("SELECT photo_id FROM order_covers WHERE order_id=?", (order_id,))), None)
         durations = [r[0] for r in con.execute("SELECT seconds FROM processing_times ORDER BY finished_at DESC LIMIT 40")]

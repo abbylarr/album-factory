@@ -186,6 +186,8 @@ def forget(con, order_id):
                   "publications", "approvals", "authorizations"):
         con.execute(f"DELETE FROM {table} WHERE order_id=?", (order_id,))
     con.execute("DELETE FROM class_sessions WHERE order_id=?", (order_id,))
+    from . import client_portal
+    client_portal.forget(con, order_id)
 
 
 def quote_limit(con, order_id):
@@ -260,6 +262,14 @@ def require_level(con, request, order_id, level):
     if level == "entry":
         raise HTTPException(401, "Нужен код входа")
     raise HTTPException(401, "Нужен код управления")
+
+
+def has_level(con, request, order_id, level):
+    try:
+        require_level(con, request, order_id, level)
+    except HTTPException:
+        return False
+    return True
 
 
 def propose(students, paid):
@@ -618,6 +628,8 @@ def install(app, s):
                 raise HTTPException(409, "Заказ уже отправлен в печать")
             con.execute("UPDATE order_terms SET workflow='layout' WHERE order_id=?", (order_id,))
             order_stages.set_stage(con, order_id, 'approval')
+            # A new revision answers the class's earlier requests.
+            con.execute("UPDATE layout_corrections SET status='resolved' WHERE order_id=? AND status='open' AND revision<>?", (order_id, revision))
         return {"revision": revision}
 
     @app.post("/api/orders/{order_id}/production")
@@ -772,6 +784,11 @@ def install(app, s):
             require_level(con, request, order["id"], "manage")
             if con.execute("SELECT 1 FROM publications WHERE order_id=?", (order["id"],)).fetchone() is None:
                 raise HTTPException(409, "Макет ещё не опубликован")
+            from .client_portal import open_corrections
+            if open_corrections(con, order["id"]):
+                raise HTTPException(409, "Вы отправили правки. Дождитесь обновлённого макета или отзовите правки")
+            if order["stage"] not in ("approval",):
+                raise HTTPException(409, "Макет обновляется. Согласуйте новую версию, когда фотограф её отправит")
             body = summary_body(con, dict(order), public=True)
             if payload.hash != body["hash"]:
                 raise HTTPException(409, "Сводка изменилась. Проверьте её ещё раз.")
