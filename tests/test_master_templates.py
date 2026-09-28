@@ -90,6 +90,27 @@ class MasterTests(unittest.TestCase):
             broken = deepcopy(doc); broken['photoRules'] = rules
             self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,rules)
 
+    def test_photo_categories_are_editable_and_validated(self):
+        doc = master()
+        slot = {'id':'far','type':'photo','box':{'x':20,'y':40,'w':100,'h':70},'source':'class','pick':{'category':'far'}}
+        doc['sections'][1]['spreads'][0]['pages'][0]['layers'].append(slot)
+        doc['sections'][2]['spreads'][0]['pages'][0]['layers'].append({**slot,'id':'me','pick':{'category':'few','who':'hero'}})
+        doc['photoCategories'] = [{'id':'far','name':'Очень общий план','scale':['wide'],'people':['class','subgroup']},
+                                  {'id':'few','name':'Пары','people':['few'],'quality':'good'}]
+        doc['photoRules'] = {'mixShoots':False,'posedFirst':True}
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        preview = self.client.post('/api/master-templates/photo-preview',json={'document':doc,'students':6,'teachers':0,'owner':'s2'})
+        self.assertEqual(preview.status_code,200,preview.text)
+        self.assertEqual(preview.json()['slots']['shared:0/far']['scale'],'wide')
+        shared = doc['sections'][1]['spreads'][0]['pages'][0]['layers']
+        for bad in ({'category':'nope'},{'category':'few','who':'hero'},{'category':'few','who':'someone'},{'category':'few','role':'any'}):
+            broken = deepcopy(doc); broken['sections'][1]['spreads'][0]['pages'][0]['layers'][len(shared)-1]['pick'] = bad
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,bad)
+        for categories in ([{'id':'x','name':''}],[{'id':'x','name':'a'},{'id':'x','name':'b'}],[{'id':'x','name':'a','people':['crowd']}],
+                           [{'id':'x','name':'a','style':'loud'}],[{'id':'x y','name':'a'}],[{'id':'x','name':'a','extra':1}]):
+            broken = deepcopy(doc); broken['photoCategories'] = categories + [doc['photoCategories'][0]]
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,categories)
+
     def create(self):
         response=self.client.post('/api/master-templates',json={'document':master()})
         self.assertEqual(response.status_code,201,response.text)
@@ -174,7 +195,7 @@ class MasterTests(unittest.TestCase):
         bad['sections'][0]['safety']['safe']=-1
         self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
 
-    def test_grid_effects_wrap_grid_instead_of_each_portrait(self):
+    def test_grid_effects_go_to_each_portrait(self):
         doc=master()
         grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
         grid.update(strokeOn=True, strokeWidth=1.2, stroke='#663399', strokeAlign='outside',
@@ -185,15 +206,18 @@ class MasterTests(unittest.TestCase):
         compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
         first=next(iter(compiled['variant_spreads']['student:1'].values()))['elements']
         grid_items=[e for e in first if '/grid/' in e['key']]
-        self.assertEqual([e['type'] for e in grid_items[:2]],['frame','rect'])
-        self.assertEqual(grid_items[0]['strokeAlign'],'outside')
-        self.assertIn('shadow',grid_items[1])
-        self.assertTrue(all(e.get('strokeWidth',0)==0 and not e.get('shadow') for e in grid_items[2:]))
+        photos=[e for e in grid_items if e['key'].endswith('/photo')]
+        self.assertTrue(photos)
+        for photo in photos:
+            self.assertEqual((photo['strokeWidth'],photo['stroke'],photo['strokeAlign']),(1.2,'#663399','outside'))
+            self.assertIn('shadow',photo)
+        self.assertTrue(all(e.get('strokeWidth',0)==0 and not e.get('shadow') for e in grid_items if e not in photos))
+        self.assertFalse(any(e['key'].endswith(('/outline','/backing')) for e in grid_items))
         grid['strokeOn']=False
         grid.pop('shadow')
         compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
         first=next(iter(compiled['variant_spreads']['student:1'].values()))['elements']
-        self.assertFalse(any('/grid/outline' in e['key'] or '/grid/backing' in e['key'] for e in first))
+        self.assertTrue(all(e.get('strokeWidth',0)==0 and not e.get('shadow') for e in first if '/grid/' in e['key']))
 
     def test_versions_and_conflict_and_isolation(self):
         draft=self.create();key=draft['id']
@@ -346,6 +370,28 @@ class MasterTests(unittest.TestCase):
         self.assertAlmostEqual(name['box'][1]-(photos[0]['box'][1]+photos[0]['box'][3]),7)
         actual_name_height=measurer().height(name['text'],name['font'],name['size'],name['leading'],name['box'][2],name.get('letterSpacing') or 0)
         self.assertAlmostEqual(detail['box'][1]-(name['box'][1]+actual_name_height),5)
+
+    def test_vignette_radius_and_shadow_go_to_card_photos(self):
+        doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        grid.update(radius=4,shadow={'color':'#000000','offsetX':0,'offsetY':1,'blur':2,'opacity':30})
+        people=[{'id':str(i),'first_name':'Анна','last_name':'Иванова'} for i in range(3)]
+        snapshot={'students':people,'teachers':[],'photos':{},'selections':[],
+                  'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        elements=[e for spread in compiled['variant_spreads']['student:0'].values() for e in spread['elements']]
+        photos=[e for e in elements if '/card[student:' in e['key'] and e['key'].endswith('/photo')]
+        self.assertEqual([e['radius'] for e in photos],[4,4,4])
+        # One shadow layer under all cards: a card's shadow must not fall on its neighbour.
+        self.assertEqual(len({e['shadowGroup'] for e in photos}),1)
+        self.assertFalse(any(e['key'].endswith(('/outline','/backing')) for e in elements))
+
+    def test_photo_shadow_is_cast_by_the_stroke_edge(self):
+        from album_factory.layout_render import _stroke_reach
+        photo={'photo':'1','strokeWidth':3}
+        self.assertEqual(_stroke_reach({**photo,'strokeAlign':'outside'}),3)
+        self.assertEqual(_stroke_reach(photo),1.5)
+        self.assertEqual(_stroke_reach({**photo,'strokeAlign':'inside'}),0)
+        self.assertEqual(_stroke_reach({**photo,'photo':None}),0)
 
     def test_design_packages_copy_and_shared_library(self):
         response=self.client.post('/api/designs',json={'name':'Осень','package_name':'Стандарт','price':2500,'document':master()})

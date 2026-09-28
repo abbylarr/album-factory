@@ -308,7 +308,7 @@ def snapshot_entries(con, order_id):
             continue
         people = meta['people']
         result.append({'id': p['id'], 'taken_at': meta.get('taken_at'), 'sequence': meta.get('sequence', 0),
-                       'series': meta.get('series'), 'alt': p['alternate'], 'event': meta.get('event'),
+                       'series': meta.get('series'), 'alt': p['alternate'], 'event': meta.get('event'), 'shoot': p['shoot_id'],
                        'quality': meta['quality'], 'defect': meta.get('defect'), 'bucket': people['bucket'],
                        'count': people['count'], 'subjects': people['subjects'], 'scale': meta['scale'],
                        'persons': meta['persons'], 'safe_box': meta['safe_box'], 'subject_box': meta['subject_box'],

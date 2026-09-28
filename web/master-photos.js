@@ -1,53 +1,85 @@
-/* Roles of automatic general-photo slots, album photo rules and the server preview on a test shoot. */
+/* Categories of automatic general-photo slots (built-in and the master's own), album photo rules and the server preview on a test shoot.
+   Built-ins mirror CATEGORIES in album_factory/photo_pick.py; a master may edit them or add its own in doc.photoCategories. */
 window.MasterPhotos=(()=>{
-  const ROLES=[
-    ['any','Любое общее фото','Лучший из свободных снимков по хронологии.'],
-    ['hero','Главное фото разворота','Самый выразительный кадр: средний, в рост или общий план.'],
-    ['class_photo','Весь класс','Постановочное фото всего класса.'],
-    ['life','Жизнь класса','Репортаж: группы от 3 до 12 человек.'],
-    ['friends','Владелец с друзьями','Владелец альбома и 1–5 человек рядом, крупно или средне.'],
-    ['me_in_class','Владелец в классе','Владелец альбома в большой группе.'],
-    ['with_item','С учеником разворота','Общее фото, где есть ученик этого личного разворота.'],
-    ['close_up','Крупный план','Один-два человека крупно — для небольших кадров.'],
-    ['atmosphere','Атмосфера','Кадры без людей, детали и общие планы.']];
-  const DEFAULTS={any:{},hero:{scale:['medium','full','wide'],quality:'best'},class_photo:{buckets:['class'],style:'posed'},life:{buckets:['small_group','group'],style:'candid'},friends:{include:'owner',buckets:['pair','small_group'],scale:['close','medium']},me_in_class:{include:'owner',buckets:['group','class']},with_item:{include:'item'},close_up:{buckets:['solo','pair'],scale:['close']},atmosphere:{buckets:['none'],scale:['detail','wide']}};
-  const BUCKETS=[['solo','Один'],['pair','Двое'],['small_group','3–6'],['group','7 и больше'],['class','Весь класс'],['none','Без людей']];
+  const BUILTIN=[
+    ['any','Любое','Лучший из свободных снимков.',{}],
+    ['class','Весь класс','Постановочное фото всего класса.',{people:['class'],style:'posed'}],
+    ['subgroup','Подгруппа','Постановочная группа — часть класса.',{people:['subgroup'],style:'posed'}],
+    ['few','Вдвоём-втроём','Два-три человека рядом.',{people:['few']}],
+    ['solo','Один','Один человек в кадре.',{people:['solo']}],
+    ['candid','Репортаж','Живые, непостановочные кадры.',{style:'candid'}],
+    ['wide','Общий план','Люди видны мелко, много пространства.',{scale:['wide']}],
+    ['empty','Без людей','Детали, место, атмосфера.',{people:['none']}]];
+  /* What a slot with the hero takes when its category has nothing — mirrors FALLBACKS in photo_pick.py. */
+  const HERO_FALLBACK={few:'Если с героем таких нет — репортаж с ним, затем дубль групповой фотографии.',solo:'Если нет — репортаж, где он крупно, затем вдвоём-втроём, затем дубль групповой.',candid:'Сначала кадры, где героя хорошо видно, затем где он мелко, затем дубль групповой.'};
+  const LEGACY={any:['any'],hero:['any'],class_photo:['class'],life:['candid'],friends:['few','owner'],me_in_class:['subgroup','owner'],with_item:['any','hero'],close_up:['solo'],atmosphere:['empty']};
+  const FILTERS=['people','scale','style','quality','tags'];
+  const PEOPLE=[['none','Никого'],['solo','Один'],['few','2–3'],['subgroup','Подгруппа'],['class','Весь класс']];
   const SCALES=[['close','Крупный'],['medium','Средний'],['full','В рост'],['wide','Общий'],['detail','Детали']];
+  const STYLES=[['','Любой'],['posed','Постановка'],['candid','Репортаж']],QUALITY=[['','Любое'],['good','Без брака'],['best','Лучшее']];
   const TAGS=[['classroom','Класс'],['library','Библиотека'],['hall','Коридор'],['gym','Спортзал'],['stage','Сцена'],['ceremony','Праздник'],['studio','Студия'],['nature','Природа'],['beach','Море'],['city','Город'],['picnic','Пикник'],['winter','Зима']];
-  const RELAX={quality:'качество',scale:'крупность',buckets:'число людей',style:'стиль',tags:'сцена',include:'кто на фото',any:'роль',cut:'обрезка людей',reuse:'повтор'};
-  const RULES={reuse:'album',coverageMin:1,coverageMax:0,rhythm:true,chronology:true};
-  let hooks=null,data=null,sent='',timer=null,version=0,failed='';
+  const RELAX={quality:'качество',scale:'крупность',people:'число людей',style:'стиль',tags:'сцена',include:'кто на фото',any:'категория',cut:'обрезка людей',reuse:'повтор',fallback:'похожий кадр с героем',dup:'дубль групповой',small:'герой мелко'};
+  const RULES={reuse:'album',coverageMin:1,coverageMax:0,rhythm:true,chronology:true,mixShoots:true,posedFirst:true};
+  let hooks=null,data=null,sent='',timer=null,version=0,failed='',openCategory=null,menuOpen=false;
+  const tick='<svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',caret='<svg class="caret" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 4 5 6.5 7.5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const role=pick=>DEFAULTS[pick?.role]?pick.role:'any';
-  function effective(pick){const base=DEFAULTS[role(pick)],result={};for(const key of ['buckets','scale','tags','include','style','quality'])result[key]=pick&&key in pick?pick[key]:base[key]??null;return result;}
-  function chips(key,options,values){return `<div class="pick-chips" role="group">${options.map(([id,label])=>{const on=!!values?.includes(id);return `<button type="button" data-pick-chip="${key}" data-value="${id}" class="${on?'active':''}" aria-pressed="${on}">${label}</button>`;}).join('')}</div>`;}
-  function segmented(key,options,value){return `<div class="pick-chips pick-segmented" role="group">${options.map(([id,label])=>{const on=(value??'')===id;return `<button type="button" data-pick-set="${key}" data-value="${id}" class="${on?'active':''}" aria-pressed="${on}">${label}</button>`;}).join('')}</div>`;}
-  function stats(key){if(failed)return `<p class="pick-stats warning">${esc(failed)}</p>`;const slot=data?.slots?.[key];if(!slot)return `<p class="pick-stats">${data?'На этой странице слот не участвует в примере.':'Подбираем фото на тестовой съёмке…'}</p>`;const relaxed=slot.relaxed.filter(r=>RELAX[r]);return `<p class="pick-stats${relaxed.length?' warning':''}"><strong>${slot.candidates}</strong> из ${data.photos} тестовых фото подходят без уступок.${relaxed.length?`<br>Для примера ослаблено: ${relaxed.map(r=>RELAX[r]).join(', ')}.`:''}</p>`;}
-  /* Inspector block for an automatic general-photo slot (layer or collage cell). */
-  function panel(pick,key,section){const r=role(pick),e=effective(pick),custom=pick&&Object.keys(pick).some(k=>k!=='role');const roles=ROLES.filter(([id])=>id!=='with_item'||section.kind==='repeat');
-    const include=[['','Не важно'],['owner','Владелец альбома'],...(section.kind==='repeat'?[['item','Ученик разворота']]:[])];
-    return `<section class="inspector-section pick-section"><h3>Подбор общего фото</h3><label>Роль слота<select data-pick-role>${roles.map(([id,label])=>`<option value="${id}" ${r===id?'selected':''}>${label}</option>`).join('')}</select></label><p class="section-note">${esc(ROLES.find(x=>x[0]===r)[2])}</p>${stats(key)}
-    <details class="pick-more" ${custom?'open':''}><summary>Уточнить фильтры${custom?' · изменены':''}</summary>
-    <div class="pick-field"><span>Сколько людей</span>${chips('buckets',BUCKETS,e.buckets)}</div>
-    <div class="pick-field"><span>Крупность</span>${chips('scale',SCALES,e.scale)}</div>
-    <div class="pick-field"><span>Кто на фото</span>${segmented('include',include,e.include)}</div>
-    <div class="pick-field"><span>Стиль</span>${segmented('style',[['','Любой'],['posed','Постановка'],['candid','Репортаж']],e.style)}</div>
-    <div class="pick-field"><span>Качество</span>${segmented('quality',[['','Любое'],['good','Без брака'],['best','Лучшее']],e.quality)}</div>
-    <div class="pick-field"><span>Сцена</span>${chips('tags',TAGS,e.tags)}</div>
-    <p class="section-note">Пустая группа — без ограничения. Если подходящих снимков нет, фильтры ослабляются по очереди, а в макете появляется предупреждение.</p>
-    ${custom?'<button type="button" class="wide" data-pick-reset>Вернуть фильтры роли</button>':''}</details></section>`;}
+  const clean=f=>Object.fromEntries(FILTERS.filter(k=>Array.isArray(f[k])?f[k].length:f[k]).map(k=>[k,f[k]]));
+  /* Built-in categories with the master's edits, then its own: {id,name,note,filters,builtin,edited}. */
+  function categories(doc){const own=doc?.photoCategories||[],list=BUILTIN.map(([id,name,note,filters])=>{const edit=own.find(c=>c.id===id);return {id,name:edit?.name||name,note,filters:edit?clean(edit):filters,builtin:true,edited:!!edit};});for(const c of own)if(!BUILTIN.some(([id])=>id===c.id))list.push({id:c.id,name:c.name,note:'',filters:clean(c),builtin:false,edited:false});return list;}
+  function category(doc,id){const list=categories(doc);return list.find(c=>c.id===id)||list[0];}
+  /* Slots saved with the first role presets become category + who. */
+  function upgrade(pick){if(!pick||'category' in pick)return pick;const [category,who]=LEGACY[pick.role]||LEGACY.any,include=pick.include==='item'?'hero':pick.include==='owner'?'owner':null;return {category,...((include||who)?{who:include||who}:{})};}
+  function migrate(doc){let changed=false;const fix=item=>{if(item?.pick&&!('category' in item.pick)){item.pick=upgrade(item.pick);changed=true;}};const walk=c=>{if(c.split)c.cells.forEach(walk);else fix(c);};for(const s of doc.sections||[])for(const sp of s.spreads||[])for(const p of sp.pages||[])for(const l of p.layers||[]){if(l.type==='photo')fix(l);if(l.type==='collage')(l.rows||[]).forEach(r=>r.forEach(walk));}return changed;}
+  const label=(options,id)=>options.find(([k])=>k===id)?.[1]||id;
+  /* One line such as «2–3 · Репортаж · Без брака». */
+  function describe(f){const parts=[];if(f.people?.length)parts.push(f.people.map(p=>label(PEOPLE,p)).join(', '));if(f.scale?.length)parts.push(f.scale.map(p=>label(SCALES,p)).join(', ').toLowerCase()+' план');if(f.style)parts.push(label(STYLES,f.style));if(f.quality)parts.push(f.quality==='best'?'лучшее качество':'без брака');if(f.tags?.length)parts.push(f.tags.map(t=>label(TAGS,t)).join(', '));const text=parts.join(' · ');return text?text[0].toUpperCase()+text.slice(1):'Без ограничений';}
+  function chips(attr,key,options,values){return `<div class="pick-chips" role="group">${options.map(([id,text])=>{const on=!!values?.includes(id);return `<button type="button" ${attr}="${key}" data-value="${id}" class="${on?'active':''}" aria-pressed="${on}">${text}</button>`;}).join('')}</div>`;}
+  function segmented(attr,key,options,value){return `<div class="pick-chips pick-segmented" role="group">${options.map(([id,text])=>{const on=(value??'')===id;return `<button type="button" ${attr}="${key}" data-value="${id}" class="${on?'active':''}" aria-pressed="${on}">${text}</button>`;}).join('')}</div>`;}
+  function stats(key){if(failed)return `<p class="pick-stats warning">${esc(failed)}</p>`;const slot=data?.slots?.[key];if(!slot)return `<p class="pick-stats">${data?'На этой странице слот не участвует в примере.':'Подбираем фото на тестовой съёмке…'}</p>`;const relaxed=slot.relaxed.filter(r=>RELAX[r]);return `<p class="pick-stats${relaxed.length?' warning':''}"><strong>${slot.candidates}</strong> из ${data.photos} тестовых фото подходят без уступок.${relaxed.length?`<br>Для примера взято: ${relaxed.map(r=>RELAX[r]).join(', ')}.`:''}</p>`;}
+  /* Who must be on the photo: the hero exists only on personal spreads; elsewhere the album owner may be asked for. */
+  /* Category rows of both frame menus (canvas and inspector): name, what it takes, and «new category» at the end. */
+  function categoryRows(doc,current,attr){return categories(doc).map(c=>{const on=c.id===current;return `<button type="button" class="menu-row${on?' on':''}" role="menuitemradio" aria-checked="${on}" title="${esc(describe(c.filters))}" ${attr}="${esc(c.id)}"><span>${esc(c.name)}</span>${on?tick:''}</button>`;}).join('')+`<button type="button" class="menu-row menu-add" data-new-category><i aria-hidden="true">+</i><span>Новая категория</span></button>`;}
+  /* A new category for the selected slot: it is chosen right away and opened for editing in the rules tab. */
+  function newCategory(){const t=target(),id='c-'+Math.random().toString(36).slice(2,8);openCategory=id;menuOpen=false;hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=[...(doc.photoCategories||[]),{id,name:'Новая категория'}];if(t){t.obj.source='class';t.obj.pick={...(upgrade(t.obj.pick)||{}),category:id};}});hooks.rules();requestAnimationFrame(()=>{const input=document.querySelector('.category-item.open [data-cat-name]');input?.scrollIntoView({block:'nearest'});input?.select();});}
+  function whoOptions(section){return section.kind==='repeat'?[['hero','С героем разворота'],['','Любой']]:[['','Любой'],['owner','С владельцем альбома']];}
+  /* Body of «what is in the frame» for an automatic general-photo slot (layer or collage cell): category, who, test-shoot stats. */
+  function panel(pick,key,section){const doc=hooks.doc(),p=upgrade(pick)||{category:'any'},c=category(doc,p.category),note=p.who==='hero'&&HERO_FALLBACK[c.id]?`<p class="section-note">${HERO_FALLBACK[c.id]}</p>`:'';
+    return `<div class="pick-section"><div class="pick-field pick-picker"><span>Категория</span><button type="button" class="pick-trigger" data-pick-menu aria-haspopup="menu" aria-expanded="${menuOpen}"><span>${esc(c.name)}</span>${caret}</button>${menuOpen?`<div class="cell-sources pick-menu" role="menu">${categoryRows(doc,c.id,'data-pick-choice')}</div>`:''}</div>
+    <div class="pick-summary"><span>${esc(c.note&&!c.edited?c.note:describe(c.filters))}</span><button type="button" class="link-button" data-edit-category="${esc(c.id)}">Настроить</button></div>
+    <div class="pick-field"><span>Кто на снимке</span>${segmented('data-pick-who','who',whoOptions(section),p.who||'')}</div>${note}${stats(key)}</div>`;}
+  /* Editor of one category inside the rules tab. */
+  function categoryEditor(c){const f=c.filters,reset=c.builtin&&c.edited?`<button type="button" data-cat-reset="${esc(c.id)}">Вернуть как было</button>`:'',remove=c.builtin?'':`<button type="button" class="danger" data-cat-delete="${esc(c.id)}">Удалить</button>`;
+    return `<div class="category-editor"><label>Название<input data-cat-name="${esc(c.id)}" maxlength="40" value="${esc(c.name)}"></label>
+    <div class="pick-field"><span>Сколько людей</span>${chips('data-cat-chip','people',PEOPLE,f.people)}</div>
+    <div class="pick-field"><span>Крупность</span>${chips('data-cat-chip','scale',SCALES,f.scale)}</div>
+    <div class="pick-field"><span>Стиль</span>${segmented('data-cat-set','style',STYLES,f.style)}</div>
+    <div class="pick-field"><span>Качество</span>${segmented('data-cat-set','quality',QUALITY,f.quality)}</div>
+    <div class="pick-field"><span>Сцена</span>${chips('data-cat-chip','tags',TAGS,f.tags)}</div>
+    <p class="section-note">Пустая группа — без ограничения. Если подходящих снимков нет, фильтры ослабляются по очереди, а в макете появляется предупреждение.</p>${reset||remove?`<div class="category-actions">${reset}${remove}</div>`:''}</div>`;}
+  function categoriesPanel(doc){const list=categories(doc);if(openCategory&&!list.some(c=>c.id===openCategory))openCategory=null;
+    return `<section class="inspector-section pick-section" id="photo-categories"><h3>Категории общих фото</h3><p class="section-note category-lead">Из них выбирают, что поставить в кадр. Изменения действуют во всём макете.</p><div class="category-list">${list.map(c=>{const open=openCategory===c.id;return `<div class="category-item${open?' open':''}"><button type="button" class="category-row" data-cat-open="${esc(c.id)}" aria-expanded="${open}"><span><strong>${esc(c.name)}${c.edited?' <i>изменена</i>':''}${c.builtin?'':' <i>своя</i>'}</strong>${describe(c.filters).toLowerCase()===c.name.toLowerCase()?'':`<small>${esc(describe(c.filters))}</small>`}</span></button>${open?categoryEditor(c):''}</div>`;}).join('')}</div><button type="button" class="wide" data-cat-add>+ Новая категория</button></section>`;}
   function rulesPanel(doc){const r={...RULES,...(doc.photoRules||{})},low=data&&Object.entries(data.coverage||{}).filter(([,n])=>n<r.coverageMin);
     return `<section class="inspector-section pick-section"><h3>Общие фото альбома</h3><label>Повторы снимков<select data-photo-rule="reuse"><option value="album" ${r.reuse==='album'?'selected':''}>Не повторять в альбоме</option><option value="section" ${r.reuse==='section'?'selected':''}>Не повторять в разделе</option><option value="allow" ${r.reuse==='allow'?'selected':''}>Разрешить повторы</option></select></label>
     <div class="field-grid"><label>Минимум появлений ученика<input type="number" min="0" max="10" step="1" data-photo-rule="coverageMin" value="${r.coverageMin}"></label><label>Максимум, 0 — без предела<input type="number" min="0" max="50" step="1" data-photo-rule="coverageMax" value="${r.coverageMax}"></label></div>
-    <label class="check"><input type="checkbox" data-photo-rule="rhythm" ${r.rhythm?'checked':''}>Чередовать крупность на развороте</label><label class="check"><input type="checkbox" data-photo-rule="chronology" ${r.chronology?'checked':''}>Ставить снимки по времени съёмки</label>
-    ${data?`<p class="pick-stats${low.length?' warning':''}">${low.length?`На тестовом классе ${low.length} из ${Object.keys(data.coverage).length} учеников появляются реже ${r.coverageMin} раз.`:`На тестовом классе каждый ученик появляется не реже ${r.coverageMin} раз.`}</p>`:''}</section>`;}
+    <label class="check"><input type="checkbox" data-photo-rule="posedFirst" ${r.posedFirst?'checked':''}>Постановочные раньше репортажа</label><label class="check"><input type="checkbox" data-photo-rule="mixShoots" ${r.mixShoots?'checked':''}>На развороте — снимки из разных съёмок</label><label class="check"><input type="checkbox" data-photo-rule="rhythm" ${r.rhythm?'checked':''}>Чередовать крупность на развороте</label><label class="check"><input type="checkbox" data-photo-rule="chronology" ${r.chronology?'checked':''}>Ставить снимки по времени съёмки</label>
+    ${data?`<p class="pick-stats${low.length?' warning':''}">${low.length?`На тестовом классе ${low.length} из ${Object.keys(data.coverage).length} учеников появляются реже ${r.coverageMin} раз.`:`На тестовом классе каждый ученик появляется не реже ${r.coverageMin} раз.`}</p>`:''}</section>`+categoriesPanel(doc);}
   function target(){const t=hooks.target();return t&&t.obj?t:null;}
-  function setPick(mutator){const t=target();if(!t)return;hooks.commit(()=>{const pick={...(t.obj.pick||{role:'any'})};mutator(pick,effective(t.obj.pick));for(const k of Object.keys(pick))if(pick[k]===undefined)delete pick[k];t.obj.pick=pick;});}
-  function click(e){const chip=e.target.closest('[data-pick-chip]');if(chip){const key=chip.dataset.pickChip,value=chip.dataset.value;setPick((pick,current)=>{const list=new Set(current[key]||[]);list.has(value)?list.delete(value):list.add(value);pick[key]=list.size?[...list]:null;});return true;}
-    const set=e.target.closest('[data-pick-set]');if(set){setPick(pick=>{pick[set.dataset.pickSet]=set.dataset.value||null;});return true;}
-    if(e.target.closest('[data-pick-reset]')){setPick(pick=>{for(const k of Object.keys(pick))if(k!=='role')pick[k]=undefined;});return true;}
+  function setPick(mutator){const t=target();if(!t)return;hooks.commit(()=>{const pick={...(upgrade(t.obj.pick)||{category:'any'})};mutator(pick);if(!pick.who)delete pick.who;t.obj.pick=pick;});}
+  /* Change a category: built-ins are stored as edits in doc.photoCategories, the master's own are edited in place. */
+  function editCategory(id,mutator){hooks.commit(()=>{const doc=hooks.doc(),own=doc.photoCategories=[...(doc.photoCategories||[])];let item=own.find(c=>c.id===id);if(!item){const base=categories(doc).find(c=>c.id===id);if(!base)return;item={id,name:base.name,...JSON.parse(JSON.stringify(base.filters))};own.push(item);}mutator(item);for(const k of FILTERS)if(item[k]==null||(Array.isArray(item[k])&&!item[k].length))delete item[k];});}
+  /* Slots still pointing at a removed category take any photo. */
+  function dropCategory(id){hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=(doc.photoCategories||[]).filter(c=>c.id!==id);if(!doc.photoCategories.length)delete doc.photoCategories;const fix=item=>{if(item?.pick?.category===id)item.pick={...item.pick,category:'any'};},walk=c=>c.split?c.cells.forEach(walk):fix(c);for(const s of doc.sections||[])for(const sp of s.spreads||[])for(const p of sp.pages||[])for(const l of p.layers||[]){if(l.type==='photo')fix(l);if(l.type==='collage')(l.rows||[]).forEach(r=>r.forEach(walk));}});}
+  function click(e){if(e.target.closest('[data-pick-menu]')){menuOpen=!menuOpen;hooks.inspector();return true;}const choice=e.target.closest('[data-pick-choice]');if(choice){menuOpen=false;setPick(pick=>{pick.category=choice.dataset.pickChoice;});return true;}if(e.target.closest('[data-new-category]')){newCategory();return true;}const who=e.target.closest('[data-pick-who]');if(who){setPick(pick=>{pick.who=who.dataset.value||undefined;});return true;}
+    const edit=e.target.closest('[data-edit-category]');if(edit){openCategory=edit.dataset.editCategory;hooks.rules();requestAnimationFrame(()=>document.querySelector('.category-item.open')?.scrollIntoView({block:'nearest'}));return true;}
+    const open=e.target.closest('[data-cat-open]');if(open){openCategory=openCategory===open.dataset.catOpen?null:open.dataset.catOpen;hooks.inspector();return true;}
+    const chip=e.target.closest('[data-cat-chip]');if(chip){const key=chip.dataset.catChip,value=chip.dataset.value;editCategory(openCategory,item=>{const list=new Set(item[key]||[]);list.has(value)?list.delete(value):list.add(value);item[key]=[...list];});return true;}
+    const set=e.target.closest('[data-cat-set]');if(set){editCategory(openCategory,item=>{item[set.dataset.catSet]=set.dataset.value||null;});return true;}
+    const reset=e.target.closest('[data-cat-reset]');if(reset){const id=reset.dataset.catReset;hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=(doc.photoCategories||[]).filter(c=>c.id!==id);if(!doc.photoCategories.length)delete doc.photoCategories;});return true;}
+    const del=e.target.closest('[data-cat-delete]');if(del){dropCategory(del.dataset.catDelete);openCategory=null;return true;}
+    if(e.target.closest('[data-cat-add]')){const id='c-'+Math.random().toString(36).slice(2,8);openCategory=id;hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=[...(doc.photoCategories||[]),{id,name:'Новая категория'}];});return true;}
     return false;}
-  function change(e){const el=e.target;if(el.matches('[data-pick-role]')){setPick(pick=>{for(const k of Object.keys(pick))pick[k]=undefined;pick.role=el.value;});return true;}
+  function change(e){const el=e.target;if(el.matches('[data-pick-category]')){setPick(pick=>{pick.category=el.value;});return true;}
+    if(el.dataset.catName){const name=el.value.trim().slice(0,40);if(name)editCategory(el.dataset.catName,item=>{item.name=name;});else el.value=category(hooks.doc(),el.dataset.catName).name;return true;}
     if(el.dataset.photoRule){const key=el.dataset.photoRule;let value=el.type==='checkbox'?el.checked:el.type==='number'?Math.round(Number(el.value)):el.value;if(el.type==='number'&&(!Number.isFinite(value)||!el.validity.valid))return true;hooks.commit(()=>{const doc=hooks.doc(),rules={...RULES,...(doc.photoRules||{}),[key]:value};if(rules.coverageMax&&rules.coverageMax<rules.coverageMin)rules.coverageMax=rules.coverageMin;doc.photoRules=rules;});return true;}
     return false;}
   function strip(doc){return JSON.parse(JSON.stringify(doc,(k,v)=>k==='dataUrl'?undefined:v));}
@@ -63,5 +95,7 @@ window.MasterPhotos=(()=>{
   /* The test photo a slot received in the preview: {src, crop} with crop normalised to the photo. */
   function image(sectionId,pageIndex,slotId){const slot=data?.slots?.[`${sectionId}:${pageIndex}/${slotId}`];if(!slot?.photo)return null;return {src:scene(slot),crop:slot.crop};}
   function bind(value){hooks=value;}
-  return {bind,panel,rulesPanel,click,change,refresh,image,effective,ROLES};
+  document.addEventListener('pointerdown',e=>{if(menuOpen&&!e.target.closest('.pick-picker')){menuOpen=false;hooks?.inspector();}},true);
+  document.addEventListener('keydown',e=>{if(menuOpen&&e.key==='Escape'){e.stopImmediatePropagation();menuOpen=false;hooks?.inspector();}},true);
+  return {bind,panel,rulesPanel,click,change,refresh,image,categories,category,describe,migrate,upgrade,categoryRows,newCategory};
 })();

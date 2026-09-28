@@ -49,7 +49,7 @@ def _cast_shadow(pdf, element, paint):
     shadow = element.get('shadow')
     if not isinstance(shadow, dict):
         return
-    base = element.get('opacity', 100) / 100 * float(shadow.get('opacity', 40)) / 100
+    base = element.get('opacity', 100) / 100 * float(shadow.get('opacity', 35)) / 100
     if base <= 0:
         return
     for ox, oy, weight in _shadow_offsets(shadow):
@@ -62,21 +62,67 @@ def _cast_shadow(pdf, element, paint):
         pdf.restoreState()
 
 
+def _rotate(pdf, element, height):
+    if element.get('angle'):
+        x, top, w, h = element["box"]
+        cx,cy=element.get('rotation_center',[x+w/2,top+h/2])
+        pdf.translate(cx*mm,(height-cy)*mm)
+        pdf.rotate(-element['angle'])
+        pdf.translate(-cx*mm,-(height-cy)*mm)
+
+
+def _stroke_reach(element):
+    """How far a photo's stroke extends past its box: the shadow is cast by that outer edge."""
+    width = element.get('strokeWidth', 0) or 0
+    if not width or not element.get('photo'):
+        return 0
+    align = element.get('strokeAlign') or 'center'
+    return width if align == 'outside' else width / 2 if align == 'center' else 0
+
+
+def _photo_path(pdf, element, height, grow=0):
+    x, top, w, h = element["box"]
+    x, bottom, w, h = x - grow, height - top - h - grow, w + 2 * grow, h + 2 * grow
+    path = pdf.beginPath()
+    if element["mask"] == "ellipse":
+        path.ellipse(x * mm, bottom * mm, w * mm, h * mm)
+    else:
+        radius = min(element.get('radius', 0) and element['radius'] + grow, w / 2, h / 2) * mm
+        if radius: path.roundRect(x * mm, bottom * mm, w * mm, h * mm, radius)
+        else: path.rect(x * mm, bottom * mm, w * mm, h * mm)
+    return path
+
+
+def _cast_photo_shadow(pdf, element, height):
+    path = _photo_path(pdf, element, height, _stroke_reach(element))
+    def paint(color):
+        pdf.setFillColor(HexColor(color))
+        pdf.drawPath(path, stroke=0, fill=1)
+    _cast_shadow(pdf, element, paint)
+
+
 def _draw(pdf, spread, size, measurer, images):
     _, height = size
+    cast_groups = set()
     for element in spread["elements"]:
         if element.get("hidden"):
             continue
+        group = element.get('shadowGroup')
+        if group and group not in cast_groups:
+            # Vignette cards share one shadow layer, so a card's shadow never falls on its neighbour.
+            cast_groups.add(group)
+            for member in spread["elements"]:
+                if member.get('shadowGroup') == group and not member.get('hidden'):
+                    pdf.saveState()
+                    _rotate(pdf, member, height)
+                    _cast_photo_shadow(pdf, member, height)
+                    pdf.restoreState()
         x, top, w, h = element["box"]
         bottom = height - top - h
         pdf.saveState()
         pdf.setFillAlpha(element.get("opacity",100)/100)
         pdf.setStrokeAlpha(element.get("opacity",100)/100)
-        if element.get('angle'):
-            cx,cy=element.get('rotation_center',[x+w/2,top+h/2])
-            pdf.translate(cx*mm,(height-cy)*mm)
-            pdf.rotate(-element['angle'])
-            pdf.translate(-cx*mm,-(height-cy)*mm)
+        _rotate(pdf, element, height)
         stroke_width=element.get('strokeWidth',0) or 0
         stroke_alpha=element.get("opacity",100)/100 * element.get('strokeOpacity',100)/100
         pdf.setStrokeAlpha(stroke_alpha)
@@ -149,17 +195,9 @@ def _draw(pdf, spread, size, measurer, images):
             if not element["photo"] and not element.get("required"):
                 pdf.restoreState()
                 continue
-            path = pdf.beginPath()
-            if element["mask"] == "ellipse":
-                path.ellipse(x * mm, bottom * mm, w * mm, h * mm)
-            else:
-                radius=min(element.get('radius',0),w/2,h/2)*mm
-                if radius: path.roundRect(x*mm,bottom*mm,w*mm,h*mm,radius)
-                else: path.rect(x * mm, bottom * mm, w * mm, h * mm)
-            def paint_photo_shadow(color):
-                pdf.setFillColor(HexColor(color))
-                pdf.drawPath(path, stroke=0, fill=1)
-            _cast_shadow(pdf, element, paint_photo_shadow)
+            path = _photo_path(pdf, element, height)
+            if not element.get('shadowGroup'):
+                _cast_photo_shadow(pdf, element, height)
             align = element.get('strokeAlign') or 'center'
             if stroke_width and align == 'outside' and element['photo']:
                 pdf.setLineWidth(stroke_width * 2 * mm)

@@ -3,7 +3,7 @@ from copy import deepcopy
 import math
 import re
 from .layout_engine import canonical_hash
-from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, entries_from, fit, resolve, rules_of
+from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, categories_of, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
 
 
@@ -164,8 +164,9 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     applied, conflicts = [], []
     overrides_by_key = {o['key']:o for o in overrides}
     found = set()
+    categories = categories_of(master)
     def slot_for(key, spread_key, bounds, pick, section, owner, item):
-        c = resolve(pick)
+        c = resolve(pick, categories)
         target = owner['id'] if c['include'] == 'owner' else item['id'] if c['include'] == 'item' and item else None
         shared_key = re.sub(r'\[student:[^\]]*\]', '[*]', key)
         personal = c['include'] == 'owner'
@@ -265,14 +266,14 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                                 slot={'key':key+'/'+cell['id'],'box':fb,'opacity':layer.get('opacity',100)}
                                 if source=='class':
                                     add({**slot,'type':'photo','photo':None,'crop':None,'mask':'rect','required':True},
-                                        slot={**slot_for(slot['key'],spread_key,fb,cell.get('pick'),section,owner,item),'cell_fill':layer.get('fill','#e6e1ea'),'crop_pref':(cell.get('cropX',50),cell.get('cropY',50),1)})
+                                        slot={**slot_for(slot['key'],spread_key,fb,cell.get('pick'),section,owner,item),'cell_fill':layer.get('fill','#e6e1ea'),'crop_pref':(cell.get('cropX',50),cell.get('cropY',50),cell.get('cropZoom',1))})
                                     continue
                                 elif source=='custom':
                                     photo=snapshot.get('master_assets',{}).get(cell['id'])
                                 else:
                                     photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
                                 if photo:
-                                    add({**slot,'type':'photo','photo':photo,'crop':crop(photo,fb,cell.get('cropX',50),cell.get('cropY',50)),'mask':'rect','required':True})
+                                    add({**slot,'type':'photo','photo':photo,'crop':crop(photo,fb,cell.get('cropX',50),cell.get('cropY',50),cell.get('cropZoom',1)),'mask':'rect','required':True})
                                 else:
                                     add({**slot,'type':'rect','fill':layer.get('fill','#e6e1ea')})
                         elif layer['type']=='grid':
@@ -281,10 +282,9 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                             if not geo:
                                 issue('error',key,'Виньетки не помещаются'); continue
                             frame_style={key:appearance[key] for key in ('stroke','strokeWidth','strokeDash','strokeAlign','strokeCap','strokeJoin','strokeOpacity') if key in appearance}
-                            if stroke_width and layer.get('strokeAlign')=='outside':
-                                add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
-                            if layer.get('shadow') or (stroke_width and layer.get('strokeAlign')=='outside'):
-                                add({'key':key+'/backing','type':'rect','box':bounds,'fill':page['background'],'opacity':layer.get('opacity',100),'shadow':layer.get('shadow'),'strokeWidth':0},False)
+                            # Corners, stroke and shadow belong to each portrait, not to the vignette area.
+                            photo_style={'radius':layer.get('radius',0),**frame_style}
+                            if isinstance(layer.get('shadow'),dict): photo_style.update(shadow=layer['shadow'],shadowGroup=key)
                             cols=geo['cols']; cw=geo['cell_w']; ch=geo['cell_h']; pw=geo['photo_w']
                             size=layer['fontSize']
                             # Shared reduction for the complete source, not individual cards.
@@ -293,7 +293,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                             for i,person in enumerate(records):
                                 x=bounds[0]+geo['offset_x']+(i%cols)*(cw+layer['gap']); y=bounds[1]+geo['offset_y']+(i//cols)*(ch+layer['gap'])
                                 pk=key+'/card['+('student:' if layer['source']=='students' else 'teacher:')+person['id']+']'
-                                add(photo_element(pk+'/photo',[x,y,pw,geo['photo_h']],photo_for(person)),False)
+                                add({**photo_element(pk+'/photo',[x,y,pw,geo['photo_h']],photo_for(person)),**photo_style},False)
                                 name_y=y+geo['photo_h']+geo['photo_name_gap']
                                 name_height=measurer.height(name(person),font,size,size*float(layer.get('lineHeight') or 1.25),cw,layer.get('letterSpacing') or 0)
                                 add(text_element(pk+'/name',[x,name_y,cw,geo['name_h']],name(person),size),False)
@@ -307,8 +307,6 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                                         if layer.get('detailUnderline'): detail_element['underline']=True
                                         if layer.get('detailStrike'): detail_element['strike']=True
                                         add(detail_element,False)
-                            if stroke_width and layer.get('strokeAlign')!='outside':
-                                add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
                         elif layer['type']=='svg':
                             add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d'),'flipX':bool(layer.get('flipX')),'flipY':bool(layer.get('flipY'))})
                         else:
@@ -321,7 +319,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         groups[owner_key]=group
         variants.append({'owner':owner_key,'name':name(owner),'kind':'student','sequence':sequence})
     if 'general' in snapshot:
-        report = Picker(entries, snapshot['photos'], rules_of(master), students).assign(slots)
+        report = Picker(entries, snapshot['photos'], rules_of(master), students, categories).assign(slots)
     else:
         report = _legacy_assign(slots, snapshot.get('general_photos', []))
     for slot in slots:

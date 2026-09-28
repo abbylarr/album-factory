@@ -69,23 +69,42 @@ def validate(document):
         safety(document['safety'], page_width, page_height)
     if 'photoRules' in document:
         rules = document['photoRules']
-        check(isinstance(rules, dict) and set(rules) <= {'reuse', 'coverageMin', 'coverageMax', 'rhythm', 'chronology'}, 'Неверные правила общих фото')
+        check(isinstance(rules, dict) and set(rules) <= {'reuse', 'coverageMin', 'coverageMax', 'rhythm', 'chronology', 'mixShoots', 'posedFirst'}, 'Неверные правила общих фото')
         check(rules.get('reuse', 'album') in {'album', 'section', 'allow'}, 'Неверное правило повторов')
         check(isinstance(rules.get('coverageMin', 1), int) and 0 <= rules.get('coverageMin', 1) <= 10, 'Неверный минимум появлений')
         check(isinstance(rules.get('coverageMax', 0), int) and 0 <= rules.get('coverageMax', 0) <= 50, 'Неверный максимум появлений')
         check(not rules.get('coverageMax') or rules['coverageMax'] >= rules.get('coverageMin', 1), 'Максимум появлений меньше минимума')
-        check(all(isinstance(rules.get(k, True), bool) for k in ('rhythm', 'chronology')), 'Неверные правила общих фото')
-    def pick(value, section):
-        from .photo_pick import ROLES
-        check(isinstance(value, dict) and set(value) <= {'role', 'buckets', 'include', 'scale', 'tags', 'style', 'quality'}, 'Неверный подбор общего фото')
-        check(value.get('role', 'any') in ROLES, 'Неизвестная роль слота')
+        check(all(isinstance(rules.get(k, True), bool) for k in ('rhythm', 'chronology', 'mixShoots', 'posedFirst')), 'Неверные правила общих фото')
+    def filters(value, message):
         def subset(key, allowed, limit):
             items = value.get(key)
-            check(items is None or (isinstance(items, list) and len(items) <= limit and len(set(items)) == len(items) and set(items) <= set(allowed)), 'Неверный фильтр общего фото')
-        subset('buckets', gm.BUCKETS, 6); subset('scale', gm.SCALES, 5); subset('tags', TAGS, 12)
+            check(items is None or (isinstance(items, list) and len(items) <= limit and len(set(items)) == len(items) and set(items) <= set(allowed)), message)
+        subset('people', PEOPLE, 5); subset('buckets', gm.BUCKETS, 6); subset('scale', gm.SCALES, 5); subset('tags', TAGS, 12)
+        check(value.get('style') in {None, 'posed', 'candid'} and value.get('quality') in {None, 'best', 'good'}, message)
+    def pick(value, section):
+        from .photo_pick import LEGACY_ROLES
+        check(isinstance(value, dict), 'Неверный подбор общего фото')
+        if 'category' in value:
+            check(set(value) <= {'category', 'who'} and value['category'] in category_ids, 'Неизвестная категория общих фото')
+            check(value.get('who') in {None, 'hero', 'owner'}, 'Неверное условие «кто на фото»')
+            check(value.get('who') != 'hero' or section.get('kind') == 'repeat', 'Герой разворота есть только в личных разворотах')
+            return
+        check(set(value) <= {'role', 'buckets', 'include', 'scale', 'tags', 'style', 'quality'}, 'Неверный подбор общего фото')
+        check(value.get('role', 'any') in LEGACY_ROLES, 'Неизвестная роль слота')
+        filters(value, 'Неверный фильтр общего фото')
         check(value.get('include') in {None, 'owner', 'item'}, 'Неверное условие «кто на фото»')
-        check(value.get('include') != 'item' or section.get('kind') == 'repeat', 'Ученик разворота доступен только в личных разворотах')
-        check(value.get('style') in {None, 'posed', 'candid'} and value.get('quality') in {None, 'best', 'good'}, 'Неверный фильтр общего фото')
+        check(value.get('include') != 'item' or section.get('kind') == 'repeat', 'Герой разворота есть только в личных разворотах')
+    from .photo_pick import CATEGORIES, PEOPLE
+    category_ids, seen = set(CATEGORIES), set()
+    if 'photoCategories' in document:
+        items = document['photoCategories']
+        check(isinstance(items, list) and len(items) <= 40, 'Неверные категории общих фото')
+        for item in items:
+            check(isinstance(item, dict) and set(item) <= {'id', 'name', 'people', 'scale', 'tags', 'style', 'quality'}, 'Неверная категория общих фото')
+            check(isinstance(item.get('id'), str) and re.fullmatch(r'[\w-]{1,40}', item['id']) and item['id'] not in seen, 'Неверная категория общих фото')
+            check(isinstance(item.get('name'), str) and 1 <= len(item['name'].strip()) <= 40, 'Название категории — от 1 до 40 символов')
+            filters(item, 'Неверный фильтр категории')
+            seen.add(item['id']); category_ids.add(item['id'])
     def color(value):
         return isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value)
     def image_data(value):
@@ -215,6 +234,7 @@ def validate(document):
                             image_data(layer['dataUrl'])
                     if kind == 'collage':
                         check(number(layer.get('gapX', 4), 0, 40) and number(layer.get('gapY', 4), 0, 40), 'Неверные зазоры коллажа')
+                        check(isinstance(layer.get('gapLinked', True), bool), 'Неверная связь зазоров коллажа')
                         check(color(layer.get('fill', '#e6e1ea')), 'Неверная заливка коллажа')
                         rows = layer.get('rows')
                         check(isinstance(rows, list) and 1 <= len(rows) <= 8, 'В коллаже от 1 до 8 рядов')
@@ -236,6 +256,7 @@ def validate(document):
                                 if 'pick' in cell:
                                     pick(cell['pick'], section)
                                 check(all(number(cell.get(k, 50), 0, 100) for k in ('cropX', 'cropY')), 'Неверное кадрирование')
+                                check(number(cell.get('cropZoom', 1), 1, 4), 'Неверный масштаб кадрирования')
                                 if cell.get('dataUrl'):
                                     image_data(cell['dataUrl'])
                         for row in rows:

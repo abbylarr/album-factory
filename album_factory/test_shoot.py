@@ -94,5 +94,12 @@ def synthetic(students, count=None, seed=7):
                         'event': event, 'quality': meta['quality'], 'defect': None, 'bucket': meta['people']['bucket'],
                         'count': meta['people']['count'], 'subjects': meta['people']['subjects'], 'scale': meta['scale'],
                         'persons': meta['persons'], 'safe_box': meta['safe_box'], 'subject_box': meta['subject_box'],
-                        'tags': meta['tags'], 'style': meta['style'], 'smile': meta['smile'], 'flags': {}})
+                        'tags': meta['tags'], 'style': meta['style'], 'smile': meta['smile'], 'flags': {},
+                        'shoot': 'test-shoot-' + ('a' if event < len(TAG_BY_EVENT) // 2 else 'b')})
+    # Posed groups are shot in series: the best frame goes to shared spreads, the double stays for personal ones.
+    for entry in [e for e in entries if e['style'] == 'posed' and e['count'] >= 4 and e['bucket'] != 'class']:
+        double = f"{entry['id']}-2"
+        photos[double] = dict(photos[entry['id']])
+        entry['series'] = entry['id']
+        entries.append({**entry, 'id': double, 'alt': True, 'quality': round(entry['quality'] * .95, 3), 'sequence': entry['sequence'] + .5})
     return entries, photos

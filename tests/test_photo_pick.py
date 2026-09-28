@@ -1,4 +1,4 @@
-"""Slot roles, crops and album-wide assignment of general photos."""
+"""Slot categories, hero fallbacks, crops and album-wide assignment of general photos."""
 import unittest
 
 from album_factory import photo_pick as pp
@@ -48,10 +48,18 @@ class FitTests(unittest.TestCase):
         self.assertLessEqual(tall[1], .1 * 6000)
         self.assertGreaterEqual(tall[1] + tall[3], .3 * 6000)
 
-    def test_roles_resolve_with_overrides(self):
-        c = pp.resolve({'role': 'friends', 'scale': None})
-        self.assertEqual(c['include'], 'owner'); self.assertIsNone(c['scale'])
-        self.assertEqual(pp.resolve({'role': 'unknown'})['role'], 'any')
+    def test_categories_resolve_with_master_edits_and_legacy_roles(self):
+        c = pp.resolve({'category': 'few', 'who': 'hero'})
+        self.assertEqual((c['people'], c['include'], c['fallback']), (['few'], 'item', ['candid', 'dup']))
+        self.assertEqual(pp.resolve({'category': 'missing'})['category'], 'any')
+        categories = pp.categories_of({'photoCategories': [{'id': 'wide', 'name': 'Очень общий', 'scale': ['wide'], 'people': ['class']},
+                                                           {'id': 'mine', 'name': 'Моё', 'style': 'candid'}]})
+        self.assertEqual(categories['wide']['name'], 'Очень общий')
+        self.assertEqual(pp.resolve({'category': 'wide'}, categories)['people'], ['class'])
+        self.assertEqual(pp.resolve({'category': 'mine'}, categories)['style'], 'candid')
+        legacy = pp.resolve({'role': 'friends', 'scale': None, 'buckets': ['pair', 'group']})
+        self.assertEqual((legacy['include'], legacy['scale'], legacy['people']), ('owner', None, ['few', 'subgroup']))
+        self.assertEqual(pp.resolve({'role': 'unknown'})['category'], 'any')
 
 
 class PickerTests(unittest.TestCase):
@@ -61,20 +69,50 @@ class PickerTests(unittest.TestCase):
     def picker(self, rules=None, entries=None):
         return pp.Picker(entries or self.entries, self.photos, {**pp.DEFAULT_RULES, **(rules or {})}, STUDENTS)
 
-    def test_roles_choose_matching_photos_without_repeats(self):
-        slots = [slot('class', {'role': 'class_photo'}, (180, 110), order=0), slot('close', {'role': 'close_up'}, (60, 80), order=1),
-                 slot('life', {'role': 'life'}, (120, 90), order=2), slot('air', {'role': 'atmosphere'}, (90, 60), order=3)]
+    def test_categories_choose_matching_photos_without_repeats(self):
+        names = ['class', 'subgroup', 'few', 'solo', 'candid', 'wide', 'empty']
+        slots = [slot(n, {'category': n}, (180, 110) if n in ('class', 'wide') else (90, 70), order=i) for i, n in enumerate(names)]
         self.picker().assign(slots)
         by = {e['id']: e for e in self.entries}
-        self.assertEqual(by[slots[0]['result']['photo']]['bucket'], 'class')
-        self.assertEqual(slots[1]['result']['scale'], 'close')
-        self.assertIn(by[slots[2]['result']['photo']]['bucket'], ('small_group', 'group'))
-        self.assertEqual(by[slots[3]['result']['photo']]['bucket'], 'none')
-        self.assertEqual(len({s['result']['photo'] for s in slots}), 4)
+        got = {s['ident']: by[s['result']['photo']] for s in slots}
+        for name in ('class', 'subgroup', 'few', 'solo'):
+            self.assertEqual(pp.people_of(got[name]), name)
+        self.assertEqual(pp.people_of(got['empty']), 'none')
+        self.assertEqual(got['candid']['style'], 'candid')
+        self.assertEqual(slots[names.index('wide')]['result']['scale'], 'wide')
+        self.assertFalse(any(e['alt'] for e in got.values()), 'series doubles stay out of ordinary slots')
+        self.assertEqual(len({s['result']['photo'] for s in slots}), len(names))
         self.assertTrue(all(not s['result']['relaxed'] for s in slots))
 
+    def test_hero_slots_show_the_hero_prominently_and_fall_back_like_a_designer(self):
+        hero = 's5'
+        mine = [e for e in self.entries if hero in e['subjects']]
+        spread = [slot(f'h{i}', {'category': c, 'who': 'hero'}, (90, 90), target=hero, spread='me', order=i)
+                  for i, c in enumerate(('solo', 'few', 'candid'))]
+        self.picker().assign(spread)
+        for s in spread:
+            self.assertIn(hero, next(e for e in self.entries if e['id'] == s['result']['photo'])['subjects'])
+        # Without pairs or candids of the hero, a double of a posed group with the hero is taken.
+        doubles = [e for e in mine if e['alt']]
+        self.assertTrue(doubles)
+        only = [e for e in mine if pp.people_of(e) == 'subgroup' and e['style'] == 'posed']
+        lone = [slot('pair', {'category': 'few', 'who': 'hero'}, (90, 90), target=hero)]
+        self.picker(entries=only).assign(lone)
+        self.assertEqual(lone[0]['result']['relaxed'], ['dup'])
+        self.assertTrue(next(e for e in only if e['id'] == lone[0]['result']['photo'])['alt'])
+
+    def test_one_spread_mixes_shoots_and_posed_photos_come_first(self):
+        spread = [slot(f'm{i}', {'category': 'few'}, (90, 90), spread='mix', order=i) for i in range(4)]
+        self.picker({'chronology': False}).assign(spread)
+        shoots = [next(e for e in self.entries if e['id'] == s['result']['photo'])['shoot'] for s in spread]
+        self.assertEqual(len(set(shoots)), 2)
+        early, late = slot('first', None, (90, 70), order=0, spread='a'), slot('last', None, (90, 70), order=9, spread='b')
+        self.picker({'chronology': False}).assign([early, late])
+        style = {e['id']: e['style'] for e in self.entries}
+        self.assertEqual((style[early['result']['photo']], style[late['result']['photo']]), ('posed', 'candid'))
+
     def test_personal_slots_show_their_owner_and_may_differ_per_variant(self):
-        slots = [slot(f'friends-{o}', {'role': 'friends'}, (90, 90), owner=o, personal=True, target=o) for o in ('s1', 's2')]
+        slots = [slot(f'friends-{o}', {'category': 'few', 'who': 'owner'}, (90, 90), owner=o, personal=True, target=o) for o in ('s1', 's2')]
         self.picker().assign(slots)
         for s in slots:
             entry = next(e for e in self.entries if e['id'] == s['result']['photo'])
@@ -82,10 +120,10 @@ class PickerTests(unittest.TestCase):
 
     def test_relaxation_is_reported_and_reuse_is_last(self):
         few = [e for e in self.entries if e['bucket'] == 'pair'][:1]
-        slots = [slot('a', {'role': 'class_photo'}, order=0), slot('b', None, order=1)]
+        slots = [slot('a', {'category': 'class'}, order=0), slot('b', None, order=1)]
         report = self.picker(entries=few).assign(slots)
         self.assertEqual(slots[0]['result']['photo'], few[0]['id'])
-        self.assertIn('buckets', slots[0]['result']['relaxed'])
+        self.assertIn('people', slots[0]['result']['relaxed'])
         self.assertIn('reuse', slots[1]['result']['relaxed'])
         self.assertEqual(report['slots']['a']['candidates'], 0)
 
