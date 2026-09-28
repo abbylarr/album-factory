@@ -36,7 +36,7 @@ assert(counted.includes('upload-strip'),'a shoot with photos gets the compact up
 assert(vm.runInContext("shootBody({id:'empty',kind:'portrait'})",c).includes('class="dropzone"'));
 delete c.needsReview;
 console.log('Shoot body: filters with counts, compact upload, no inline action bar: OK');
-for(const n of ['needsReview','visiblePhotos','shootStatus','renderWorkspace','folderCard','fmtDate'])vm.runInContext(source.split('\n').find(l=>l.startsWith('function '+n+'(')||l.startsWith('const '+n+'=')),c);
+for(const n of ['needsReview','visiblePhotos','shootStatus','renderWorkspace','folderCard','teacherFolderCard','fmtDate'])vm.runInContext(source.split('\n').find(l=>l.startsWith('function '+n+'(')||l.startsWith('const '+n+'=')),c);
 c.photoLabel=n=>`${n} фото`;
 state.order.shoots=[{id:'portrait',kind:'portrait',title:'Портреты',shot_on:'2026-09-20'},{id:'general',kind:'general',title:'Прогулка'}];
 state.order.photos=[{id:'p',shoot_id:'portrait',status:'ready',uncertain:1},{id:'g',shoot_id:'general',shoot_type:'general',status:'ready'}];

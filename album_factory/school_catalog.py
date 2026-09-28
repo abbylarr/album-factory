@@ -7,6 +7,10 @@ same from the order page. Nothing here is shared between studios.
 """
 from __future__ import annotations
 
+import hashlib
+import sqlite3
+from pathlib import Path
+
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -21,6 +25,9 @@ def init(con):
     con.execute("""CREATE TABLE IF NOT EXISTS order_teachers (
       order_id TEXT NOT NULL, teacher_id TEXT NOT NULL, position INTEGER NOT NULL,
       is_class_teacher INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (order_id, teacher_id))""")
+    con.execute("""CREATE TABLE IF NOT EXISTS teacher_photos (
+      id TEXT PRIMARY KEY, school_id TEXT NOT NULL, order_id TEXT, filename TEXT NOT NULL,
+      sha TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (school_id, sha))""")
     con.execute("""CREATE TABLE IF NOT EXISTS order_teacher_state (
       order_id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL)""")
     schools = {r[1] for r in con.execute("PRAGMA table_info(schools)")}
@@ -36,6 +43,7 @@ def init(con):
 def forget(con, order_id):
     con.execute("DELETE FROM order_teachers WHERE order_id=?", (order_id,))
     con.execute("DELETE FROM order_teacher_state WHERE order_id=?", (order_id,))
+    con.execute("UPDATE teacher_photos SET order_id=NULL WHERE order_id=?", (order_id,))
 
 
 def clean(text):
@@ -103,6 +111,7 @@ def order_teachers_body(con, order_id, public=False):
     if not public:
         layout = con.execute("SELECT generated_at FROM order_layouts WHERE order_id=?", (order_id,)).fetchone()
         body.update(updated_at=state["updated_at"] if state else None, updated_by=state["updated_by"] if state else None,
+                    unsorted_photos=con.execute("SELECT COUNT(*) FROM teacher_photos WHERE school_id=?", (school_id,)).fetchone()[0] if school else 0,
                     layout_outdated=bool(state and layout and state["updated_at"] > layout["generated_at"]))
     return body
 
@@ -156,6 +165,11 @@ class TeacherInput(BaseModel):
     first_name: str = Field(default="", max_length=60)
     patronymic: str = Field(default="", max_length=60)
     subject: str = Field(default="", max_length=100)
+
+
+class AssignInput(BaseModel):
+    teacher_id: str | None = None
+    teacher: TeacherInput | None = None
 
 
 class ChoiceInput(BaseModel):
@@ -235,23 +249,28 @@ def install(app, s):
             if con.execute("SELECT 1 FROM order_terms WHERE school_id=?", (school_id,)).fetchone():
                 raise HTTPException(409, "У школы есть заказы. Удалить можно только школу без заказов")
             paths = [row[0] for row in con.execute("SELECT portrait_path FROM teachers WHERE school_id=?", (school_id,))]
+            paths += [f"photos/tphoto-{row[0]}.jpg" for row in con.execute("SELECT id FROM teacher_photos WHERE school_id=?", (school_id,))]
+            con.execute("DELETE FROM teacher_photos WHERE school_id=?", (school_id,))
             con.execute("DELETE FROM teachers WHERE school_id=?", (school_id,))
             con.execute("DELETE FROM schools WHERE id=?", (school_id,))
         for path in paths:
             remove_portrait_files(path)
         return {"ok": True}
 
-    @app.post("/api/schools/{school_id}/teachers", status_code=201)
-    def create_teacher(school_id: str, payload: TeacherInput):
+    def insert_teacher(con, school_id, payload):
         values = [clean(v) for v in (payload.last_name, payload.first_name, payload.patronymic, payload.subject)]
         if not values[0]:
             raise HTTPException(422, "Укажите фамилию учителя")
+        teacher_id = s.uid()
+        con.execute("""INSERT INTO teachers (id,school_id,last_name,first_name,patronymic,subject,defined,created_at)
+            VALUES (?,?,?,?,?,?,1,?)""", (teacher_id, school_id, *values, s.now()))
+        return teacher_id
+
+    @app.post("/api/schools/{school_id}/teachers", status_code=201)
+    def create_teacher(school_id: str, payload: TeacherInput):
         with s.db() as con:
             require_school(con, school_id)
-            teacher_id = s.uid()
-            con.execute("""INSERT INTO teachers (id,school_id,last_name,first_name,patronymic,subject,defined,created_at)
-                VALUES (?,?,?,?,?,?,1,?)""", (teacher_id, school_id, *values, s.now()))
-            return teacher_view(require_teacher(con, teacher_id))
+            return teacher_view(require_teacher(con, insert_teacher(con, school_id, payload)))
 
     @app.patch("/api/teachers/{teacher_id}")
     def edit_teacher(teacher_id: str, payload: TeacherInput):
@@ -321,6 +340,99 @@ def install(app, s):
         with s.db() as con:
             teacher = require_teacher(con, teacher_id)
         return portrait_file(teacher, variant)
+
+    # Unsorted teacher photos: uploaded from the catalogue or from an order of the school,
+    # then each one is given to a teacher and becomes that teacher's portrait.
+    def photo_view(row):
+        return {"id": row["id"], "filename": row["filename"], "order_id": row["order_id"], "created_at": row["created_at"]}
+
+    def require_photo(con, photo_id):
+        row = con.execute("""SELECT p.* FROM teacher_photos p JOIN schools s ON s.id=p.school_id
+            WHERE p.id=? AND s.studio_id=?""", (photo_id, mvp._studio())).fetchone()
+        if row is None:
+            raise HTTPException(404, "Фотография не найдена")
+        return row
+
+    @app.get("/api/schools/{school_id}/teacher-photos")
+    def teacher_photos(school_id: str):
+        with s.db() as con:
+            require_school(con, school_id)
+            return [photo_view(row) for row in con.execute(
+                "SELECT * FROM teacher_photos WHERE school_id=? ORDER BY created_at, filename, id", (school_id,))]
+
+    @app.post("/api/schools/{school_id}/teacher-photos", status_code=201)
+    async def upload_teacher_photo(school_id: str, request: Request, filename: str, order_id: str | None = None):
+        if len(filename) > 240 or not filename.strip():
+            raise HTTPException(422, "Некорректное имя файла")
+        with s.db() as con:
+            require_school(con, school_id)
+            if order_id:
+                s.require_order(con, order_id)
+                if order_school_id(con, order_id) != school_id:
+                    raise HTTPException(422, "Заказ относится к другой школе")
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > s.MAX_BYTES:
+                raise HTTPException(413, "Файл больше 30 МБ")
+        sha = hashlib.sha256(body).hexdigest()
+        with s.db() as con:
+            existing = con.execute("SELECT id FROM teacher_photos WHERE school_id=? AND sha=?", (school_id, sha)).fetchone()
+            if existing:
+                return {"id": existing["id"], "duplicate": True}
+        photo_id = s.uid()
+        s.prepare_photo_files(bytes(body), "tphoto-" + photo_id)
+        with s.db() as con:
+            try:
+                con.execute("INSERT INTO teacher_photos VALUES (?,?,?,?,?,?)",
+                            (photo_id, school_id, order_id, Path(filename).name, sha, s.now()))
+            except sqlite3.IntegrityError:
+                remove_portrait_files(f"photos/tphoto-{photo_id}.jpg")
+                existing = con.execute("SELECT id FROM teacher_photos WHERE school_id=? AND sha=?", (school_id, sha)).fetchone()
+                return {"id": existing["id"], "duplicate": True}
+        return {"id": photo_id, "duplicate": False}
+
+    @app.get("/api/teacher-photos/{photo_id}/{variant}")
+    def teacher_photo_file(photo_id: str, variant: str):
+        if variant not in {"thumb", "full"}:
+            raise HTTPException(404, "Фотография не найдена")
+        with s.db() as con:
+            require_photo(con, photo_id)
+        path = s.DATA / "photos" / (f"tphoto-{photo_id}" + (".thumb.jpg" if variant == "thumb" else ".jpg"))
+        if not path.is_file():
+            raise HTTPException(404, "Фотография не найдена")
+        return FileResponse(path, media_type="image/jpeg")
+
+    @app.delete("/api/teacher-photos/{photo_id}")
+    def delete_teacher_photo(photo_id: str):
+        with s.db() as con:
+            require_photo(con, photo_id)
+            con.execute("DELETE FROM teacher_photos WHERE id=?", (photo_id,))
+        remove_portrait_files(f"photos/tphoto-{photo_id}.jpg")
+        return {"ok": True}
+
+    @app.post("/api/teacher-photos/{photo_id}/assign")
+    def assign_teacher_photo(photo_id: str, payload: AssignInput):
+        """The photo becomes the teacher's portrait; a new teacher can be created on the spot."""
+        if bool(payload.teacher_id) == bool(payload.teacher):
+            raise HTTPException(422, "Выберите учителя или добавьте нового")
+        with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
+            photo = require_photo(con, photo_id)
+            teacher_id = insert_teacher(con, photo["school_id"], payload.teacher) if payload.teacher else payload.teacher_id
+            teacher = require_teacher(con, teacher_id)
+            if teacher["school_id"] != photo["school_id"]:
+                raise HTTPException(422, "Учитель из другой школы")
+            stem = "teacher-" + s.uid()
+            for suffix in PORTRAIT_SUFFIXES:
+                source = s.DATA / "photos" / (f"tphoto-{photo_id}" + suffix)
+                if source.is_file():
+                    source.rename(s.DATA / "photos" / (stem + suffix))
+            con.execute("UPDATE teachers SET portrait_path=? WHERE id=?", (f"photos/{stem}.jpg", teacher_id))
+            con.execute("DELETE FROM teacher_photos WHERE id=?", (photo_id,))
+            fresh = teacher_view(require_teacher(con, teacher_id))
+        remove_portrait_files(teacher["portrait_path"])
+        return fresh
 
     @app.get("/api/orders/{order_id}/teachers")
     def order_teachers(order_id: str):

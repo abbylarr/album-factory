@@ -45,8 +45,9 @@ const SchoolCatalog=(()=>{
     let school;try{school=await api('/schools/'+encodeURIComponent(id));}catch(error){if(version===routeVersion)$('#main').innerHTML=`<div class="page"><h1>Школа не найдена</h1><p class="error">${esc(error.message)}</p><a class="secondary" href="#schools">К каталогу школ</a></div>`;return;}
     if(version!==routeVersion)return;
     const teachers=school.teachers;
-    $('#main').innerHTML=`<div class="page schools-page"><div class="eyebrow"><a href="#schools">Каталог школ</a> / ${esc(school.city||'Школа')}</div><div class="page-heading"><div><h1 class="school-title">${esc(school.name)}</h1><p class="muted">${place(school)} · ${teacherLabel(school.teacher_count)} · ${orderLabel(school.order_count)}</p></div><div class="school-heading-actions"><button class="secondary" data-school="edit">Изменить</button>${school.order_count?'':'<button class="danger-button" data-school="delete">Удалить</button>'}</div></div><section class="forms-block teacher-add"><div class="forms-block-head"><h3>Добавить учителя</h3><small>Фото можно загрузить после добавления</small></div><form id="teacher-form" class="teacher-form">${teacherFields()}<button class="primary" type="submit">Добавить</button><p class="error" role="alert"></p></form></section><div class="forms-block-head teacher-list-head"><h2>Учителя <span class="heading-count">${teachers.length}</span></h2></div><div class="teacher-grid">${teachers.map(teacherCard).join('')||'<div class="empty-state"><h3>Учителей пока нет</h3><p>Добавьте учителей школы. Класс отметит нужных в личном кабинете и выберет классного руководителя.</p></div>'}</div></div>`;
+    $('#main').innerHTML=`<div class="page schools-page"><div class="eyebrow"><a href="#schools">Каталог школ</a> / ${esc(school.city||'Школа')}</div><div class="page-heading"><div><h1 class="school-title">${esc(school.name)}</h1><p class="muted">${place(school)} · ${teacherLabel(school.teacher_count)} · ${orderLabel(school.order_count)}</p></div><div class="school-heading-actions"><button class="secondary" data-school="edit">Изменить</button>${school.order_count?'':'<button class="danger-button" data-school="delete">Удалить</button>'}</div></div><section class="forms-block teacher-add"><div class="forms-block-head"><h3>Добавить учителя</h3><small>Фото можно загрузить после добавления</small></div><form id="teacher-form" class="teacher-form">${teacherFields()}<button class="primary" type="submit">Добавить</button><p class="error" role="alert"></p></form></section><section class="forms-block tphoto-panel" id="school-teacher-photos"></section><div class="forms-block-head teacher-list-head"><h2>Учителя <span class="heading-count">${teachers.length}</span></h2></div><div class="teacher-grid">${teachers.map(teacherCard).join('')||'<div class="empty-state"><h3>Учителей пока нет</h3><p>Добавьте учителей школы. Класс отметит нужных в личном кабинете и выберет классного руководителя.</p></div>'}</div></div>`;
     const main=$('#main .schools-page');
+    teacherPhotos($('#school-teacher-photos'),school.id);
     main.querySelector('[data-school="edit"]').onclick=()=>schoolForm(school);
     const remove=main.querySelector('[data-school="delete"]');
     if(remove)remove.onclick=async()=>{if(!confirm(`Удалить школу «${school.name}» вместе с учителями?`))return;try{await api('/schools/'+school.id,{method:'DELETE'});toast('Школа удалена');location.hash='schools';}catch(error){toast(error.message);}};
@@ -62,6 +63,56 @@ const SchoolCatalog=(()=>{
 
   function page(id){if(id)schoolPage(id);else listPage();}
 
+  // Teacher photos: uploaded from the catalogue or from an order of the school, then each is given to a teacher.
+  const uploads={};
+  const isImage=f=>/^image\/(jpe?g|pjpeg|png|x-png)$/i.test(f.type||'')||/\.(jpe?g|png)$/i.test(f.name);
+  async function upload(schoolId,files,orderId=null){
+    files=[...files].filter(isImage);if(!files.length){toast('Выберите файлы JPG или PNG');return;}
+    const run=uploads[schoolId]||(uploads[schoolId]={total:0,done:0,errors:[],queue:[],active:false});
+    run.total+=files.length;run.queue.push(...files.map(file=>({file,orderId})));drawProgress(schoolId);
+    if(run.active)return;run.active=true;
+    const worker=async()=>{while(run.queue.length){const {file,orderId}=run.queue.shift();try{if(file.size>30*1024*1024)throw Error('Файл больше 30 МБ');await api(`/schools/${encodeURIComponent(schoolId)}/teacher-photos?filename=${encodeURIComponent(file.name)}${orderId?'&order_id='+encodeURIComponent(orderId):''}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});}catch(error){run.errors.push(file.name+': '+error.message);}run.done++;drawProgress(schoolId);}};
+    await Promise.all(Array.from({length:3},worker));
+    run.active=false;toast(run.errors.length?'Загрузка завершена с ошибками':'Фото учителей загружены. Подпишите, кто на каждом снимке.');
+    const errors=run.errors;delete uploads[schoolId];
+    const root=document.querySelector(`[data-teacher-photos="${CSS.escape(schoolId)}"]`);if(root)await teacherPhotos(root,schoolId,root.dataset.order||null,errors);
+  }
+  function drawProgress(schoolId){const el=document.querySelector(`[data-teacher-photos="${CSS.escape(schoolId)}"] .teacher-upload-progress`),run=uploads[schoolId];if(el&&run)el.innerHTML=`<span>Загружаем ${run.done} из ${run.total}</span><progress max="${run.total}" value="${run.done}"></progress>`;}
+
+  function assignCard(photo,teachers){
+    return `<article class="tphoto" data-tphoto="${esc(photo.id)}"><img src="/api/teacher-photos/${encodeURIComponent(photo.id)}/thumb" alt="Фото учителя" loading="lazy"><div class="tphoto-body"><small title="${esc(photo.filename)}">${esc(photo.filename)}</small><label class="tphoto-who">Кто на фото?<select data-assign="${esc(photo.id)}"><option value="">Выберите учителя</option>${teachers.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}${t.has_portrait?' · заменить фото':''}</option>`).join('')}<option value="new">＋ Новый учитель…</option></select></label><form class="tphoto-new" hidden>${teacherFields()}<div class="tphoto-actions"><button class="primary" type="submit">Сохранить</button><button class="text-button" type="button" data-new-cancel>Отмена</button></div></form><p class="error" role="alert"></p><button type="button" class="text-button danger-text" data-tphoto-delete="${esc(photo.id)}">Удалить снимок</button></div></article>`;
+  }
+
+  async function teacherPhotos(root,schoolId,orderId=null,errors=[]){
+    root.dataset.teacherPhotos=schoolId;if(orderId)root.dataset.order=orderId;
+    let photos,school;
+    try{[photos,school]=await Promise.all([api(`/schools/${encodeURIComponent(schoolId)}/teacher-photos`),api(`/schools/${encodeURIComponent(schoolId)}`)]);}catch(error){root.innerHTML=`<p class="error">${esc(error.message)}</p>`;return;}
+    if(!root.isConnected)return;
+    const teachers=school.teachers,missing=teachers.filter(t=>!t.has_portrait).length;
+    root.innerHTML=`<div class="tphoto-head"><div><h3>Фото учителей</h3><p class="muted small">${photos.length?`Без подписи: ${photos.length}. Выберите, кто на каждом снимке, — фото станет портретом учителя в каталоге школы.`:'Загрузите портреты учителей: из съёмки этого года или из архива. Каждый снимок нужно подписать.'}${missing?` Без портрета: ${teacherLabel(missing)}.`:''}</p></div><div class="tphoto-buttons"><label class="primary">Загрузить фото<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple hidden data-tupload></label><label class="secondary">Папку<input type="file" webkitdirectory multiple hidden data-tupload></label></div></div><div class="teacher-upload-progress"></div>${errors.length?`<details class="error small"><summary>Не загружено: ${errors.length}</summary>${errors.map(e=>`<div>${esc(e)}</div>`).join('')}</details>`:''}<div class="tphoto-grid">${photos.map(p=>assignCard(p,teachers)).join('')}</div>${orderId?`<div class="tphoto-teachers"><div class="forms-block-head"><h3>Учителя школы <span class="heading-count">${teachers.length}</span></h3><a href="#schools/${encodeURIComponent(schoolId)}" class="text-button">Открыть в каталоге →</a></div><div class="tphoto-teacher-list">${teachers.map(t=>`<div class="tphoto-teacher"><span class="teacher-photo small">${avatar(t)}</span><span><strong>${esc(t.name)}</strong><small>${t.has_portrait?esc(t.subject):'Нет портрета'}</small></span></div>`).join('')||'<p class="muted small">Учителей пока нет — добавьте их прямо при подписи фото.</p>'}</div></div>`:''}`;
+    drawProgress(schoolId);
+    const refresh=()=>{if(orderId)teacherPhotos(root,schoolId,orderId);else schoolPage(schoolId);};
+    root.onchange=async e=>{
+      if(e.target.matches('[data-tupload]')){const files=[...e.target.files];e.target.value='';upload(schoolId,files,orderId);return;}
+      const select=e.target.closest('[data-assign]');if(!select)return;const card=select.closest('.tphoto'),form=card.querySelector('.tphoto-new');
+      if(select.value==='new'){form.hidden=false;form.elements.last_name.focus();return;}form.hidden=true;if(!select.value)return;
+      const teacher=teachers.find(t=>t.id===select.value);if(teacher.has_portrait&&!confirm(`Заменить портрет: ${teacher.name}?`)){select.value='';return;}
+      card.classList.add('busy');try{await api(`/teacher-photos/${encodeURIComponent(select.dataset.assign)}/assign`,json('POST',{teacher_id:select.value}));toast(`Портрет сохранён: ${teacher.name}`);refresh();}catch(error){card.classList.remove('busy');card.querySelector('.error').textContent=error.message;}
+    };
+    root.onsubmit=async e=>{const form=e.target.closest('.tphoto-new');if(!form)return;e.preventDefault();const card=form.closest('.tphoto');card.classList.add('busy');try{const t=await api(`/teacher-photos/${encodeURIComponent(card.dataset.tphoto)}/assign`,json('POST',{teacher:Object.fromEntries(new FormData(form))}));toast(`Учитель добавлен: ${t.name}`);refresh();}catch(error){card.classList.remove('busy');card.querySelector('.error').textContent=error.message;}};
+    root.onclick=async e=>{
+      if(e.target.closest('[data-new-cancel]')){const card=e.target.closest('.tphoto');card.querySelector('.tphoto-new').hidden=true;card.querySelector('select').value='';return;}
+      const del=e.target.closest('[data-tphoto-delete]');if(!del||!confirm('Удалить этот снимок?'))return;try{await api('/teacher-photos/'+encodeURIComponent(del.dataset.tphotoDelete),{method:'DELETE'});refresh();}catch(error){toast(error.message);}
+    };
+  }
+
+  // Order photos tab: the "Учителя" folder shows the school's teacher photos.
+  function orderFolder(order){
+    const root=document.createElement('div');root.className='tphoto-panel';
+    if(!order.school_id){root.innerHTML='<div class="empty-state"><h3>Школа не из каталога</h3><p>Чтобы загрузить фото учителей, выберите школу заказа из каталога: «⋯ → Изменить заказ».</p></div>';return root;}
+    root.innerHTML='<p class="muted">Загружаем фото учителей…</p>';teacherPhotos(root,order.school_id,order.id);return root;
+  }
+
   // Order page (Анкеты tab): teachers chosen for this class album.
   async function orderBlock(order){
     const el=$('#order-teachers');if(!el)return;const id=order.id;
@@ -71,12 +122,12 @@ const SchoolCatalog=(()=>{
     if(!data.teachers.length){el.innerHTML=`<p class="muted small">В каталоге у школы «${esc(data.school.name)}» пока нет учителей. <a href="#schools/${encodeURIComponent(data.school.id)}">Добавить учителей →</a></p>`;return;}
     const picked=data.teachers.filter(t=>t.selected).length;
     const who=data.updated_by==='client'?'Выбрал класс':data.updated_by==='photographer'?'Выбрал фотограф':'Класс ещё не выбрал учителей';
-    el.innerHTML=`<p class="muted small">${who}${data.chosen?` · ${teacherLabel(picked)} в альбоме`:''}${data.class_teacher_id?'':' · классный руководитель не выбран'}</p>${data.layout_outdated?'<p class="warn small">Состав учителей изменился после сборки макета. Пересоберите макет.</p>':''}<form id="order-teachers-form"><div class="teacher-choice-list">${data.teachers.map(t=>`<div class="teacher-choice"><label class="teacher-choice-main"><input type="checkbox" name="teacher" value="${esc(t.id)}" ${t.selected?'checked':''} ${data.locked?'disabled':''}><span class="teacher-photo small">${avatar(t)}</span><span><strong>${esc(t.name)}</strong><small>${esc(t.subject)}</small></span></label><label class="teacher-lead"><input type="radio" name="lead" value="${esc(t.id)}" ${t.is_class_teacher?'checked':''} ${data.locked?'disabled':''}>Кл. руководитель</label></div>`).join('')}</div>${data.locked?'<p class="muted small">Заказ в печати — состав учителей зафиксирован.</p>':'<p class="error" role="alert"></p><button class="secondary" type="submit">Сохранить учителей</button>'}</form>`;
+    el.innerHTML=`<p class="muted small">${who}${data.chosen?` · ${teacherLabel(picked)} в альбоме`:''}${data.class_teacher_id?'':' · классный руководитель не выбран'}</p>${data.unsorted_photos?`<p class="warn small">Фото учителей без подписи: ${data.unsorted_photos}. <a href="#order/${encodeURIComponent(id)}/photos" data-v2-teachers>Подписать →</a></p>`:''}${data.layout_outdated?'<p class="warn small">Состав учителей изменился после сборки макета. Пересоберите макет.</p>':''}<form id="order-teachers-form"><div class="teacher-choice-list">${data.teachers.map(t=>`<div class="teacher-choice"><label class="teacher-choice-main"><input type="checkbox" name="teacher" value="${esc(t.id)}" ${t.selected?'checked':''} ${data.locked?'disabled':''}><span class="teacher-photo small">${avatar(t)}</span><span><strong>${esc(t.name)}</strong><small>${esc(t.subject)}</small></span></label><label class="teacher-lead"><input type="radio" name="lead" value="${esc(t.id)}" ${t.is_class_teacher?'checked':''} ${data.locked?'disabled':''}>Кл. руководитель</label></div>`).join('')}</div>${data.locked?'<p class="muted small">Заказ в печати — состав учителей зафиксирован.</p>':'<p class="error" role="alert"></p><button class="secondary" type="submit">Сохранить учителей</button>'}</form>`;
     const form=$('#order-teachers-form');
     form.onchange=e=>{if(e.target.name==='lead'&&e.target.checked){const box=form.querySelector(`[name=teacher][value="${CSS.escape(e.target.value)}"]`);if(box)box.checked=true;}if(e.target.name==='teacher'&&!e.target.checked){const lead=form.querySelector(`[name=lead][value="${CSS.escape(e.target.value)}"]`);if(lead)lead.checked=false;}};
     form.onsubmit=async e=>{e.preventDefault();const ids=[...form.querySelectorAll('[name=teacher]:checked')].map(x=>x.value),lead=form.querySelector('[name=lead]:checked')?.value||null;try{await api(`/orders/${encodeURIComponent(id)}/teachers`,json('PUT',{teacher_ids:ids,class_teacher_id:lead}));toast('Учителя сохранены');orderBlock(order);}catch(error){form.querySelector('.error').textContent=error.message;}};
   }
 
-  document.addEventListener('click',e=>{if(e.target.closest('[data-school="new"]'))schoolForm(null);});
-  return {page,orderBlock};
+  document.addEventListener('click',e=>{if(e.target.closest('[data-school="new"]'))schoolForm(null);if(e.target.closest('[data-v2-teachers]'))state.shootId='teachers';});
+  return {page,orderBlock,upload,orderFolder};
 })();

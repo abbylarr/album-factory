@@ -135,6 +135,54 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(guest.put(base + '/teachers', json={'teacher_ids': []}).status_code, 409)
         self.assertTrue(guest.get(base + '/teachers').json()['locked'])
 
+    def test_teacher_photos_from_order_or_catalog_become_portraits(self):
+        school = self.school()
+        known = self.teacher(school['id'], 'Петрова')
+        order = self.order_for(school['id'])
+        from_order = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=IMG_1.jpg&order_id={order}', content=jpeg('#112233'))
+        self.assertEqual(from_order.status_code, 201, from_order.text)
+        again = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=copy.jpg', content=jpeg('#112233')).json()
+        self.assertEqual((again['id'], again['duplicate']), (from_order.json()['id'], True))
+        from_catalog = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=IMG_2.jpg', content=jpeg('#445566')).json()
+        spare = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=IMG_3.jpg', content=jpeg('#778899')).json()
+        pool = self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()
+        self.assertEqual([p['filename'] for p in pool], ['IMG_1.jpg', 'IMG_2.jpg', 'IMG_3.jpg'])
+        self.assertEqual(pool[0]['order_id'], order)
+        self.assertEqual(self.client.get(f'/api/orders/{order}/teachers').json()['unsorted_photos'], 3)
+        self.assertEqual(self.client.get(f'/api/teacher-photos/{spare["id"]}/thumb').status_code, 200)
+
+        other_school = self.school(city='Уфа')
+        other_order = self.order_for(other_school['id'])
+        self.assertEqual(self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=a.jpg&order_id={other_order}', content=jpeg()).status_code, 422)
+        stranger = self.teacher(other_school['id'], 'Чужая')
+        self.assertEqual(self.client.post(f'/api/teacher-photos/{spare["id"]}/assign', json={'teacher_id': stranger['id']}).status_code, 422)
+        self.assertEqual(self.client.post(f'/api/teacher-photos/{spare["id"]}/assign', json={}).status_code, 422)
+
+        assigned = self.client.post(f'/api/teacher-photos/{from_order.json()["id"]}/assign', json={'teacher_id': known['id']})
+        self.assertEqual(assigned.status_code, 200, assigned.text)
+        self.assertTrue(assigned.json()['has_portrait'])
+        first_version = assigned.json()['portrait_version']
+        created = self.client.post(f'/api/teacher-photos/{from_catalog["id"]}/assign', json={'teacher': {'last_name': 'Новикова', 'first_name': 'Ольга', 'subject': 'История'}})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual((created.json()['name'], created.json()['subject']), ('Новикова Ольга', 'История'))
+        self.assertTrue(created.json()['has_portrait'])
+        # A newer photo replaces the portrait and the old files go away.
+        replaced = self.client.post(f'/api/teacher-photos/{spare["id"]}/assign', json={'teacher_id': known['id']}).json()
+        self.assertNotEqual(replaced['portrait_version'], first_version)
+        self.assertFalse((s.DATA / 'photos' / (first_version + '.jpg')).exists())
+        self.assertEqual(self.client.get(f'/api/teachers/{known["id"]}/portrait/full').status_code, 200)
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json(), [])
+        self.assertEqual(self.client.get(f'/api/teacher-photos/{spare["id"]}/thumb').status_code, 404)
+
+        other = TestClient(self.client.app)
+        other.headers['origin'] = 'http://testserver'
+        other.post('/api/register', json={'email': 'c@studio.test', 'password': 'secret-pass', 'studio_name': 'Третья'})
+        leftover = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=x.jpg', content=jpeg('#000000')).json()
+        self.assertEqual(other.post(f'/api/schools/{school["id"]}/teacher-photos?filename=x.jpg', content=jpeg()).status_code, 404)
+        self.assertEqual(other.get(f'/api/teacher-photos/{leftover["id"]}/full').status_code, 404)
+        self.assertEqual(other.delete(f'/api/teacher-photos/{leftover["id"]}').status_code, 404)
+        self.assertEqual(self.client.delete(f'/api/teacher-photos/{leftover["id"]}').status_code, 200)
+
     def test_order_without_catalog_school_cannot_choose(self):
         guest, base = self.portal(self.order, manage=True)
         view = guest.get(base + '/teachers').json()
