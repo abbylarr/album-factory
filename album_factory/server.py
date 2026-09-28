@@ -206,6 +206,8 @@ async def lifespan(app):
     init_db()
     app.state.token = secrets.token_urlsafe(32)
     executor.submit(process_pending)
+    from .school_catalog import group_pending
+    executor.submit(group_pending, _sys.modules[__name__])
     yield
 
 

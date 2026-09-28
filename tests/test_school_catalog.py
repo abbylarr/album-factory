@@ -146,9 +146,10 @@ class SchoolCatalogTests(unittest.TestCase):
         from_catalog = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=IMG_2.jpg', content=jpeg('#445566')).json()
         spare = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=IMG_3.jpg', content=jpeg('#778899')).json()
         pool = self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()
-        self.assertEqual([p['filename'] for p in pool], ['IMG_1.jpg', 'IMG_2.jpg', 'IMG_3.jpg'])
-        self.assertEqual(pool[0]['order_id'], order)
-        self.assertEqual(self.client.get(f'/api/orders/{order}/teachers').json()['unsorted_photos'], 3)
+        photos = [p for group in pool['groups'] for p in group['photos']]
+        self.assertEqual([p['filename'] for p in photos], ['IMG_1.jpg', 'IMG_2.jpg', 'IMG_3.jpg'])
+        self.assertEqual((photos[0]['order_id'], photos[0]['status'], pool['pending']), (order, 'pending', 3))
+        self.assertEqual(self.client.get(f'/api/orders/{order}/teachers').json()['unsigned_groups'], 3)
         self.assertEqual(self.client.get(f'/api/teacher-photos/{spare["id"]}/thumb').status_code, 200)
 
         other_school = self.school(city='Уфа')
@@ -171,7 +172,7 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertNotEqual(replaced['portrait_version'], first_version)
         self.assertFalse((s.DATA / 'photos' / (first_version + '.jpg')).exists())
         self.assertEqual(self.client.get(f'/api/teachers/{known["id"]}/portrait/full').status_code, 200)
-        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json(), [])
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['groups'], [])
         self.assertEqual(self.client.get(f'/api/teacher-photos/{spare["id"]}/thumb').status_code, 404)
 
         other = TestClient(self.client.app)
@@ -182,6 +183,69 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(other.get(f'/api/teacher-photos/{leftover["id"]}/full').status_code, 404)
         self.assertEqual(other.delete(f'/api/teacher-photos/{leftover["id"]}').status_code, 404)
         self.assertEqual(self.client.delete(f'/api/teacher-photos/{leftover["id"]}').status_code, 200)
+
+    def test_class_signs_teacher_photo_and_other_frames_are_removed(self):
+        from album_factory.school_catalog import group_pending
+
+        class ColourFaces:
+            """Stands in for face embeddings: frames of one colour are one person."""
+            def extract(self, pixels):
+                mean = pixels.reshape(-1, 3).mean(axis=0)
+                return 'ready', list(mean / (sum(v * v for v in mean) ** .5))
+
+        school = self.school()
+        order = self.order_for(school['id'])
+        waiting = self.teacher(school['id'], 'Петрова', first='Анна')
+        pictured = self.teacher(school['id'], 'Сидорова')
+        self.client.put(f'/api/teachers/{pictured["id"]}/portrait', content=jpeg('#00ff00'))
+        upload = lambda name, colour: self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename={name}&order_id={order}', content=jpeg(colour)).json()['id']
+        red = [upload('r1.jpg', '#ff0000'), upload('r2.jpg', '#fd0101'), upload('r3.jpg', '#fb0202')]
+        blue = [upload('b1.jpg', '#0000ff'), upload('b2.jpg', '#0101fd')]
+        group_pending(s, ColourFaces())
+        pool = self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()
+        self.assertEqual(sorted(sorted(p['id'] for p in g['photos']) for g in pool['groups']), sorted([sorted(red), sorted(blue)]))
+        self.assertEqual(pool['pending'], 0)
+
+        # Any pupil (or the teacher) with the entry code can sign; no manage code needed.
+        guest, base = self.portal(order)
+        view = guest.get(base + '/teacher-photos').json()
+        self.assertEqual(len(view['groups']), 2)
+        self.assertEqual([t['name'] for t in view['teachers']], ['Петрова Анна Ивановна'])
+        self.assertEqual(guest.get(base + f'/teacher-photos/{red[1]}/thumb').status_code, 200)
+        self.assertEqual(guest.get(base + '/').json()['teachers']['unsigned'], 2)
+        self.assertEqual(guest.post(base + f'/teacher-photos/{red[1]}/sign', json={'teacher_id': pictured['id']}).status_code, 409)
+        self.assertEqual(guest.post(base + f'/teacher-photos/{red[1]}/sign', json={'teacher': {'last_name': 'Иванов'}}).status_code, 422)
+        signed = guest.post(base + f'/teacher-photos/{red[1]}/sign', json={'teacher_id': waiting['id']})
+        self.assertEqual(signed.status_code, 200, signed.text)
+        for photo_id in red:
+            self.assertFalse((s.DATA / 'photos' / f'tphoto-{photo_id}.jpg').exists())
+        catalog = {t['id']: t for t in self.client.get(f'/api/schools/{school["id"]}').json()['teachers']}
+        self.assertEqual((catalog[waiting['id']]['has_portrait'], catalog[waiting['id']]['portrait_by']), (True, 'client'))
+        self.assertEqual(guest.post(base + f'/teacher-photos/{red[0]}/sign', json={'teacher_id': waiting['id']}).status_code, 404)
+
+        # A teacher missing from the catalogue signs themselves in.
+        me = guest.post(base + f'/teacher-photos/{blue[0]}/sign', json={'teacher': {'last_name': 'Орлов', 'first_name': 'Игорь', 'subject': 'Физкультура'}})
+        self.assertEqual(me.status_code, 200, me.text)
+        self.assertEqual(me.json()['name'], 'Орлов Игорь')
+        self.assertEqual(guest.get(base + '/teacher-photos').json()['groups'], [])
+        self.assertFalse((s.DATA / 'photos' / f'tphoto-{blue[1]}.jpg').exists())
+
+        # The photographer can still replace a portrait the class chose.
+        again = upload('new.jpg', '#ffff00')
+        group_pending(s, ColourFaces())
+        replaced = self.client.post(f'/api/teacher-photos/{again}/assign', json={'teacher_id': waiting['id']}).json()
+        self.assertEqual(replaced['portrait_by'], 'photographer')
+
+        # Grouping can be fixed by hand: split a frame out, then put it back.
+        first, second = upload('x1.jpg', '#123456'), upload('x2.jpg', '#654321')
+        with s.db() as con:
+            con.execute("UPDATE teacher_photos SET status='ready' WHERE id IN (?,?)", (first, second))
+        joined = self.client.post(f'/api/teacher-photos/{second}/move', json={'group_id': first})
+        self.assertEqual(joined.json()['group_id'], first)
+        self.assertEqual(len(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['groups']), 1)
+        alone = self.client.post(f'/api/teacher-photos/{second}/move', json={}).json()
+        self.assertNotEqual(alone['group_id'], first)
+        self.assertEqual(self.client.post(f'/api/teacher-photos/{second}/move', json={'group_id': 'missing'}).status_code, 404)
 
     def test_order_without_catalog_school_cannot_choose(self):
         guest, base = self.portal(self.order, manage=True)

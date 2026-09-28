@@ -32,3 +32,20 @@ main:has(.spread-stage) h1{font-size:32px;margin:6px 0}
 #teachers-manage{margin-top:22px;padding-top:8px;border-top:1px solid #e8e8e3}
 #teachers-manage[hidden]{display:none}
 @media(max-width:700px){.teacher-row{flex-wrap:wrap}.teacher-lead{padding-left:32px}}
+.teacher-section{font-size:22px;margin:28px 0 6px}
+.sign-list{display:grid;gap:14px;margin:18px 0 10px;max-width:900px}
+.sign-card{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:18px;padding:14px;background:#fff;border:1px solid #e8e8e3;border-radius:14px}
+.sign-frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;align-content:start}
+.sign-frame{position:relative;cursor:pointer;margin:0}
+.sign-frame input{position:absolute;opacity:0;pointer-events:none}
+.sign-frame img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:9px;border:3px solid transparent;display:block}
+.sign-frame input:checked+img{border-color:#ffd900}
+.sign-frame input:focus-visible+img{outline:2px solid #333;outline-offset:2px}
+.sign-fields{display:grid;gap:10px;align-content:start}
+.sign-fields label{margin:0}
+.sign-new{display:grid;gap:8px}
+.sign-new[hidden]{display:none}
+.sign-error{color:#a14331;margin:0}
+.sign-error:empty{display:none}
+@media(max-width:700px){.sign-card{grid-template-columns:1fr}.sign-frames{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.sign-fields select{display:block;width:100%;margin-top:6px}

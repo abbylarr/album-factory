@@ -74,3 +74,25 @@
 .tphoto-teacher span:last-child{display:grid;gap:2px;min-width:0}
 .tphoto-teacher small{font-size:11px;color:#8a8c83}
 @media(max-width:560px){.tphoto-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.tphoto-buttons{width:100%}.tphoto-buttons label{flex:1;text-align:center}}
+.tphoto-grid:has(.tgroup){grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.tgroup{background:#fff;border:1px solid #e0e3d7;border-radius:12px;padding:12px;display:grid;gap:10px;align-content:start}
+.tgroup.busy{opacity:.55;pointer-events:none}
+.tgroup-head{display:flex;align-items:baseline;gap:8px}
+.tgroup-head strong{font-size:14px}
+.tgroup-head small{font-size:11px;color:#8a8c83;flex:1}
+.tgroup-head .text-button{font-size:11px;padding:0;background:none;color:#5d6350}
+.tgroup-frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:6px}
+.tframe{margin:0;display:grid;gap:4px}
+.tframe-pick{padding:0;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#eceee4;display:block;width:100%}
+.tframe-pick img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
+.tframe.chosen .tframe-pick{border-color:#e0b800;box-shadow:0 0 0 2px #fff3b3}
+.tframe.pending{opacity:.5}
+.tframe-edit{display:grid;gap:2px}
+.tframe-edit[hidden]{display:none}
+.tframe-edit select{font-size:10px;padding:3px;margin:0}
+.tframe-edit .text-button{font-size:10px;padding:0;background:none;justify-self:start}
+.tgroup-body{display:grid;gap:8px}
+.tgroup-body .error{margin:0;font-size:12px}
+.tgroup-body .error:empty{display:none}
+.tgroup-body>small{font-size:11px}
+.teacher-by{color:#6f8a4a!important}
