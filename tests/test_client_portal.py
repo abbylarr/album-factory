@@ -81,6 +81,39 @@ class ClientPortalTests(unittest.TestCase):
         progress=self.client.get(f'/api/orders/{self.order}').json()['client_progress']
         self.assertEqual((progress['status'],progress['total'],progress['percent']),('waiting',0,0))
 
+    def test_codes_stay_visible_and_can_be_reissued(self):
+        url = f'/api/orders/{self.order}/client-link'
+        self.assertIsNone(self.client.get(url).json()['url'])
+        first = self.client.post(url).json()
+        self.assertRegex(first['entry_pin'], r'^\d{4}$')
+        again = self.client.get(url).json()
+        self.assertEqual((again['entry_pin'], again['manage_pin']), (first['entry_pin'], first['manage_pin']))
+        self.assertEqual(self.client.post(url).json()['entry_pin'], first['entry_pin'])
+        fresh = self.client.post(f'/api/orders/{self.order}/client-codes/reset').json()
+        self.assertEqual(fresh['url'], first['url'])
+        token = fresh['url'].rsplit('/', 1)[1]
+        other = TestClient(self.client.app)
+        other.headers['origin'] = 'http://testserver'
+        self.assertEqual(other.post(f'/client-api/{token}/enter', json={'pin': fresh['entry_pin']}).status_code, 200)
+        from album_factory import server as s
+        with s.db() as con:
+            con.execute('DELETE FROM order_codes WHERE order_id=?', (self.order,))
+        lost = self.client.get(url).json()
+        self.assertTrue(lost['pins_lost'])
+        self.assertIsNone(lost['entry_pin'])
+
+    def test_message_templates_save_and_reset(self):
+        base = self.client.get('/api/message-templates').json()
+        self.assertIn('{код_входа}', base['class']['body'])
+        self.assertIn('{код_управления}', base['manager']['body'])
+        self.assertFalse(base['class']['custom'])
+        saved = self.client.put('/api/message-templates/class', json={'body': 'Привет, {класс}! {ссылка}'}).json()
+        self.assertTrue(saved['custom'])
+        self.assertEqual(self.client.get('/api/message-templates').json()['class']['body'], 'Привет, {класс}! {ссылка}')
+        self.client.put('/api/message-templates/class', json={'body': ''})
+        self.assertFalse(self.client.get('/api/message-templates').json()['class']['custom'])
+        self.assertEqual(self.client.put('/api/message-templates/other', json={'body': 'x'}).status_code, 404)
+
     def test_deletion_and_schema_restart(self):
         from album_factory import server as s
         photo = self.photo()

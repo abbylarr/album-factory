@@ -45,7 +45,7 @@ def process_batch(server, items, engine):
                     groups = {}
                     for sample in con.execute('SELECT person_id,embedding FROM photos WHERE order_id=? AND person_id IS NOT NULL AND embedding IS NOT NULL', (p['order_id'],)):
                         groups.setdefault(sample['person_id'], []).append(json.loads(sample['embedding']))
-                    person, uncertain = choose_person(vector, groups, strong_match_threshold=0.93)
+                    person, uncertain = choose_person(vector, groups, strong_match_threshold=0.93, join_threshold=0.75)
                     if person is None:
                         person = server.uid()
                         con.execute('INSERT INTO persons VALUES (?,?,?,?)', (person, p['order_id'], '', server.now()))

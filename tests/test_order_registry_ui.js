@@ -1,0 +1,16 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const source=fs.readFileSync('web/v2.js','utf8');
+const ctx=vm.createContext({state:{orders:[]},cardStatus:o=>({kind:o.kind}),isMine:st=>st.kind==='todo',daysIn:o=>o.days||0});
+for(const prefix of ['const orderFilters=','const searchKey=','function registryOrders('])vm.runInContext(source.split('\n').find(l=>l.startsWith(prefix)),ctx);
+ctx.state.orders=[{school:'Школа 1',class_name:'9 б',stage:'photos',kind:'todo',customer_name:'Анна',days:7},{school:'Школа 2',class_name:'9 Б',stage:'forms',kind:'waiting'},{school:'Школа 1',class_name:'11 А',stage:'archive',kind:'done'}];
+const run=s=>vm.runInContext(s,ctx);
+assert.equal(run('registryOrders().length'),2);
+assert.equal(run("orderFilters.query='9б';registryOrders().length"),2);
+assert.equal(run("orderFilters.school='Школа 1';registryOrders().length"),1);
+assert.equal(run("orderFilters.school='';orderFilters.attention=true;registryOrders().length"),1);
+assert.equal(run("orderFilters.query='';orderFilters.attention=false;orderFilters.scope='waiting';registryOrders().length"),1);
+assert.equal(run("orderFilters.scope='archive';registryOrders()[0].class_name"),'11 А');
+assert.equal(run("orderFilters.scope='all';orderFilters.className='9 Б';registryOrders().length"),2);
+assert.equal(run("orderFilters.className='';orderFilters.query='анна';registryOrders().length"),1);
+assert.equal(run("orderFilters.query='нет такого заказа';registryOrders().length"),0);
+console.log('Order registry: combined filters, normalized class search, waiting and archive scopes OK');

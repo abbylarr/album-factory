@@ -8,29 +8,29 @@
   <link rel="stylesheet" href="/static/person-picker.css">
   <link rel="stylesheet" href="/static/layout.css">
   <link rel="stylesheet" href="/static/general-review.css">
+  <link rel="stylesheet" href="/static/board.css">
+  <link rel="stylesheet" href="/static/photo-tools.css">
   <script src="/static/person-picker.js" defer></script>
+  <script src="/static/master-default.js" defer></script>
   <script src="/static/v2.js" defer></script>
+  <script src="/static/photo-tools.js" defer></script>
   <script src="/static/general-review.js" defer></script>
   <script src="/static/layout.js" defer></script>
 </head>
 <body class="v2">
 <aside class="sidebar">
-  <a class="brand" href="#orders"><img src="/static/assets/logo.svg" alt=""><strong>ALBUM<br>FACTORY</strong></a>
+  <a class="brand" href="#home"><img src="/static/assets/logo.svg" alt=""><strong>ALBUM<br>FACTORY</strong></a>
   <nav id="v2-nav" aria-label="Основное меню"></nav>
   <div class="sidebar-bottom"><button class="create-button" data-action="new-order"><span class="plus">＋</span>Создать заказ</button><a class="account" href="#settings"><img src="/static/assets/account.svg" alt=""><span>Фотограф</span><small>Локально</small></a></div>
 </aside>
 <main id="main" tabindex="-1"></main>
-<dialog id="order-dialog" aria-labelledby="dialog-title">
+<dialog id="order-dialog" class="wide-dialog" aria-labelledby="dialog-title">
   <form id="order-form">
-    <div class="dialog-heading"><h2 id="dialog-title">Создать заказ</h2><button type="button" class="close" data-close="order-dialog" aria-label="Закрыть">×</button></div>
-    <p class="muted">Один класс — один общий альбом.</p>
-    <label>Школа<input name="school" maxlength="100" placeholder="Например, Школа № 20" required autofocus></label>
-    <div class="form-row"><label>Класс<input name="class_name" maxlength="30" placeholder="9 Б" required></label><label>Количество альбомов<input name="copies" type="number" min="1" max="1000" value="20" required></label></div>
-    <div class="form-row"><label>Дата съёмки<input name="shoot_date" type="date"></label><label>Цена альбома, ₽<input name="price" type="number" min="0" max="1000000" value="0" required></label></div>
-    <label>Заказчик<input name="customer_name" maxlength="120" placeholder="ФИО ответственного" autocomplete="name"></label>
-    <div class="form-row"><label>Контакт<input name="customer_contact" maxlength="120" placeholder="Телефон или почта"></label><label>Учеников<input name="student_count" type="number" min="1" max="1000" inputmode="numeric"></label></div>
-    <label>Комплектация<select id="offer-id" name="offer_id"><option value="">Не выбрана</option></select></label>
-    <p class="muted small">Дату и цену можно оставить незаполненными. После создания можно сразу загрузить портреты.</p>
+    <div class="dialog-heading"><h2 id="dialog-title">Новый заказ</h2><button type="button" class="close" data-close="order-dialog" aria-label="Закрыть">×</button></div>
+    <div class="field"><span class="field-label" id="order-school-label">Школа</span><div id="order-school" class="school-picker" role="group" aria-labelledby="order-school-label"></div></div>
+    <div class="form-row three"><label>Класс<input name="class_name" maxlength="30" placeholder="9 Б" required></label><label>Год выпуска<input name="graduation_year" id="graduation-year" type="number" min="2000" max="2100" required></label><label>Альбомов<input name="copies" type="number" min="1" max="1000" value="20" required></label></div>
+    <div class="form-row"><label>Заказчик<input name="customer_name" maxlength="100" placeholder="Ирина Петрова" required autocomplete="name"></label><label>Телефон<input name="customer_contact" type="tel" inputmode="tel" maxlength="40" placeholder="+7 999 000-00-00" required autocomplete="tel"></label></div>
+    <fieldset class="package-field"><legend>Дизайн и комплектация</legend><div id="order-packages"></div></fieldset>
     <p id="form-error" class="error" role="alert"></p>
     <button class="primary wide" type="submit">Создать заказ</button>
   </form>
@@ -38,5 +38,7 @@
 <dialog id="person-dialog" aria-labelledby="person-title"><div id="person-content"></div></dialog>
 <dialog id="move-dialog" aria-labelledby="move-title"><form id="move-form"><div class="dialog-heading"><h2 id="move-title">Перенести фотографии</h2><button type="button" class="close" data-close="move-dialog" aria-label="Закрыть">×</button></div><div id="person-picker"></div><div class="picker-footer"><button type="button" class="secondary" data-close="move-dialog">Отмена</button><button type="submit" class="primary">Назначить персону</button></div></form></dialog>
 <dialog id="action-dialog" aria-label="Действия с заказом"><div id="action-content"></div></dialog>
+<dialog id="design-dialog" aria-labelledby="design-title"><form id="design-form"><div class="dialog-heading"><h2 id="design-title">Новый дизайн</h2><button type="button" class="close" data-close="design-dialog" aria-label="Закрыть">×</button></div><p class="muted">Начните со стартовых шаблонов. Новые комплектации смогут использовать этот же дизайн.</p><label>Название дизайна<input name="name" placeholder="Тёплый сентябрь" maxlength="80" required></label><div class="form-row"><label>Первая комплектация<input name="package_name" value="Стандарт" maxlength="80" required></label><label>Цена альбома, ₽<input name="price" type="number" value="2500" min="0" max="1000000" required></label></div><p class="error" role="alert"></p><button class="primary wide" type="submit">Создать и открыть редактор</button></form></dialog>
+<dialog id="package-dialog" aria-labelledby="package-title"><form id="package-form"><div class="dialog-heading"><h2 id="package-title">Новая комплектация</h2><button type="button" class="close" data-close="package-dialog" aria-label="Закрыть">×</button></div><p class="muted">Скопируем все развороты выбранной комплектации. Дальше их можно изменять независимо.</p><label>Название<input name="name" placeholder="Эконом" maxlength="80" required></label><label>Цена альбома, ₽<input name="price" type="number" min="0" max="1000000" value="1500" required></label><label>Взять за основу<select name="source_id"></select></label><p class="error" role="alert"></p><button class="primary wide" type="submit">Создать комплектацию</button></form></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 </body></html>

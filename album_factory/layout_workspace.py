@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from . import order_stages
 from .layout_engine import LayoutEngine, LayoutError, ReportLabMeasurer, load_edition
 from .layout_render import render_variant, variant_filename
 from .layout_custom import PAGE_TEMPLATES, add_spread, edit_element, merge_custom, remove_spread, set_page_template
@@ -84,6 +85,10 @@ def general_entries(con, order_id):
     return snapshot_entries(con, order_id)
 
 
+class MasterSelection(BaseModel):
+    master_template_id: str | None = None
+
+
 def snapshot_for(con, order, data, master=False):
     photos = {}
     for photo in data['photos']:
@@ -116,7 +121,7 @@ def snapshot_for(con, order, data, master=False):
         raise HTTPException(409, 'Для макета нужны портреты минимум трёх персон. Проверьте группы фотографий.')
     return {'schema_version': 2,
             'order': {'id': order['id'], 'school': order['school'], 'class_name': order['class_name'],
-                      'year': str(datetime.now().year), 'studio': ''},
+                      'year': str(order['graduation_year']), 'studio': ''},
             'students': students, 'teachers': [], 'photos': photos, 'selections': selections,
             'general_photos': [p['id'] for p in data['photos'] if p['id'] in photos and p['shoot_type'] == 'general'],
             'general': [e for e in general_entries(con, order['id']) if e['id'] in photos],
@@ -174,18 +179,24 @@ def install(app, s):
             return response(enrich(con, order_id, layout))
 
     @app.post('/api/orders/{order_id}/layout')
-    def generate_layout(order_id: str):
+    def generate_layout(order_id: str, payload: MasterSelection | None = None):
         with s.db() as con:
             order = dict(s.require_order(con, order_id))
             data = {'persons': [dict(r) for r in con.execute('SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id', (order_id,))],
                     'photos': [dict(r) for r in con.execute('''SELECT p.id,p.person_id,p.status,s.kind AS shoot_type
                         FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? ORDER BY p.created_at,p.id''', (order_id,))],
                     'data_root': s.DATA}
+            changed_master = bool(payload and payload.master_template_id and payload.master_template_id != order.get('master_template_id'))
+            if changed_master:
+                from .master_templates import select_order_master
+                select_order_master(con, order_id, payload.master_template_id)
             selected_edition = order_edition(con, order_id, s.ROOT)
             snapshot = snapshot_for(con, order, data, master='master' in selected_edition)
             if 'master' in selected_edition:
                 enrich_master_snapshot(con, order_id, snapshot, selected_edition, s.DATA)
             old = con.execute('SELECT overrides,document FROM order_layouts WHERE order_id=?', (order_id,)).fetchone()
+            if changed_master:
+                old = None
             overrides = json.loads(old['overrides']) if old else []
             try:
                 document = generate_document(selected_edition, snapshot, overrides)
@@ -195,7 +206,7 @@ def install(app, s):
             con.execute('''INSERT INTO order_layouts VALUES (?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET
                 snapshot=excluded.snapshot,document=excluded.document,overrides=excluded.overrides,generated_at=excluded.generated_at''',
                 (order_id, json.dumps(snapshot), json.dumps(document), json.dumps(overrides), s.now()))
-            con.execute("UPDATE orders SET stage='layout' WHERE id=?", (order_id,))
+            order_stages.reopen_layout(con, order_id)
             return response(enrich(con, order_id, {'snapshot': snapshot, 'document': document, 'generated_at': s.now()}))
 
     @app.put('/api/orders/{order_id}/layout/element')

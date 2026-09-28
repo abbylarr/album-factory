@@ -40,9 +40,24 @@ class V2Tests(unittest.TestCase):
         home=self.client.get('/')
         self.assertEqual(home.status_code,200)
         self.assertIn('/static/v2.js',home.text)
+        self.assertIn('name="customer_name"',home.text)
+        self.assertIn('name="customer_contact"',home.text)
+        self.assertIn('>Заказчик<',home.text)
+        self.assertIn('>Телефон<',home.text)
         self.assertEqual(home.text,self.client.get('/v2').text)
         self.assertEqual(self.client.get('/sorting-lab').status_code,404)
         self.assertEqual(self.client.get('/api/orders').status_code,200)
+
+    def test_order_keeps_customer_and_phone(self):
+        created=self.client.post('/api/orders',json={'school':'Лицей','class_name':'11 А','copies':5,'customer_name':'  Ирина Петрова  ','customer_contact':' +7 999 000-00-00 '})
+        self.assertEqual(created.status_code,201,created.text)
+        order_id=created.json()['id']
+        order=self.client.get(f'/api/orders/{order_id}').json()
+        self.assertEqual(order['customer_name'],'Ирина Петрова')
+        self.assertEqual(order['customer_contact'],'+7 999 000-00-00')
+        listed=next(row for row in self.client.get('/api/orders').json() if row['id']==order_id)
+        self.assertEqual(listed['customer_name'],'Ирина Петрова')
+        self.assertEqual(listed['customer_contact'],'+7 999 000-00-00')
 
     def test_review_counters_and_cover(self):
         photo=self.photo(uncertain=1)

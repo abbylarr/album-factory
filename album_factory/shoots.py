@@ -3,10 +3,10 @@ import uuid
 from datetime import datetime, timezone
 
 
-def create(con, order_id, kind, title):
+def create(con, order_id, kind, title, shot_on=''):
     shoot_id = uuid.uuid4().hex
-    con.execute('INSERT INTO shoots VALUES (?,?,?,?,?)',
-                (shoot_id, order_id, kind, title, datetime.now(timezone.utc).isoformat()))
+    con.execute('INSERT INTO shoots (id,order_id,kind,title,created_at,shot_on) VALUES (?,?,?,?,?,?)',
+                (shoot_id, order_id, kind, title, datetime.now(timezone.utc).isoformat(), shot_on))
     return shoot_id
 
 
@@ -20,6 +20,8 @@ def init(con):
         id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id),
         kind TEXT NOT NULL CHECK(kind IN ('portrait','general')),
         title TEXT NOT NULL, created_at TEXT NOT NULL)""")
+    if 'shot_on' not in {r['name'] for r in con.execute('PRAGMA table_info(shoots)')}:
+        con.execute("ALTER TABLE shoots ADD COLUMN shot_on TEXT NOT NULL DEFAULT ''")
     if 'shoot_id' not in {r['name'] for r in con.execute('PRAGMA table_info(photos)')}:
         con.execute('ALTER TABLE photos ADD COLUMN shoot_id TEXT REFERENCES shoots(id)')
     for row in con.execute('SELECT DISTINCT order_id FROM photos WHERE shoot_id IS NULL').fetchall():

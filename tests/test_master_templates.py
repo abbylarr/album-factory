@@ -21,6 +21,41 @@ def master():
 class MasterTests(unittest.TestCase):
     setUp = test_server_v2.V2Tests.setUp
 
+    def test_order_can_choose_saved_master_now_or_at_generation(self):
+        import json
+        draft = self.client.post('/api/master-templates', json={'document':master()})
+        self.assertEqual(draft.status_code,201,draft.text)
+        key = draft.json()['id']
+        created = self.client.post('/api/orders', json={'school':'Тест','class_name':'9 Б','copies':10,'master_template_id':key})
+        self.assertEqual(created.status_code,201,created.text)
+        order_id = created.json()['id']
+        self.assertEqual(self.client.get('/api/orders/'+order_id).json()['master_template_id'],key)
+        with s.db() as con:
+            saved = json.loads(con.execute('SELECT edition_json FROM order_terms WHERE order_id=?',(order_id,)).fetchone()[0])
+            self.assertEqual(saved['master']['name'],'Тестовый дизайн')
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM offers').fetchone()[0],0)
+        self.assertEqual(self.client.post('/api/orders',json={'school':'Тест','class_name':'9','copies':10,'master_template_id':'missing'}).status_code,404)
+        generated = self.client.post(f'/api/orders/{self.order}/layout',json={'master_template_id':key})
+        self.assertEqual(generated.status_code,200,generated.text)
+        self.assertEqual(self.client.get('/api/orders/'+self.order).json()['master_template_id'],key)
+        self.assertEqual(self.client.post(f'/api/orders/{self.order}/layout',json={'master_template_id':'missing'}).status_code,404)
+        self.assertEqual(self.client.get('/api/orders/'+self.order).json()['master_template_id'],key)
+
+    def test_order_price_comes_from_package_and_school_from_catalog(self):
+        design = self.client.post('/api/designs', json={'name':'Сентябрь','package_name':'Стандарт','price':2500,'document':master()}).json()
+        package = design['packages'][0]
+        self.assertEqual(package['summary']['spreads'],6)
+        school = self.client.post('/api/schools', json={'name':'Лицей № 1'}).json()
+        self.assertEqual(self.client.post('/api/schools', json={'name':' лицей  № 1 '}).json()['id'],school['id'])
+        created = self.client.post('/api/orders', json={'school_id':school['id'],'class_name':'9 Б','copies':10,'price':99,'master_template_id':package['template_id']})
+        self.assertEqual(created.status_code,201,created.text)
+        order = self.client.get('/api/orders/'+created.json()['id']).json()
+        self.assertEqual((order['school'],order['price']),('Лицей № 1',2500))
+        self.assertEqual(self.client.post('/api/orders', json={'school_id':'missing','class_name':'9','copies':1}).status_code,404)
+        cheaper = self.client.post(f'/api/designs/{design["id"]}/packages', json={'name':'Эконом','price':1500,'source_id':package['template_id']}).json()
+        self.assertEqual(self.client.post(f'/api/orders/{self.order}/layout',json={'master_template_id':cheaper['template_id']}).status_code,200)
+        self.assertEqual(self.client.get('/api/orders/'+self.order).json()['price'],1500)
+
     def test_photo_crop_zoom_is_saved_in_compiled_layout(self):
         doc = master()
         photo = {'id':'portrait','type':'photo','box':{'x':20,'y':40,'w':100,'h':50},

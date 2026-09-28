@@ -357,6 +357,26 @@ def preview_photos(document, students, teachers, owner):
             'issues': [i for i in result['issues'] if i['key'].startswith(('coverage', 'must')) or '[*]' in i['key'] or '[student:' in i['key'] and i['message'] in RELAX_MESSAGES]}
 
 
+def select_order_master(con, order_id, template_id):
+    """Freeze the chosen saved master for this order, without publishing an offer."""
+    from .mvp import _studio
+    row = con.execute('SELECT * FROM master_templates WHERE id=? AND studio_id=?', (template_id, _studio())).fetchone()
+    if row is None:
+        raise HTTPException(404, 'Мастер-макет не найден')
+    master = validate(json.loads(row['document']))
+    document = {'id': f'master-{template_id}-r{row["revision"]}', 'version': row['revision'],
+                'master': master, 'capacity': {'students': [1, 1000], 'teachers': [0, 1000]}}
+    con.execute('UPDATE order_terms SET edition_json=?, edition_id=NULL, offer_id=NULL WHERE order_id=?',
+                (json.dumps(document), order_id))
+    con.execute('UPDATE orders SET master_template_id=? WHERE id=?', (template_id, order_id))
+    # The album price belongs to the chosen package, not to the order form.
+    package = con.execute('SELECT p.name,p.price,d.name AS design_name FROM master_packages p JOIN designs d ON d.id=p.design_id WHERE p.template_id=?', (template_id,)).fetchone()
+    if package is not None:
+        con.execute('UPDATE orders SET price=? WHERE id=?', (package['price'], order_id))
+        con.execute('UPDATE order_terms SET offer_title=?, offer_price=? WHERE order_id=?',
+                    (f"{package['design_name']} · {package['name']}", package['price'], order_id))
+
+
 def install(app, s):
     from .mvp import _studio
     def owned(con, key):
@@ -429,7 +449,14 @@ def install(app, s):
         return row
 
     def design_result(con, row):
-        packages = [dict(p) for p in con.execute('SELECT p.*,m.revision,m.updated_at FROM master_packages p JOIN master_templates m ON m.id=p.template_id WHERE p.design_id=? ORDER BY m.updated_at,p.template_id', (row['id'],))]
+        packages = []
+        for p in con.execute('SELECT p.*,m.revision,m.updated_at,m.document FROM master_packages p JOIN master_templates m ON m.id=p.template_id WHERE p.design_id=? ORDER BY m.updated_at,p.template_id', (row['id'],)):
+            package = dict(p)
+            document = json.loads(package.pop('document'))
+            sections = [x for x in document.get('sections', []) if not x.get('cover')]
+            package['summary'] = {'page_size': document.get('pageSize'), 'sections': [x.get('name', '') for x in sections],
+                                  'spreads': sum(len(x.get('spreads', [])) for x in sections)}
+            packages.append(package)
         blocks = [{'id':b['id'],'name':b['name'],'section':json.loads(b['document'])} for b in con.execute('SELECT * FROM design_blocks WHERE design_id=? ORDER BY rowid', (row['id'],))]
         return {**dict(row),'packages':packages,'blocks':blocks}
 

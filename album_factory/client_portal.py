@@ -4,7 +4,23 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import secrets
 
-from . import mvp
+from . import mvp, order_stages
+
+
+DEFAULT_TEMPLATES = {
+    'class': ('Здравствуйте! Фотографии для выпускного альбома {класс} готовы.\n\n'
+              'Откройте ссылку: {ссылка}\nКод входа: {код_входа}\n\n'
+              'Каждый выбирает свой портрет, пишет имя, фамилию и, если хочется, цитату. '
+              'Пожалуйста, заполните анкету в ближайшие дни.'),
+    'manager': ('Здравствуйте! Анкеты для альбома {класс} открыты.\n\n'
+                'Ссылка для класса: {ссылка}\nКод входа (для всех): {код_входа}\n'
+                'Код управления (только для вас): {код_управления}\n\n'
+                'Код управления понадобится, чтобы согласовать макет и тираж. Не пересылайте его в общий чат.'),
+}
+
+
+class Template(BaseModel):
+    body: str = Field(default='', max_length=2000)
 
 
 class Selection(BaseModel):
@@ -56,14 +72,56 @@ def install(app, s):
             raise HTTPException(404, 'Ссылка на заказ не найдена')
         return row
 
+    def access(con, order_id, token):
+        entry, manage = mvp.stored_pins(con, order_id)
+        issued = con.execute('SELECT 1 FROM order_pins WHERE order_id=?', (order_id,)).fetchone() is not None
+        return {'url': '/client/' + token if token else None, 'entry_pin': entry, 'manage_pin': manage,
+                'pins_set': issued, 'pins_lost': issued and entry is None}
+
     @app.post('/api/orders/{order_id}/client-link')
     def link(order_id: str):
         with s.db() as con:
             s.require_order(con, order_id)
             con.execute('INSERT OR IGNORE INTO client_links VALUES (?,?)', (order_id, secrets.token_urlsafe(32)))
             token = con.execute('SELECT token FROM client_links WHERE order_id=?', (order_id,)).fetchone()[0]
-            entry, manage = mvp.issue_pins(con, order_id)
-        return {'url': '/client/' + token, 'entry_pin': entry, 'manage_pin': manage}
+            mvp.issue_pins(con, order_id)
+            order_stages.advance(con, order_id, 'forms')
+            return access(con, order_id, token)
+
+    @app.get('/api/orders/{order_id}/client-link')
+    def current_link(order_id: str):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            row = con.execute('SELECT token FROM client_links WHERE order_id=?', (order_id,)).fetchone()
+            return access(con, order_id, row[0] if row else None)
+
+    @app.post('/api/orders/{order_id}/client-codes/reset')
+    def reset_codes(order_id: str):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            row = con.execute('SELECT token FROM client_links WHERE order_id=?', (order_id,)).fetchone()
+            if row is None:
+                raise HTTPException(409, 'Сначала отправьте анкеты классу')
+            mvp.reset_pins(con, order_id)
+            return access(con, order_id, row[0])
+
+    @app.get('/api/message-templates')
+    def templates():
+        with s.db() as con:
+            saved = dict(con.execute('SELECT kind, body FROM message_templates WHERE studio_id=?', (mvp._studio(),)).fetchall())
+        return {kind: {'body': saved.get(kind, text), 'custom': kind in saved, 'default': text} for kind, text in DEFAULT_TEMPLATES.items()}
+
+    @app.put('/api/message-templates/{kind}')
+    def save_template(kind: str, payload: Template):
+        if kind not in DEFAULT_TEMPLATES:
+            raise HTTPException(404, 'Неизвестный шаблон')
+        body = payload.body.strip()
+        with s.db() as con:
+            if body and body != DEFAULT_TEMPLATES[kind]:
+                con.execute('INSERT OR REPLACE INTO message_templates VALUES (?,?,?)', (mvp._studio(), kind, body))
+            else:
+                con.execute('DELETE FROM message_templates WHERE studio_id=? AND kind=?', (mvp._studio(), kind))
+        return {'body': body or DEFAULT_TEMPLATES[kind], 'custom': bool(body) and body != DEFAULT_TEMPLATES[kind]}
 
     @app.get('/client/{token}')
     def page(token: str):

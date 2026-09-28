@@ -14,7 +14,7 @@ class ProductionV3Tests(unittest.TestCase):
         p=patch.object(s,'DATA',Path(self.tmp.name));p.start();self.addCleanup(p.stop)
         s.init_db()
         with s.db() as con:
-            con.execute('INSERT INTO orders VALUES (?,?,?,?,?,?,?,?)',('o','School','A',1,0,'','upload',s.now()))
+            con.execute('INSERT INTO orders (id,school,class_name,copies,price,shoot_date,stage,created_at) VALUES (?,?,?,?,?,?,?,?)',('o','School','A',1,0,'','upload',s.now()))
 
     def photo(self,number,status='pending',person=None,vector=None,color=100):
         id=str(number)

@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Literal
-from . import shoots
+from . import shoots, order_stages
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .faces import FaceEngine
@@ -35,7 +35,6 @@ DATA = Path(os.environ.get("ALBUM_DATA_DIR", ROOT / "data"))
 MAX_BYTES = 30 * 1024 * 1024
 MAX_PIXELS = 50_000_000
 MAX_PHOTOS = 3000
-STAGES = {"planned", "scheduled", "upload", "layout"}
 executor = ThreadPoolExecutor(max_workers=1)
 image_executor = ThreadPoolExecutor(max_workers=4)
 worker_lock = threading.Lock()
@@ -87,6 +86,14 @@ def init_db():
         init_masters(con)
         from .general_photos import init as init_general
         init_general(con)
+        order_stages.migrate(con)
+        if "master_template_id" not in {r[1] for r in con.execute("PRAGMA table_info(orders)")}:
+            con.execute("ALTER TABLE orders ADD COLUMN master_template_id TEXT")
+        if "graduation_year" not in {r[1] for r in con.execute("PRAGMA table_info(orders)")}:
+            con.execute("ALTER TABLE orders ADD COLUMN graduation_year INTEGER")
+        for row in con.execute("SELECT id, created_at FROM orders WHERE graduation_year IS NULL").fetchall():
+            date = datetime.fromisoformat(row["created_at"])
+            con.execute("UPDATE orders SET graduation_year=? WHERE id=?", (graduation_year_for(date), row["id"]))
         con.execute("UPDATE photos SET status='pending' WHERE status='processing'")
 
 
@@ -242,14 +249,27 @@ async def local_session(request: Request, call_next):
     return response
 
 
+def graduation_year_for(date):
+    return date.year + (1 if date.month >= 9 else 0)
+
+
+class OrderEditInput(BaseModel):
+    school: str = Field(default="", max_length=100)
+    school_id: str | None = None
+    class_name: str = Field(min_length=1, max_length=30)
+    graduation_year: int = Field(ge=2000, le=2100)
+
+
 class OrderInput(BaseModel):
-    school: str = Field(min_length=1, max_length=100)
+    master_template_id: str | None = None
+    graduation_year: int | None = Field(default=None, ge=2000, le=2100)
+    school: str = Field(default="", max_length=100)
     class_name: str = Field(min_length=1, max_length=30)
     copies: int = Field(ge=1, le=1000)
     price: int = Field(default=0, ge=0, le=1_000_000)
     shoot_date: str = ""
-    customer_name: str = ""
-    customer_contact: str = ""
+    customer_name: str = Field(default="", max_length=100)
+    customer_contact: str = Field(default="", max_length=40)
     offer_id: str | None = None
     school_id: str | None = None
     student_count: int | None = Field(default=None, ge=1, le=1000)
@@ -260,6 +280,11 @@ def system_status():
     from .general_meta import CONFIG
     return {"models_ready": all((ROOT / "models" / f).is_file() for f in ["yunet.onnx", "sface.onnx"]), "local": True, "analysis_version": "v3",
             "general_analysis": {"version": CONFIG["version"], "features": general_vision().features}}
+
+
+# The client approved the layout that is currently published.
+APPROVED = """EXISTS (SELECT 1 FROM approvals a JOIN publications pub ON pub.order_id=a.order_id
+          WHERE a.order_id=o.id AND a.approved_at>=pub.published_at)"""
 
 
 @app.get("/api/orders")
@@ -276,17 +301,31 @@ def list_orders():
           (SELECT COUNT(*) FROM persons p WHERE p.order_id=o.id) AS person_count,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status IN ('pending','processing')) AS pending,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status NOT IN ('pending','processing') AND NOT EXISTS (SELECT 1 FROM shoots s WHERE s.id=p.shoot_id AND s.kind='general') AND (p.status!='ready' OR p.uncertain=1 OR p.person_id IS NULL)) AS review_count,
-          COALESCE((SELECT photo_id FROM order_covers WHERE order_id=o.id), (SELECT id FROM photos p WHERE p.order_id=o.id ORDER BY created_at,id LIMIT 1)) AS cover_id
-          FROM orders o {where} ORDER BY created_at DESC""", args).fetchall()
+          COALESCE((SELECT photo_id FROM order_covers WHERE order_id=o.id), (SELECT id FROM photos p WHERE p.order_id=o.id ORDER BY created_at,id LIMIT 1)) AS cover_id,
+          COALESCE((SELECT customer_name FROM order_terms WHERE order_id=o.id), '') AS customer_name,
+          COALESCE((SELECT customer_contact FROM order_terms WHERE order_id=o.id), '') AS customer_contact,
+          {APPROVED} AS approved
+          FROM orders o {where} ORDER BY created_at DESC""".replace("{APPROVED}", APPROVED), args).fetchall()
         from .client_portal import progress_by_order
         progress = progress_by_order(con)
         return [dict(row, client_progress=progress[row["id"]]) for row in rows]
+
+
+def school_name(con, school_id):
+    from . import mvp
+    row = con.execute("SELECT name FROM schools WHERE id=? AND studio_id=?", (school_id, mvp.studio_ctx.get() or mvp.LOCAL)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Школа не найдена")
+    return row["name"]
 
 
 @app.post("/api/orders", status_code=201)
 def create_order(payload: OrderInput):
     values = payload.model_dump()
     values["school"], values["class_name"] = values["school"].strip(), values["class_name"].strip()
+    if values["school_id"]:
+        with db() as con:
+            values["school"] = school_name(con, values["school_id"])
     if not values["school"] or not values["class_name"]:
         raise HTTPException(422, "Укажите школу и класс")
     if values["shoot_date"]:
@@ -296,9 +335,29 @@ def create_order(payload: OrderInput):
             raise HTTPException(422, "Некорректная дата съёмки")
     order_id = uid()
     with db() as con:
-        con.execute("INSERT INTO orders VALUES (?,?,?,?,?,?,?,?)", (order_id, values["school"], values["class_name"], values["copies"], values["price"], values["shoot_date"], "scheduled" if values["shoot_date"] else "planned", now()))
+        created = now()
+        con.execute("INSERT INTO orders (id,school,class_name,copies,price,shoot_date,stage,created_at,stage_at,graduation_year) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (order_id, values["school"], values["class_name"], values["copies"], values["price"], values["shoot_date"], "new", created, created, values["graduation_year"] or graduation_year_for(datetime.fromisoformat(created))))
         from . import mvp
         mvp.attach_order(con, order_id, mvp.studio_ctx.get(), values)
+        if values["master_template_id"]:
+            from .master_templates import select_order_master
+            select_order_master(con, order_id, values["master_template_id"])
+    return {"id": order_id}
+
+
+@app.patch("/api/orders/{order_id}")
+def edit_order(order_id: str, payload: OrderEditInput):
+    school, class_name = payload.school.strip(), payload.class_name.strip()
+    with db() as con:
+        require_order(con, order_id)
+        if payload.school_id:
+            school = school_name(con, payload.school_id)
+            con.execute("UPDATE order_terms SET school_id=? WHERE order_id=?", (payload.school_id, order_id))
+        if not school or not class_name:
+            raise HTTPException(422, "Укажите школу и класс")
+        con.execute("UPDATE orders SET school=?, class_name=?, graduation_year=? WHERE id=?",
+                    (school, class_name, payload.graduation_year, order_id))
     return {"id": order_id}
 
 
@@ -306,8 +365,13 @@ def create_order(payload: OrderInput):
 def get_order(order_id: str):
     with db() as con:
         order = dict(require_order(con, order_id))
+        terms = con.execute("SELECT customer_name, customer_contact FROM order_terms WHERE order_id=?", (order_id,)).fetchone()
+        order["customer_name"] = terms["customer_name"] if terms else ""
+        order["customer_contact"] = terms["customer_contact"] if terms else ""
+        order["approved"] = bool(con.execute(f"SELECT {APPROVED} FROM orders o WHERE o.id=?", (order_id,)).fetchone()[0])
+        order["published"] = con.execute("SELECT 1 FROM publications WHERE order_id=?", (order_id,)).fetchone() is not None
         order["photos"] = [dict(row) for row in con.execute("SELECT p.id,p.shoot_id,s.kind AS shoot_type,p.filename,p.status,p.person_id,p.uncertain,p.error,a.algorithm AS analysis_version,a.source AS assignment_source FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id LEFT JOIN photo_analysis a ON a.photo_id=p.id WHERE p.order_id=? ORDER BY p.created_at,p.id", (order_id,))]
-        order["shoots"] = [dict(r) for r in con.execute("SELECT id,title,kind FROM shoots WHERE order_id=? ORDER BY created_at,id", (order_id,))]
+        order["shoots"] = [dict(r) for r in con.execute("SELECT id,title,kind,shot_on FROM shoots WHERE order_id=? ORDER BY created_at,id", (order_id,))]
         order["persons"] = [dict(row) for row in con.execute("SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id", (order_id,))]
         from .client_portal import progress_by_order
         order["client_progress"] = progress_by_order(con, order_id)[order_id]
@@ -325,17 +389,104 @@ def get_order(order_id: str):
 class ShootInput(BaseModel):
     kind: Literal['portrait', 'general']
     title: str = Field(min_length=1, max_length=100)
+    shot_on: str = ''
+
+
+class ShootEdit(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    shot_on: str = ''
+
+
+def clean_shoot(title, shot_on):
+    title = title.strip()
+    if not title:
+        raise HTTPException(422, 'Укажите название съёмки')
+    if shot_on:
+        try:
+            datetime.strptime(shot_on, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(422, 'Некорректная дата съёмки')
+    return title, shot_on
+
+
+def require_shoot(con, order_id, shoot_id):
+    require_order(con, order_id)
+    if not con.execute('SELECT 1 FROM shoots WHERE id=? AND order_id=?', (shoot_id, order_id)).fetchone():
+        raise HTTPException(404, 'Съёмка не найдена в заказе')
 
 
 @app.post('/api/orders/{order_id}/shoots', status_code=201)
 def create_shoot(order_id: str, payload: ShootInput):
-    title = payload.title.strip()
-    if not title:
-        raise HTTPException(422, 'Укажите название съёмки')
+    title, shot_on = clean_shoot(payload.title, payload.shot_on)
     with db() as con:
         require_order(con, order_id)
-        shoot_id = shoots.create(con, order_id, payload.kind, title)
-    return {'id': shoot_id, 'title': title, 'kind': payload.kind}
+        shoot_id = shoots.create(con, order_id, payload.kind, title, shot_on)
+    return {'id': shoot_id, 'title': title, 'kind': payload.kind, 'shot_on': shot_on}
+
+
+@app.patch('/api/orders/{order_id}/shoots/{shoot_id}')
+def edit_shoot(order_id: str, shoot_id: str, payload: ShootEdit):
+    title, shot_on = clean_shoot(payload.title, payload.shot_on)
+    with db() as con:
+        require_shoot(con, order_id, shoot_id)
+        con.execute('UPDATE shoots SET title=?, shot_on=? WHERE id=?', (title, shot_on, shoot_id))
+    return {'ok': True}
+
+
+@app.delete('/api/orders/{order_id}/shoots/{shoot_id}')
+def delete_shoot(order_id: str, shoot_id: str):
+    """The whole folder: its photos, their files and analysis. Layout frames that used them become empty."""
+    with db() as con:
+        con.execute("BEGIN IMMEDIATE")
+        require_shoot(con, order_id, shoot_id)
+        ids = [r[0] for r in con.execute("SELECT id FROM photos WHERE shoot_id=?", (shoot_id,))]
+        if con.execute("SELECT 1 FROM photos WHERE shoot_id=? AND status='processing'", (shoot_id,)).fetchone():
+            raise HTTPException(409, "Дождитесь завершения обработки")
+        if ids:
+            remove_photo_rows(con, order_id, ids)
+        con.execute("DELETE FROM shoots WHERE id=?", (shoot_id,))
+    remove_photo_files(ids)
+    return {"deleted": len(ids)}
+
+
+class ShootPhotos(BaseModel):
+    photo_ids: list[str] = Field(min_length=1, max_length=3000)
+
+
+@app.post('/api/orders/{order_id}/shoots/{shoot_id}/move-photos')
+def move_to_shoot(order_id: str, shoot_id: str, payload: ShootPhotos):
+    """Frames that are not portraits leave the person groups and are analysed again as general photos."""
+    ids = list(set(payload.photo_ids))
+    marks = ",".join("?" for _ in ids)
+    with db() as con:
+        con.execute("BEGIN IMMEDIATE")
+        require_shoot(con, order_id, shoot_id)
+        if con.execute('SELECT kind FROM shoots WHERE id=?', (shoot_id,)).fetchone()['kind'] != 'general':
+            raise HTTPException(409, 'Переносить можно только в общую съёмку')
+        rows = con.execute(f"SELECT id,status,shoot_id FROM photos WHERE order_id=? AND id IN ({marks})", [order_id, *ids]).fetchall()
+        if len(rows) != len(ids):
+            raise HTTPException(404, "Фотографии не найдены в заказе")
+        if any(r["status"] in {"pending", "processing"} for r in rows):
+            raise HTTPException(409, "Дождитесь завершения обработки")
+        if any(r["shoot_id"] == shoot_id for r in rows):
+            raise HTTPException(409, "Фотографии уже в этой съёмке")
+        con.execute(f"UPDATE photos SET shoot_id=?,person_id=NULL,uncertain=0,embedding=NULL,status='pending',error='' WHERE order_id=? AND id IN ({marks})", [shoot_id, order_id, *ids])
+        con.execute(f"DELETE FROM photo_analysis WHERE photo_id IN ({marks})", ids)
+        con.execute("DELETE FROM persons WHERE order_id=? AND id NOT IN (SELECT person_id FROM photos WHERE person_id IS NOT NULL)", (order_id,))
+    executor.submit(process_pending)
+    return {"moved": len(ids)}
+
+
+class StageInput(BaseModel):
+    stage: Literal[order_stages.STAGES]
+
+
+@app.post('/api/orders/{order_id}/stage')
+def move_stage(order_id: str, payload: StageInput):
+    with db() as con:
+        require_order(con, order_id)
+        order_stages.move(con, order_id, payload.stage)
+    return {'stage': payload.stage}
 
 
 @app.post("/api/orders/{order_id}/photos", status_code=201)
@@ -396,7 +547,7 @@ async def upload_photo(order_id: str, request: Request, filename: str, shoot_id:
                 "INSERT INTO photos (id,order_id,filename,sha,status,created_at,shoot_id) VALUES (?,?,?,?,?,?,?)",
                 (photo_id, order_id, Path(filename).name, sha, "pending", now(), shoot_id),
             )
-            con.execute("UPDATE orders SET stage='upload' WHERE id=?", (order_id,))
+            order_stages.advance(con, order_id, 'photos')
     executor.submit(process_pending)
     return {"id": photo_id, "duplicate": False}
 

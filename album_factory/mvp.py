@@ -13,7 +13,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from . import jobs
+from . import jobs, order_stages
 from .layout_engine import LayoutError, capacity_matrix, field_limits, validate_edition
 from .storage import retention_deadline
 
@@ -58,6 +58,10 @@ def init(con):
     CREATE TABLE IF NOT EXISTS order_pins (
       order_id TEXT PRIMARY KEY, entry_hash TEXT NOT NULL, entry_salt TEXT NOT NULL,
       manage_hash TEXT NOT NULL, manage_salt TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS order_codes (
+      order_id TEXT PRIMARY KEY, entry_pin TEXT NOT NULL, manage_pin TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS message_templates (
+      studio_id TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (studio_id, kind));
     CREATE TABLE IF NOT EXISTS pin_attempts (
       order_id TEXT NOT NULL, kind TEXT NOT NULL, fails INTEGER NOT NULL DEFAULT 0,
       locked_until TEXT NOT NULL DEFAULT '', PRIMARY KEY (order_id, kind));
@@ -178,7 +182,7 @@ def photo_visible(con, photo_id):
 
 
 def forget(con, order_id):
-    for table in ("order_membership", "order_terms", "order_pins", "pin_attempts", "allocations", "deliveries",
+    for table in ("order_membership", "order_terms", "order_pins", "order_codes", "pin_attempts", "allocations", "deliveries",
                   "publications", "approvals", "authorizations"):
         con.execute(f"DELETE FROM {table} WHERE order_id=?", (order_id,))
     con.execute("DELETE FROM class_sessions WHERE order_id=?", (order_id,))
@@ -194,16 +198,29 @@ def quote_limit(con, order_id):
     return 300
 
 
+def stored_pins(con, order_id):
+    """Codes stay visible to the photographer so they can be resent; orders issued before this return None."""
+    row = con.execute("SELECT entry_pin, manage_pin FROM order_codes WHERE order_id=?", (order_id,)).fetchone()
+    return (row["entry_pin"], row["manage_pin"]) if row else (None, None)
+
+
+def reset_pins(con, order_id):
+    for table in ("order_pins", "order_codes", "pin_attempts", "class_sessions"):
+        con.execute(f"DELETE FROM {table} WHERE order_id=?", (order_id,))
+    return issue_pins(con, order_id)
+
+
 def issue_pins(con, order_id):
     row = con.execute("SELECT 1 FROM order_pins WHERE order_id=?", (order_id,)).fetchone()
     if row:
-        return None, None
+        return stored_pins(con, order_id)
     entry, manage = f"{secrets.randbelow(10000):04d}", f"{secrets.randbelow(10000):04d}"
     while manage == entry:
         manage = f"{secrets.randbelow(10000):04d}"
     entry_salt, manage_salt = secrets.token_hex(8), secrets.token_hex(8)
     con.execute("INSERT INTO order_pins VALUES (?,?,?,?,?)", (
         order_id, digest(entry_salt, entry), entry_salt, digest(manage_salt, manage), manage_salt))
+    con.execute("INSERT OR REPLACE INTO order_codes VALUES (?,?,?)", (order_id, entry, manage))
     con.execute("UPDATE order_terms SET workflow='selection' WHERE order_id=? AND workflow='materials'", (order_id,))
     return entry, manage
 
@@ -397,8 +414,8 @@ class ProfileInput(BaseModel):
 
 
 class SchoolInput(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    address: str = ""
+    name: str = Field(min_length=1, max_length=100)
+    address: str = Field(default="", max_length=200)
 
 
 class EditionInput(BaseModel):
@@ -499,10 +516,17 @@ def install(app, s):
 
     @app.post("/api/schools", status_code=201)
     def create_school(payload: SchoolInput):
-        school_id = s.uid()
+        name = " ".join(payload.name.split())
+        if not name:
+            raise HTTPException(422, "Укажите название школы")
         with s.db() as con:
-            con.execute("INSERT INTO schools VALUES (?,?,?,?)", (school_id, _studio(), payload.name.strip(), payload.address.strip()))
-        return {"id": school_id}
+            # Creating a school that already exists selects it instead of adding a duplicate.
+            for row in con.execute("SELECT id,name FROM schools WHERE studio_id=?", (_studio(),)):
+                if row["name"].casefold() == name.casefold():
+                    return {"id": row["id"], "name": row["name"]}
+            school_id = s.uid()
+            con.execute("INSERT INTO schools VALUES (?,?,?,?)", (school_id, _studio(), name, payload.address.strip()))
+        return {"id": school_id, "name": name}
 
     @app.post("/api/catalog/editions", status_code=201)
     def publish_edition(payload: EditionInput):
@@ -590,7 +614,10 @@ def install(app, s):
             revision = str(document.get("revision") or hashlib.sha256(layout["document"].encode()).hexdigest()[:12])
             con.execute("INSERT INTO publications VALUES (?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET revision=excluded.revision, document=excluded.document, published_at=excluded.published_at",
                         (order_id, revision, layout["document"], s.now()))
+            if con.execute("SELECT stage FROM orders WHERE id=?", (order_id,)).fetchone()["stage"] in order_stages.STAGES[5:]:
+                raise HTTPException(409, "Заказ уже отправлен в печать")
             con.execute("UPDATE order_terms SET workflow='layout' WHERE order_id=?", (order_id,))
+            order_stages.set_stage(con, order_id, 'approval')
         return {"revision": revision}
 
     @app.post("/api/orders/{order_id}/production")
@@ -612,6 +639,7 @@ def install(app, s):
             con.execute("INSERT INTO authorizations VALUES (?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET revision=excluded.revision, responsibility=excluded.responsibility, authorized_at=excluded.authorized_at",
                         (order_id, publication["revision"], int(payload.responsibility), s.now()))
             con.execute("UPDATE order_terms SET workflow='production_allowed' WHERE order_id=?", (order_id,))
+            order_stages.advance(con, order_id, 'print')
             job = jobs.enqueue(con, "export", {"order_id": order_id}, f"export:{order_id}:{publication['revision']}", s.now())
         if job["status"] == "pending":
             with s.db() as con:

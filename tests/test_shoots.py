@@ -84,3 +84,19 @@ class ShootTests(unittest.TestCase):
             s.process_pending()
         self.assertEqual(len(batches),2)
         self.assertIn({a},batches); self.assertIn({b},batches)
+
+    def test_move_non_portraits_to_general_shoot(self):
+        portrait, general = self.shoot(), self.shoot('general')
+        photo = self.upload(portrait).json()['id']
+        with s.db() as con:
+            person = s.uid()
+            con.execute("INSERT INTO persons VALUES (?,?,?,?)", (person, self.order, '', s.now()))
+            con.execute("UPDATE photos SET status='ready',person_id=?,uncertain=1,embedding='[1]' WHERE id=?", (person, photo))
+        url = f'/api/orders/{self.order}/shoots/{{}}/move-photos'
+        self.assertEqual(self.client.post(url.format(portrait), json={'photo_ids':[photo]}).status_code, 409)
+        self.assertEqual(self.client.post(url.format(general), json={'photo_ids':['missing']}).status_code, 404)
+        self.assertEqual(self.client.post(url.format(general), json={'photo_ids':[photo]}).json(), {'moved': 1})
+        moved = self.detail()['photos'][0]
+        self.assertEqual((moved['shoot_id'], moved['person_id'], moved['status'], moved['uncertain']), (general, None, 'pending', 0))
+        self.assertEqual(self.detail()['persons'], [])
+        self.assertEqual(self.client.post(url.format(general), json={'photo_ids':[photo]}).status_code, 409)
