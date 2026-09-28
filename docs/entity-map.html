@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
+<title>Карта Album Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky tab bar; graph views are a dotted drafting canvas with a detail drawer; other tabs are reading pages. */
+:root{
+  --bg:#f2f3f0; --paper:#ffffff; --ink:#1c2422; --muted:#5f6a67; --faint:#8b9592; --rule:#dde1dc; --grid:#d3d8d2;
+  --accent:#1f5fbf; --accent-soft:#e3ecfa;
+  --ref:#8a9491; --snap:#c07a16; --flow:#1f5fbf;
+  --c-studio:#5b6b86; --c-catalog:#b0642a; --c-school:#2f8a57; --c-order:#1f5fbf; --c-photo:#a8488f; --c-client:#0f8a9a; --c-release:#b23a3a; --c-ui:#6b5bb5; --c-out:#4d6b2f;
+  --b-sc:#c26a00; --b-cp:#7b3fd6; --b-mvp:#0a7f99;
+  --sev-high:#b23a3a; --sev-mid:#c07a16; --sev-low:#5f6a67;
+  --f-ui:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141917; --paper:#1d2421; --ink:#e7ece9; --muted:#a3aeaa; --faint:#7b8783; --rule:#2e3733; --grid:#2a322f;
+  --accent:#7aa7ff; --accent-soft:#1f2c44; --ref:#6f7b77; --snap:#e0a24a; --flow:#7aa7ff;
+  --c-studio:#9aaccc; --c-catalog:#e39a5c; --c-school:#6cc893; --c-order:#7aa7ff; --c-photo:#e088c9; --c-client:#4fc8d8; --c-release:#f07f7f; --c-ui:#b1a3f5; --c-out:#9fcb6e;
+  --b-sc:#f0a040; --b-cp:#b58cff; --b-mvp:#4cc6e0; --sev-high:#f07f7f; --sev-mid:#e0a24a; --sev-low:#a3aeaa; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141917; --paper:#1d2421; --ink:#e7ece9; --muted:#a3aeaa; --faint:#7b8783; --rule:#2e3733; --grid:#2a322f;
+  --accent:#7aa7ff; --accent-soft:#1f2c44; --ref:#6f7b77; --snap:#e0a24a; --flow:#7aa7ff;
+  --c-studio:#9aaccc; --c-catalog:#e39a5c; --c-school:#6cc893; --c-order:#7aa7ff; --c-photo:#e088c9; --c-client:#4fc8d8; --c-release:#f07f7f; --c-ui:#b1a3f5; --c-out:#9fcb6e;
+  --b-sc:#f0a040; --b-cp:#b58cff; --b-mvp:#4cc6e0; --sev-high:#f07f7f; --sev-mid:#e0a24a; --sev-low:#a3aeaa; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-ui);margin:0}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-size:.86em}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);border-bottom:1px solid var(--rule);padding:12px 16px 0}
+.brand{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.brand h1{font-size:20px;font-weight:700;margin:0;letter-spacing:-.01em}
+.brand .snap{color:var(--muted);font-size:13px}
+nav.tabs{display:flex;gap:2px;overflow-x:auto;margin-top:8px;scrollbar-width:none}
+nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;color:var(--muted);white-space:nowrap;font-weight:500}
+nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+nav.tabs button:hover{color:var(--ink)}
+main{padding-inline:16px;padding-block:16px 40px}
+section.view{max-width:1400px;margin:0 auto}
+.lead{max-width:72ch;color:var(--muted);margin:0 0 12px}
+.lead b{color:var(--ink);font-weight:600}
+
+/* graph toolbar + canvas */
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.search{flex:1 1 220px;min-width:0;max-width:340px;padding:7px 10px;border:1px solid var(--rule);border-radius:8px;background:var(--paper)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--rule);background:var(--paper);border-radius:999px;padding:4px 10px;font-size:13px;cursor:pointer;user-select:none}
+.chip[aria-pressed="false"]{opacity:.45;text-decoration:line-through}
+.chip .sw{width:9px;height:9px;border-radius:50%}
+.btn{border:1px solid var(--rule);background:var(--paper);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px}
+.btn:hover{border-color:var(--faint)}
+.spacer{flex:1}
+.stage{position:relative;height:max(480px,calc(100vh - 230px));border:1px solid var(--rule);border-radius:12px;overflow:hidden;
+  background-color:var(--bg);background-image:radial-gradient(var(--grid) 1px,transparent 1.2px);background-size:22px 22px}
+.stage svg{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+.stage svg.panning{cursor:grabbing}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin-top:8px;align-items:center}
+.legend svg{vertical-align:middle}
+.hint{font-size:12px;color:var(--faint)}
+
+g.cluster rect{fill:var(--cc);fill-opacity:.07;stroke:var(--cc);stroke-opacity:.35;stroke-width:1}
+g.cluster text{fill:var(--cc);font:600 13px var(--f-ui);letter-spacing:.04em;text-transform:uppercase}
+g.node{cursor:pointer}
+g.node rect.card{fill:var(--paper);stroke:var(--cc);stroke-opacity:.55;stroke-width:1.2}
+g.node rect.dot{fill:var(--cc)}
+g.node text.t{fill:var(--ink);font:600 13px var(--f-ui)}
+g.node text.s{fill:var(--muted);font:400 11px var(--f-mono)}
+g.node.virtual rect.card{stroke-dasharray:4 3}
+g.node:hover rect.card,g.node.sel rect.card{stroke-width:2.2;stroke-opacity:1}
+g.node.sel rect.card{fill:var(--accent-soft)}
+g.node .badge rect{fill:var(--bc)}
+g.node .badge text{fill:#fff;font:600 9px var(--f-ui);letter-spacing:.03em}
+g.node .chg{fill:var(--bc)}
+path.edge{fill:none;stroke-width:1.3}
+path.edge.ref{stroke:var(--ref)}
+path.edge.snap{stroke:var(--snap);stroke-dasharray:6 4}
+path.edge.flow{stroke:var(--flow);stroke-dasharray:2 4;stroke-linecap:round}
+text.elabel{font:500 11px var(--f-ui);fill:var(--ink);paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round;display:none}
+svg.focus .dim{opacity:.13}
+svg.focus path.edge.hot{stroke-width:2.2}
+svg.focus text.elabel.hot{display:block}
+svg.searching g.node:not(.match){opacity:.2}
+svg.searching g.node.match rect.card{stroke-width:2.4;stroke-opacity:1}
+marker path{stroke:none}
+
+/* detail drawer */
+.drawer{position:absolute;top:10px;right:10px;bottom:10px;width:min(360px,calc(100% - 20px));background:var(--paper);border:1px solid var(--rule);border-radius:12px;
+  box-shadow:0 8px 30px rgb(0 0 0 / .12);overflow:auto;padding:16px 18px;font-size:14px}
+.drawer .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--cc)}
+.drawer h2{font-size:19px;margin:2px 0 2px;text-wrap:balance}
+.drawer .close{position:absolute;top:10px;right:10px;border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--muted);padding:4px 8px}
+.drawer h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px;font-weight:600}
+.drawer p{margin:6px 0}
+.drawer ul{margin:0;padding:0;list-style:none}
+.drawer li{padding:3px 0;border-bottom:1px dashed var(--rule)}
+.drawer li:last-child{border-bottom:0}
+.drawer .f{font-family:var(--f-mono);font-size:12px}
+.drawer .f i{font-family:var(--f-ui);font-style:normal;color:var(--muted);font-size:12.5px}
+.drawer .f.new{color:var(--b-sc)}
+.rel{display:flex;gap:6px;align-items:baseline;width:100%;text-align:left;background:none;border:0;padding:2px 0;cursor:pointer}
+.rel:hover .rn{text-decoration:underline}
+.rel .dir{color:var(--faint);font-size:12px;width:14px;flex:none}
+.rel .rl{color:var(--muted);font-size:12px}
+.pill{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:1px 8px;border:1px solid currentColor;margin-right:4px}
+.pill.sc{color:var(--b-sc)}.pill.cp{color:var(--b-cp)}.pill.mvp{color:var(--b-mvp)}.pill.main{color:var(--muted)}
+.empty-drawer{color:var(--muted)}
+
+/* editor inventory */
+.inv-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:28px 0 8px}
+.inv-head h2{margin:0 12px 0 0;font-size:18px}
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:12px;background:var(--paper)}
+table.inv{border-collapse:collapse;width:100%;min-width:860px;font-size:13.5px}
+table.inv th{position:sticky;top:0;background:var(--paper);text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--rule)}
+table.inv td{padding:8px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+table.inv tr:last-child td{border-bottom:0}
+table.inv td.path{font-family:var(--f-mono);font-size:12px;color:var(--muted);white-space:nowrap}
+table.inv td.scope span{font-size:12px;font-weight:600;color:var(--cc)}
+table.inv tr.warn td:first-child::after{content:" · не проверяется сервером";color:var(--sev-mid);font-size:12px}
+.count{color:var(--muted);font-size:13px}
+
+/* reading views */
+.stages{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;counter-reset:st}
+.stagecard{background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:14px 16px;min-width:0}
+.stagecard .code{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.stagecard h3{margin:2px 0 6px;font-size:16px}
+.stagecard .who{font-size:12px;font-weight:600;color:var(--accent)}
+.stagecard p{margin:6px 0;font-size:14px}
+.tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.tag{font-family:var(--f-mono);font-size:11.5px;background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:1px 6px;cursor:pointer}
+.tag:hover{border-color:var(--accent)}
+.arrowrow{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;font-size:13px;color:var(--muted);margin:0 0 14px}
+.arrowrow b{color:var(--ink);font-weight:600}
+
+.branches{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.bcard{background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:14px 16px;min-width:0;border-top:3px solid var(--bc)}
+.bcard h3{margin:0;font-family:var(--f-mono);font-size:15px}
+.bcard .meta{font-size:12px;color:var(--muted);margin:2px 0 8px}
+.bcard ul{margin:6px 0 0;padding-left:18px;font-size:14px}
+.bcard li{margin:3px 0}
+.overlap{margin-top:18px}
+.overlap h2,.risks h2{font-size:18px;margin:0 0 8px}
+.matrix{border-collapse:collapse;font-size:13.5px;background:var(--paper);border:1px solid var(--rule);border-radius:12px;overflow:hidden;min-width:640px;width:100%}
+.matrix th,.matrix td{padding:8px 12px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+.matrix td.files{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.risk{font-weight:600}
+.risk.high{color:var(--sev-high)}.risk.mid{color:var(--sev-mid)}.risk.low{color:var(--sev-low)}
+
+.risklist{display:grid;gap:10px}
+.riskitem{background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:12px 16px;display:grid;grid-template-columns:auto 1fr;gap:4px 14px}
+.riskitem .sev{grid-row:span 3;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding-top:3px;width:70px}
+.riskitem h3{margin:0;font-size:15.5px}
+.riskitem p{margin:0;font-size:14px;color:var(--muted);max-width:90ch}
+.riskitem p b{color:var(--ink);font-weight:600}
+
+dl.gloss{display:grid;grid-template-columns:minmax(150px,220px) 1fr;gap:0;background:var(--paper);border:1px solid var(--rule);border-radius:12px;overflow:hidden;margin:0}
+dl.gloss dt,dl.gloss dd{padding:10px 14px;border-bottom:1px solid var(--rule);margin:0}
+dl.gloss dt{font-weight:600}
+dl.gloss dt small{display:block;font-family:var(--f-mono);font-weight:400;color:var(--muted);font-size:11.5px}
+dl.gloss dd{color:var(--muted);min-width:0}
+.keep{margin-top:22px;background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:14px 16px;max-width:90ch}
+.keep h2{font-size:16px;margin:0 0 6px}
+.keep ol{margin:0;padding-left:20px}
+.keep li{margin:4px 0}
+
+@media (max-width:700px){
+  .drawer{top:auto;left:8px;right:8px;width:auto;height:58%}
+  dl.gloss{grid-template-columns:1fr}
+  dl.gloss dt{border-bottom:0;padding-bottom:0}
+  .riskitem{grid-template-columns:1fr}
+  .riskitem .sev{grid-row:auto;width:auto}
+}
+@media (prefers-reduced-motion:no-preference){ .stage svg g.vp{transition:none} }
+</style>
+
+<header class="top">
+  <div class="brand">
+    <h1>Карта Album Factory</h1>
+    <span class="snap">Снимок кода: <span class="mono">main a5b9aab</span> и ветки <span class="mono">school-catalog</span>, <span class="mono">new-client-portal</span>, <span class="mono">mvp/complete</span> · 28 сентября 2026</span>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Разделы карты">
+    <button role="tab" data-view="map" aria-selected="true">Карта сервиса</button>
+    <button role="tab" data-view="editor" aria-selected="false">Мастер-редактор</button>
+    <button role="tab" data-view="flow" aria-selected="false">Путь заказа</button>
+    <button role="tab" data-view="branches" aria-selected="false">Ветки</button>
+    <button role="tab" data-view="risks" aria-selected="false">Тонкие места</button>
+    <button role="tab" data-view="glossary" aria-selected="false">Словарь</button>
+  </nav>
+</header>
+
+<main>
+  <section class="view" id="view-map">
+    <p class="lead">Все таблицы базы, сгруппированные по смыслу. <b>Нажмите на сущность</b> — справа появятся её поля, экраны, API и все связи; соседи подсветятся. Карточки можно перетаскивать, холст — двигать и масштабировать колесом. Стрелка идёт от того, кто ссылается, к тому, на кого ссылаются.</p>
+    <div class="toolbar">
+      <input class="search" id="map-search" type="search" placeholder="Найти: учитель, photo_id, PIN…" aria-label="Поиск по карте сервиса">
+      <span class="chip" data-branch="school-catalog" aria-pressed="true" role="button" tabindex="0"><span class="sw" style="background:var(--b-sc)"></span>school-catalog</span>
+      <span class="chip" data-branch="new-client-portal" aria-pressed="true" role="button" tabindex="0"><span class="sw" style="background:var(--b-cp)"></span>new-client-portal</span>
+      <span class="spacer"></span>
+      <button class="btn" data-act="fit">Показать всё</button>
+      <button class="btn" data-act="reset">Вернуть раскладку</button>
+    </div>
+    <div class="stage" id="map-stage"></div>
+    <div class="legend">
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--ref)" stroke-width="1.5"/></svg> хранит id другой сущности</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--snap)" stroke-width="1.5" stroke-dasharray="6 4"/></svg> копия / снимок (не меняется вслед за оригиналом)</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--flow)" stroke-width="1.8" stroke-dasharray="2 4" stroke-linecap="round"/></svg> порождает или читает при работе</span>
+      <span><span class="pill sc">SC</span><span class="pill cp">CP</span> есть только в ветке · точка в углу — ветка меняет поля</span>
+    </div>
+  </section>
+
+  <section class="view" id="view-editor" hidden>
+    <p class="lead">Локальная карта мастер-редактора. Слева — <b>где в интерфейсе</b> настройка, в центре — <b>где она живёт в документе</b> (дизайн → комплектация → документ → раздел → разворот → страница → слой), справа — <b>куда уходит</b>: подбор фото, генерация заказа, PDF. Ниже — реестр всех настроек с поиском.</p>
+    <div class="toolbar">
+      <input class="search" id="ed-search" type="search" placeholder="Найти: виньетка, обводка, роль…" aria-label="Поиск по карте редактора">
+      <span class="spacer"></span>
+      <button class="btn" data-act="fit">Показать всё</button>
+      <button class="btn" data-act="reset">Вернуть раскладку</button>
+    </div>
+    <div class="stage" id="ed-stage"></div>
+    <div class="legend">
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--ref)" stroke-width="1.5"/></svg> содержит</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--flow)" stroke-width="1.8" stroke-dasharray="2 4" stroke-linecap="round"/></svg> настраивает / передаёт дальше</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--snap)" stroke-width="1.5" stroke-dasharray="6 4"/></svg> неизменяемая копия</span>
+    </div>
+
+    <div class="inv-head">
+      <h2>Реестр настроек</h2>
+      <input class="search" id="inv-search" type="search" placeholder="Поиск по настройкам" aria-label="Поиск по реестру настроек">
+      <span class="count" id="inv-count"></span>
+    </div>
+    <div class="toolbar" id="inv-scopes" role="group" aria-label="Уровень настройки"></div>
+    <div class="tablewrap"><table class="inv"><thead><tr><th>Настройка</th><th>Уровень</th><th>Поле в документе</th><th>Где в интерфейсе</th><th>Значения</th><th>На что влияет</th></tr></thead><tbody id="inv-body"></tbody></table></div>
+  </section>
+
+  <section class="view" id="view-flow" hidden>
+    <p class="lead">Восемь этапов из <span class="mono">order_stages.py</span>. У заказа всегда один этап; вперёд его двигают действия, а печать → доставка → архив фотограф переключает вручную. Под каждым этапом — таблицы, которые он заполняет. Нажмите на таблицу, чтобы открыть её на карте.</p>
+    <div class="arrowrow" id="flow-strip"></div>
+    <div class="stages" id="flow-cards"></div>
+  </section>
+
+  <section class="view" id="view-branches" hidden>
+    <p class="lead">Что каждая ветка добавляет поверх <span class="mono">main</span> и где ветки правят одни и те же файлы. Чем больше пересечение, тем вероятнее конфликт при слиянии.</p>
+    <div class="branches" id="branch-cards"></div>
+    <div class="overlap">
+      <h2>Пересечения файлов</h2>
+      <div class="tablewrap" style="border:0;background:none"><table class="matrix" id="overlap"></table></div>
+    </div>
+  </section>
+
+  <section class="view risks" id="view-risks" hidden>
+    <p class="lead">Места, где одно и то же понятие хранится в двух местах, названо по-разному или ещё не доведено. Именно здесь проще всего запутаться — и человеку, и ИИ.</p>
+    <div class="risklist" id="risk-list"></div>
+  </section>
+
+  <section class="view" id="view-glossary" hidden>
+    <p class="lead">Одно понятие — одно слово. Если в разговоре с ИИ использовать эти названия, он найдёт нужный код быстрее.</p>
+    <dl class="gloss" id="gloss"></dl>
+    <div class="keep">
+      <h2>Как держать карту в актуальном виде</h2>
+      <ol>
+        <li>Все данные карты лежат в начале скрипта этой страницы: <span class="mono">MAP</span>, <span class="mono">EDITOR</span>, <span class="mono">SETTINGS</span>, <span class="mono">RISKS</span>. Копия страницы хранится в репозитории: <span class="mono">docs/entity-map.html</span>.</li>
+        <li>Добавили таблицу, поле или настройку редактора — попросите ИИ: «обнови docs/entity-map.html под мои изменения». Ему достаточно дописать одну строку в нужный массив.</li>
+        <li>Перед новой настройкой мастер-редактора найдите её группу в реестре. Если подходящей группы нет, это сигнал остановиться и подумать, куда она относится.</li>
+      </ol>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ============================================================
+   DATA. Edit these arrays when the code changes.
+   branch: 'main' | 'school-catalog' | 'new-client-portal'
+   edge kinds: ref (stores id), snap (copy/snapshot), flow (produces / reads)
+   ============================================================ */
+const BR = {'school-catalog':{short:'SC',cls:'sc',color:'var(--b-sc)'},'new-client-portal':{short:'CP',cls:'cp',color:'var(--b-cp)'},'mvp/complete':{short:'MVP',cls:'mvp',color:'var(--b-mvp)'}};
+
+const MAP = {
+  key:'map',
+  clusters:[
+    {id:'studio',label:'Студия и вход',color:'--c-studio',x:0,y:0,cols:2},
+    {id:'catalog',label:'Каталог дизайнов',color:'--c-catalog',x:0,y:290,cols:2},
+    {id:'school',label:'Справочник школ',color:'--c-school',x:0,y:580,cols:2},
+    {id:'order',label:'Заказ',color:'--c-order',x:540,y:170,cols:2},
+    {id:'release',label:'Макет, согласование, выпуск',color:'--c-release',x:540,y:540,cols:2},
+    {id:'photo',label:'Фотографии и анализ',color:'--c-photo',x:1080,y:0,cols:2},
+    {id:'client',label:'Кабинет класса',color:'--c-client',x:1080,y:290,cols:2},
+  ],
+  nodes:[
+    {id:'studios',c:'studio',t:'Студия',file:'mvp.py',d:'Владелец всех данных. Почти каждая таблица ниже изолирована по studio_id: чужая студия не видит ни школ, ни заказов, ни дизайнов.',f:['id','name']},
+    {id:'photographers',c:'studio',t:'Фотограф',file:'mvp.py',api:['POST /api/register','POST /api/login'],d:'Аккаунт входа. Сейчас у студии один фотограф; сотрудники — будущее расширение.',f:['id','studio_id','email','password_hash, salt']},
+    {id:'auth_sessions',c:'studio',t:'Сессия фотографа',file:'mvp.py',d:'Токен входа фотографа со сроком действия.',f:['token_hash','studio_id','photographer_id','expires_at']},
+    {id:'profiles',c:'studio',t:'Настройки профиля',file:'mvp.py',ui:'Аккаунт',api:['GET/PUT /api/profile'],d:'Подарок учителю по умолчанию и способы получения. Копируются в заказ при создании и дальше живут там независимо.',f:['studio_id','teacher_gift — подарок учителю','delivery_modes — лично / отправка / оба']},
+    {id:'message_templates',c:'studio',t:'Готовые сообщения',file:'client_portal.py',ui:'Заказ → Доступ для класса → Готовые сообщения',api:['GET /api/message-templates','PUT /api/message-templates/{kind}'],d:'Тексты, которые фотограф отправляет в чат класса: ссылка, коды.',f:['studio_id','kind','body']},
+
+    {id:'designs',c:'catalog',t:'Дизайн',file:'master_templates.py',ui:'Мастер-макеты (каталог)',api:['GET/POST /api/designs','POST /api/designs/{id}/duplicate','DELETE /api/designs/{id}'],d:'Визуальная серия студии. Внутри — комплектации и общая библиотека заготовок.',f:['id','studio_id','name','created_at']},
+    {id:'master_packages',c:'catalog',t:'Комплектация',file:'master_templates.py',ui:'Редактор → кнопка «Комплектация»',api:['POST /api/designs/{id}/packages','PUT /api/master-templates/{id}/package'],d:'Вариант дизайна со своим названием и ценой. Ровно один черновик мастер-макета на комплектацию: template_id — это и ключ комплектации, и id черновика.',f:['template_id — PK, он же id черновика','design_id','name — «Основная», «Эконом»…','price']},
+    {id:'master_templates',c:'catalog',t:'Черновик мастер-макета',file:'master_templates.py',ui:'Мастер-редактор',api:['GET/POST /api/master-templates','GET/PUT /api/master-templates/{id}','POST /api/master-templates/validate'],d:'Редактируемый JSON-документ комплектации: разделы → развороты → страницы → слои. Автосохранение; устаревшая вкладка получает 409. Устройство документа — на вкладке «Мастер-редактор».',f:['id','studio_id','document — JSON schemaVersion 1','revision — защита от перезаписи','updated_at']},
+    {id:'design_blocks',c:'catalog',t:'Заготовка раздела',file:'master_templates.py',ui:'Редактор → вкладка «Шаблоны»',api:['POST /api/designs/{id}/blocks'],d:'Сохранённый раздел, доступный всем комплектациям дизайна.',f:['id','design_id','name','document — раздел целиком']},
+    {id:'editions',c:'catalog',t:'Издание',file:'mvp.py · master_templates.py',api:['POST /api/master-templates/{id}/publish','POST /api/catalog/editions'],d:'Неизменяемая копия черновика, созданная кнопкой «Опубликовать». Идентификатор master-{id}-r{revision}: повторная публикация той же ревизии не создаёт дубль.',f:['id — master-{id}-r{revision}','document — полный мастер-макет','published']},
+    {id:'offers',c:'catalog',t:'Предложение',file:'mvp.py',ui:'Новый заказ → «Дизайн и комплектация»',api:['GET/POST /api/offers'],d:'То, что фотограф выбирает при создании заказа: название и цена комплектации плюс ссылка на издание.',f:['id','studio_id','edition_id','title','price','active']},
+
+    {id:'schools',c:'school',t:'Школа',file:'mvp.py · school_catalog.py',ui:'Каталог школ (ветка SC)',api:['GET/POST /api/schools','PATCH/DELETE /api/schools/{id} (SC)'],changed:['school-catalog'],d:'Постоянная запись справочника студии, используется многими заказами. В main есть таблица и два метода API; экран каталога и поле «город» — в ветке school-catalog.',f:['id','studio_id','name','address','+city (SC)']},
+    {id:'teachers',c:'school',t:'Учитель',file:'mvp.py · school_catalog.py',ui:'Каталог школ → школа → учителя',api:['POST /api/schools/{id}/teachers (SC)','PATCH/DELETE /api/teachers/{id} (SC)','PUT/DELETE /api/teachers/{id}/portrait (SC)'],changed:['school-catalog'],d:'Постоянная карточка учителя школы. Портрет, выбранный однажды, работает в следующих альбомах этой школы.',f:['id','school_id','first_name, last_name','defined — определён ли','portrait_path','+patronymic, subject, archived, created_at, portrait_by (SC)']},
+    {id:'teacher_photos',c:'school',t:'Фото учителей',branch:'school-catalog',file:'school_catalog.py',ui:'Заказ или каталог школ → «Загрузить фото»; кабинет класса → подписать',api:['GET/POST /api/schools/{id}/teacher-photos','POST /api/teacher-photos/{id}/assign','POST /client-api/{token}/teacher-photos/{id}/sign'],d:'Неподписанные кадры учителей. Группируются по лицу; класс выбирает лучший кадр и подписывает имя, остальные кадры группы удаляются.',f:['id','school_id','order_id — откуда загрузили','filename, sha','group_id — группа по лицу','status','embedding','created_at']},
+    {id:'order_teachers',c:'school',t:'Учитель в заказе',branch:'school-catalog',file:'school_catalog.py',ui:'Кабинет класса → учителя; заказ → учителя',api:['GET/PUT /api/orders/{id}/teachers','GET/PUT /client-api/{token}/teachers'],d:'Какие учителя школы попадут в альбом класса, в каком порядке и кто классный руководитель.',f:['order_id','teacher_id','position','is_class_teacher']},
+    {id:'order_teacher_state',c:'school',t:'Кто менял учителей',branch:'school-catalog',file:'school_catalog.py',d:'Когда и кем (класс или фотограф) последний раз сохранён состав учителей заказа.',f:['order_id','updated_at','updated_by']},
+
+    {id:'orders',c:'order',t:'Заказ',file:'server.py · order_stages.py',ui:'Главная, Заказы, страница заказа',api:['GET/POST /api/orders','PATCH/DELETE /api/orders/{id}','POST /api/orders/{id}/stage','PUT /api/orders/{id}/cover'],d:'Центр модели: один класс одной школы. Этап (stage) — одно из восьми значений пути заказа.',f:['id','school — текст названия школы','class_name','graduation_year','copies, price — старые поля','shoot_date','stage: new → photos → forms → layout → approval → print → delivery → archive','stage_at','master_template_id','created_at']},
+    {id:'order_membership',c:'order',t:'Принадлежность заказа',file:'mvp.py',d:'Связывает заказ со студией. Через неё сервер проверяет, что фотограф видит только свои заказы.',f:['order_id','studio_id']},
+    {id:'order_terms',c:'order',t:'Условия заказа',file:'mvp.py',ui:'Страница заказа → «Изменить заказ»',api:['GET /api/orders/{id}/deal'],d:'Коммерческая и договорная часть заказа. Хранит полный снимок издания (edition_json), поэтому правка мастер-макета не меняет уже созданный заказ.',f:['customer_name, customer_contact','school_id','offer_id, offer_title, offer_price — снимок предложения','edition_id, edition_json — снимок издания','planned_paid, current_paid — тираж','gift_copies','delivery_modes','student_count','workflow — старое поле этапа','allocations_custom','created_at']},
+    {id:'shoots',c:'order',t:'Съёмка',file:'shoots.py',ui:'Заказ → папки съёмок',api:['POST /api/orders/{id}/shoots','PATCH/DELETE …/shoots/{id}','POST …/shoots/{id}/move-photos'],d:'Папка фотографий внутри заказа: портретная или общая.',f:['id','order_id','kind: portrait | general','title','shot_on','created_at']},
+    {id:'persons',c:'order',t:'Персона (ученик)',file:'server.py',ui:'Заказ → портреты; кабинет класса → «Выберите себя»',api:['PATCH /api/orders/{id}/persons/{pid}','POST /api/orders/{id}/person-suggestions'],d:'Ученик существует только внутри одного заказа. Персоны появляются из портретной съёмки (группы лиц). Общие фото персон не создают.',f:['id','order_id','name','created_at']},
+    {id:'upload_parts',c:'order',t:'Часть загрузки',file:'uploads.py',d:'Учёт больших загрузок по частям, чтобы продолжать после обрыва.',f:['id','order_id','shoot_id','filename','sha256','size, received','created_at']},
+    {id:'jobs',c:'order',t:'Фоновая задача',file:'jobs.py',d:'Очередь обработки: распознавание лиц на портретах, анализ общих фото. Идемпотентна по ключу.',f:['id','idempotency_key','kind','payload','status','attempts','error, result']},
+
+    {id:'photos',c:'photo',t:'Фотография',file:'server.py',ui:'Заказ → съёмка',api:['POST /api/orders/{id}/photos','POST /api/orders/{id}/delete-photos','POST /api/orders/{id}/retry','GET /media/{photo_id}/{variant}'],d:'Любой снимок заказа. Портрет получает person_id после распознавания; общий снимок — метаданные анализа.',f:['id','order_id','shoot_id','filename, sha','status: pending → processing → ready | error','person_id','embedding, uncertain','error','created_at']},
+    {id:'photo_meta',c:'photo',t:'Анализ снимка',file:'general_photos.py',d:'Результат локального анализа общего фото: сколько людей, крупность, сцена, качество, время съёмки.',f:['photo_id','version','raw — сырые детекции','meta — производные признаки','clip','thumb','taken_at','analyzed_at']},
+    {id:'photo_faces',c:'photo',t:'Лицо на общем фото',file:'general_photos.py',ui:'Проверка общих фото → «Кто это?»',api:['PUT /api/orders/{id}/general/faces'],d:'Каждое найденное лицо. subject связывает его с персоной — автоматически или вручную фотографом.',f:['id','photo_id','idx','embedding','px','doubtful','subject → персона','source: auto | manual','score, level, cluster']},
+    {id:'photo_flags',c:'photo',t:'Отметки фотографа',file:'general_photos.py',ui:'Проверка общих фото',api:['PUT /api/orders/{id}/general/flags','PUT /api/orders/{id}/general/best'],d:'Решения фотографа, которые главнее автоматики: не брать, обязательно, главное фото, лучший кадр серии.',f:['photo_id','excluded','must_use','hero','best']},
+    {id:'general_state',c:'photo',t:'Отпечаток галереи',file:'general_photos.py',d:'Отпечаток набора портретов. Изменился — лица на общих фото сопоставляются заново.',f:['order_id','gallery']},
+    {id:'photo_frames',c:'photo',t:'Рамка лица на портрете',file:'production_v3.py',d:'Где на портрете лицо — для кадрирования в виньетке.',f:['photo_id','x, y, w, h']},
+
+    {id:'client_links',c:'client',t:'Ссылка класса',file:'client_portal.py',ui:'Заказ → «Доступ для класса»',api:['GET/POST /api/orders/{id}/client-link','GET /client/{token}'],d:'Одна непредсказуемая ссылка на весь класс.',f:['order_id','token']},
+    {id:'order_pins',c:'client',t:'PIN-коды (хэш)',file:'mvp.py',d:'Проверка кода входа и кода управления.',f:['order_id','entry_hash, entry_salt','manage_hash, manage_salt']},
+    {id:'order_codes',c:'client',t:'PIN-коды (открыто)',file:'mvp.py',api:['POST /api/orders/{id}/client-codes/reset'],d:'Те же коды в открытом виде, чтобы фотограф мог показать их классу.',f:['order_id','entry_pin','manage_pin']},
+    {id:'pin_attempts',c:'client',t:'Попытки ввода PIN',file:'mvp.py',d:'Защита от перебора: счётчик ошибок и блокировка.',f:['order_id','kind','fails','locked_until']},
+    {id:'class_sessions',c:'client',t:'Сессия класса',file:'mvp.py',api:['POST /client-api/{token}/enter','POST /client-api/{token}/manage'],d:'Сессия после ввода кода: уровень «вход» или «управление».',f:['token_hash','order_id','level: entry | manage','expires_at']},
+    {id:'client_selections',c:'client',t:'Анкета ученика',file:'client_portal.py',ui:'Кабинет класса → анкета',api:['PUT /client-api/{token}/persons/{pid}'],d:'Выбранный портрет, имя, фамилия, цитата ученика. Отсюда генерация берёт подписи.',f:['person_id','photo_id — выбранный портрет','first_name, last_name','quote']},
+    {id:'selection_state',c:'client',t:'Статус анкеты',file:'mvp.py',api:['POST /client-api/{token}/persons/{pid}/submit'],d:'Зафиксирован ли выбор и отправлена ли анкета.',f:['person_id','photo_id','submitted']},
+    {id:'layout_corrections',c:'client',t:'Замечание к макету',branch:'new-client-portal',file:'client_portal.py',ui:'Кабинет класса → просмотр макета; заказ → замечания',api:['POST /client-api/{token}/corrections/name','POST /client-api/{token}/corrections/spread','POST /api/orders/{id}/corrections/{fid}/resolve'],d:'Класс сообщает об ошибке в имени или развороте опубликованной редакции. Замечание привязано к редакции: после новой публикации старые не показываются.',f:['id','order_id','revision','kind: name | spread','person_id, old_name, new_name','variant, spread_key, spread_label','comment','status: open | resolved','created_at']},
+    {id:'client_extras',c:'client',t:'Ссылка на все фото',branch:'new-client-portal',file:'client_portal.py',api:['GET/PUT /api/orders/{id}/photos-link'],d:'Внешняя ссылка на полный архив фотографий, которую видит класс.',f:['order_id','photos_url']},
+
+    {id:'order_layouts',c:'release',t:'Рабочий макет заказа',file:'layout_workspace.py · master_layout.py',ui:'Заказ → «Макет»',api:['GET/POST /api/orders/{id}/layout','PUT /api/orders/{id}/layout/element','POST/DELETE …/layout/spreads','GET …/layout/pdf/{owner}'],d:'Результат генерации: издание из снимка заказа + ученики, учителя и фото. Ручные правки хранятся отдельно (overrides) и переживают повторную генерацию; несовместимые становятся конфликтами.',f:['order_id','snapshot — вход генерации','document — shared_spreads, variant_spreads, variants, issues, revision','overrides — ручные правки по ключам','generated_at']},
+    {id:'publications',c:'release',t:'Опубликованная редакция',file:'mvp.py',ui:'Макет → «Опубликовать классу»',api:['POST /api/orders/{id}/layout/publish','GET /client-api/{token}/layout'],d:'Копия рабочего макета, которую видит класс. Публикация — отдельное действие от генерации.',f:['order_id','revision','document','published_at']},
+    {id:'approvals',c:'release',t:'Согласование класса',file:'mvp.py',ui:'Кабинет класса → «Согласовать заказ»',api:['POST /client-api/{token}/approve'],d:'Ответственный подтверждает макет и сводку кодом управления. Хранится снимок подтверждённой сводки.',f:['id','order_id','summary_hash','snapshot','approved_at']},
+    {id:'authorizations',c:'release',t:'Разрешение печати',file:'mvp.py',ui:'Заказ → «В печать»',api:['POST /api/orders/{id}/production'],d:'Отдельное решение фотографа после согласования. responsibility = печать без согласования под ответственность фотографа.',f:['order_id','revision','responsibility','authorized_at']},
+    {id:'allocations',c:'release',t:'Распределение экземпляров',file:'mvp.py',ui:'Кабинет класса → сводка',api:['GET/PUT /client-api/{token}/summary'],d:'Кому сколько платных и подарочных экземпляров.',f:['order_id','recipient_key — ученик или учитель','label','paid','gift']},
+    {id:'deliveries',c:'release',t:'Получение',file:'mvp.py',ui:'Кабинет класса → «Получение»',d:'Способ, служба, адрес, получатель и телефон. Один набор на заказ.',f:['order_id','mode','carrier','address','recipient','phone']},
+    {id:'export',c:'release',t:'Экспортный комплект',virtual:true,file:'export.py · mvp.py',api:['GET /api/orders/{id}/export'],d:'Не таблица: собирается на лету. Именованные PDF, ведомость «кому — какой файл — сколько» и манифест версий.',f:['PDF на получателя','ведомость','манифест']},
+  ],
+  edges:[
+    ['photographers','studios','studio_id','ref'],['auth_sessions','photographers','photographer_id','ref'],['profiles','studios','studio_id','ref'],['message_templates','studios','studio_id','ref'],
+    ['designs','studios','studio_id','ref'],['master_packages','designs','design_id','ref'],['master_packages','master_templates','template_id · 1:1','ref'],['design_blocks','designs','design_id','ref'],
+    ['master_templates','editions','«Опубликовать» → копия','snap'],['offers','editions','edition_id','ref'],['master_packages','offers','публикация создаёт','flow'],
+    ['schools','studios','studio_id','ref'],['teachers','schools','school_id','ref'],['teacher_photos','schools','school_id','ref'],['teacher_photos','orders','order_id','ref'],['teacher_photos','teachers','подпись → портрет','flow'],
+    ['order_teachers','orders','order_id','ref'],['order_teachers','teachers','teacher_id','ref'],['order_teacher_state','orders','order_id','ref'],
+    ['order_membership','orders','order_id','ref'],['order_membership','studios','studio_id','ref'],
+    ['order_terms','orders','order_id','ref'],['order_terms','schools','school_id','ref'],['order_terms','offers','offer_id + снимок цены','ref'],['order_terms','editions','edition_json — снимок','snap'],['order_terms','profiles','копия настроек','snap'],
+    ['orders','master_templates','master_template_id','ref'],
+    ['shoots','orders','order_id','ref'],['persons','orders','order_id','ref'],['photos','orders','order_id','ref'],['photos','shoots','shoot_id','ref'],['photos','persons','person_id','ref'],['upload_parts','shoots','shoot_id','ref'],['jobs','photos','обработка','flow'],
+    ['photo_meta','photos','photo_id','ref'],['photo_faces','photos','photo_id','ref'],['photo_faces','persons','subject','ref'],['photo_flags','photos','photo_id','ref'],['general_state','orders','order_id','ref'],['photo_frames','photos','photo_id','ref'],
+    ['client_links','orders','order_id','ref'],['order_pins','orders','order_id','ref'],['order_codes','orders','order_id','ref'],['pin_attempts','orders','order_id','ref'],['class_sessions','orders','order_id','ref'],
+    ['client_selections','persons','person_id','ref'],['client_selections','photos','выбранный портрет','ref'],['selection_state','persons','person_id','ref'],['selection_state','photos','photo_id','ref'],
+    ['layout_corrections','publications','revision','ref'],['layout_corrections','persons','person_id','ref'],['client_extras','orders','order_id','ref'],
+    ['order_layouts','orders','order_id','ref'],['order_layouts','order_terms','издание из снимка','flow'],['order_layouts','client_selections','имена, портреты, цитаты','flow'],['order_layouts','photo_flags','подбор общих фото','flow'],['order_layouts','order_teachers','учителя и руководитель','flow'],
+    ['publications','order_layouts','копия документа','snap'],['approvals','publications','подтверждает редакцию','ref'],['approvals','allocations','снимок сводки','snap'],['approvals','deliveries','снимок сводки','snap'],
+    ['authorizations','publications','revision','ref'],['allocations','orders','order_id','ref'],['allocations','persons','recipient_key','ref'],['deliveries','orders','order_id','ref'],
+    ['export','authorizations','после разрешения','flow'],['export','allocations','ведомость','flow'],['export','publications','PDF','flow'],
+  ]
+};
+
+const EDITOR = {
+  key:'editor',
+  clusters:[
+    {id:'ui',label:'Где в интерфейсе',color:'--c-ui',x:0,y:0,cols:1},
+    {id:'cat',label:'Каталог',color:'--c-catalog',x:270,y:0,cols:1},
+    {id:'sec',label:'Правило раздела',color:'--c-catalog',x:270,y:470,cols:1},
+    {id:'doc',label:'Документ мастер-макета',color:'--c-order',x:540,y:0,cols:1},
+    {id:'lay',label:'Типы слоёв',color:'--c-photo',x:810,y:0,cols:1},
+    {id:'prop',label:'Группы свойств слоя',color:'--c-client',x:1080,y:0,cols:1},
+    {id:'out',label:'Куда уходит',color:'--c-out',x:1350,y:0,cols:1},
+  ],
+  nodes:[
+    {id:'U_tools',c:'ui',t:'Панель инструментов',sub:'V H T F C G R O L',d:'Создание слоёв и режимы холста: указатель, рука, текст, изображение / коллаж / виньетка, фигура / SVG. Масштаб и панорамирование.'},
+    {id:'U_spreads',c:'ui',t:'Вкладка «Развороты»',sub:'data-tab=pages',d:'Список разделов и разворотов: добавить, переименовать, переставить, дублировать, удалить. Обложка всегда первая.'},
+    {id:'U_rules',c:'ui',t:'Вкладка «Правила»',sub:'раздел + общие фото',d:'Правило раздела («Как добавлять страницы»), ориентир разворотов, строгий минимум, «Не повторять руководителя», личные развороты и блок «Общие фото альбома».'},
+    {id:'U_templates',c:'ui',t:'Вкладка «Шаблоны»',sub:'data-tab=library',d:'Библиотека заготовок дизайна: «Сохранить текущий раздел», добавить заготовку в комплектацию.'},
+    {id:'U_props',c:'ui',t:'Панель «Свойства»',sub:'выбранный слой',d:'Всё о выбранном слое: положение, размер, поворот, оформление, обводка, тень, типографика, стиль текста, источник данных, роль общего фото, кадрирование, коллаж.'},
+    {id:'U_safety',c:'ui',t:'Диалог «Линии безопасности»',sub:'Все страницы / Обложка',d:'Размер страниц и обложки, безопасная зона, вылет, корешок, расстав. Линии видны только в редакторе.'},
+    {id:'U_vign',c:'ui',t:'Диалог «Настроить виньетки»',sub:'Размещение · Подписи',d:'Живой пример страницы: кого разместить, мин/макс на странице, промежутки, размер фото, цитаты / предметы и их оформление.'},
+    {id:'U_test',c:'ui',t:'«Проверить на данных»',sub:'Тестовые данные',d:'Число учеников и учителей, длинное имя, отсутствующий портрет. Меняет только пример, не макет. Предпросмотр блокирует редактирование.'},
+    {id:'U_package',c:'ui',t:'Комплектация и публикация',sub:'шапка редактора',d:'Название и цена, «Новая комплектация» (копия текущей), «Опубликовать комплектацию».'},
+    {id:'U_file',c:'ui',t:'Меню файла •••',sub:'JSON',d:'Скачать и импортировать JSON, скачать изображение, восстановить локальную копию.'},
+
+    {id:'design',c:'cat',t:'Дизайн',sub:'designs',d:'Серия страниц студии. Содержит комплектации и общую библиотеку заготовок.'},
+    {id:'package',c:'cat',t:'Комплектация',sub:'master_packages',d:'Название и цена. Одна комплектация = один черновик. Новая комплектация копирует развороты; дальше правки независимы.'},
+    {id:'block',c:'cat',t:'Заготовка раздела',sub:'design_blocks',d:'Раздел, сохранённый в библиотеку дизайна.'},
+    {id:'draft',c:'cat',t:'Черновик',sub:'master_templates',d:'Документ + ревизия. Автосохранение через паузу; 409 при устаревшей вкладке.'},
+    {id:'edition',c:'cat',t:'Издание',sub:'editions',d:'Неизменяемая копия черновика после публикации. Заказы ссылаются только на издания.'},
+    {id:'offer',c:'cat',t:'Предложение',sub:'offers',d:'Появляется при публикации; его выбирают в новом заказе.'},
+
+    {id:'cover',c:'sec',t:'Обложка',sub:'cover: true',d:'Всегда первый раздел, один разворот: слева оборотная сторона, справа лицевая. Свой размер и линии безопасности, корешок и расстав.'},
+    {id:'fixed',c:'sec',t:'Фиксированный',sub:'kind: fixed',d:'Точное число шаблонных разворотов, например четыре общих, при любом составе класса.'},
+    {id:'flow',c:'sec',t:'Расширяемый',sub:'kind: flow',d:'Распределяет учеников или учителей по страницам с автовиньетками. Ориентир мягкий; при нехватке места повторяется последний шаблон.'},
+    {id:'repeat',c:'sec',t:'Личные развороты',sub:'kind: repeat',d:'Повторяет шаблон по ученикам: для всех в каждом альбоме (all), только владельцу варианта (owner) или отключено (off).'},
+
+    {id:'doc',c:'doc',t:'Документ',sub:'schemaVersion 1',d:'Корень: название, режим личных разворотов, размер страниц 210×280 мм, список разделов (1–30).'},
+    {id:'safety',c:'doc',t:'Линии безопасности',sub:'safety',d:'safe, bleed, spine, gap в мм. У обложки — свои.'},
+    {id:'photoRules',c:'doc',t:'Правила общих фото',sub:'photoRules',d:'Повторы снимков, минимум и максимум появлений ученика, чередование крупности, порядок по времени съёмки.'},
+    {id:'fonts',c:'doc',t:'Свои шрифты',sub:'fonts[] ≤ 12',d:'TTF / OTF до 1,5 МБ хранятся прямо в документе.'},
+    {id:'textStyles',c:'doc',t:'Стили текста',sub:'textStyles[] ≤ 50',d:'Заголовок, Имя, Подпись, Цитата, Основной текст и свои. Правка стиля меняет все связанные тексты макета.'},
+    {id:'section',c:'doc',t:'Раздел',sub:'sections[]',d:'Название, правило (fixed / flow / repeat), ориентир, строгий минимум, исключение руководителя, 1–100 шаблонов разворотов. Один источник виньеток на раздел.'},
+    {id:'spread',c:'doc',t:'Разворот',sub:'spreads[]',d:'Шаблон разворота: ровно две страницы.'},
+    {id:'page',c:'doc',t:'Страница',sub:'pages[2]',d:'Фон и до 100 слоёв; не больше одной автовиньетки.'},
+    {id:'layer',c:'doc',t:'Слой',sub:'layers[]',d:'Постоянный id, тип, box в мм. Оформление хранится отдельно от привязки к данным.'},
+
+    {id:'L_text',c:'lay',t:'Текст',sub:'type: text',d:'Свободный или привязанный к данным текст, до 2000 символов.'},
+    {id:'L_photo',c:'lay',t:'Фоторамка',sub:'type: photo',d:'Портрет владельца / ученика / руководителя, общее фото с ролью или загруженный файл.'},
+    {id:'L_collage',c:'lay',t:'Коллаж',sub:'type: collage',d:'1–8 рядов по 1–8 кадров, кадры делятся по ширине и высоте до 4 уровней, до 48 кадров. У каждого кадра свой источник и роль.'},
+    {id:'L_grid',c:'lay',t:'Автовиньетка',sub:'type: grid',d:'Сетка карточек участников. Только в расширяемом разделе, одна на страницу.'},
+    {id:'L_rect',c:'lay',t:'Прямоугольник',sub:'type: rect',d:'Фигура с заливкой, радиусом, обводкой и тенью.'},
+    {id:'L_ellipse',c:'lay',t:'Круг / эллипс',sub:'type: ellipse',d:'Фигура с заливкой, обводкой и тенью.'},
+    {id:'L_line',c:'lay',t:'Линия',sub:'type: line',d:'Штрих, концы и стыки.'},
+    {id:'L_svg',c:'lay',t:'SVG-рисунок',sub:'type: svg',d:'Вектор до 200 КБ без скриптов; заливка и обводка «как в файле», своим цветом или без.'},
+
+    {id:'P_geom',c:'prop',t:'Положение и размер',sub:'box, angle, flip, locked',d:'x, y, w, h в мм; поворот; отражение; закрепить; скрыть. Прилипание к линиям и объектам, ползунок расстояния между двумя объектами.'},
+    {id:'P_look',c:'prop',t:'Оформление',sub:'fill, opacity, radius',d:'Заливка, непрозрачность, радиус углов.'},
+    {id:'P_stroke',c:'prop',t:'Обводка',sub:'stroke*',d:'Вкл., толщина, цвет, штрих, внутри / по центру / снаружи, концы и стыки.'},
+    {id:'P_shadow',c:'prop',t:'Тень',sub:'shadow',d:'Цвет, сдвиг X / Y, размытие, сила.'},
+    {id:'P_type',c:'prop',t:'Типографика',sub:'font, fontSize…',d:'Шрифт, кегль, начертание, выравнивание, интерлиньяж, межбуквенный интервал, цвет, общий стиль.'},
+    {id:'P_bind',c:'prop',t:'Привязка текста',sub:'binding',d:'Свой текст, имя владельца / ученика разворота / руководителя, класс, год.'},
+    {id:'P_source',c:'prop',t:'Чьё фото',sub:'source',d:'Владелец варианта, ученик разворота, руководитель, общее фото класса, загруженный файл.'},
+    {id:'P_pick',c:'prop',t:'Роль общего фото',sub:'pick',d:'9 ролей (главное фото, весь класс, жизнь класса, с друзьями…) и фильтры: сколько людей, крупность, кто на фото, стиль, качество, сцена.'},
+    {id:'P_crop',c:'prop',t:'Кадрирование',sub:'cropX, cropY, cropZoom',d:'Сдвиг кадра 0–100 % и масштаб 1–4.'},
+    {id:'P_vignette',c:'prop',t:'Размещение виньеток',sub:'source, min, max, gap…',d:'Кого разместить, минимум и максимум на странице, промежуток, ширина фото, минимальный кегль имени. Общие для раздела.'},
+    {id:'P_detail',c:'prop',t:'Подписи виньеток',sub:'showDetail, detail*',d:'Цитата у учеников или предмет у учителей, их отдельное оформление, расстояния фото → имя → подпись.'},
+
+    {id:'C_validate',c:'out',t:'Проверка документа',sub:'master_templates.validate',d:'При сохранении и публикации: схема, уникальные id, границы чисел, геометрия, цвета, источники, изображения и шрифты.'},
+    {id:'C_preview',c:'out',t:'Тестовая съёмка',sub:'test_shoot.py',d:'Синтетический класс для предпросмотра подбора общих фото (POST /api/master-templates/photo-preview).'},
+    {id:'C_pick',c:'out',t:'Подбор общих фото',sub:'photo_pick.py',d:'Одно назначение на весь альбом: покрытие учеников, ритм крупностей, хронология. При нехватке ослабляет фильтры и предупреждает.'},
+    {id:'C_compile',c:'out',t:'Генерация альбома',sub:'master_layout.py',d:'Издание + снимок заказа → развороты, варианты, ошибки. Считает вместимость по самому тесному шаблону раздела.'},
+    {id:'C_layout',c:'out',t:'Рабочий макет',sub:'order_layouts',d:'Результат генерации, в котором фотограф правит фото и тексты заказа.'},
+    {id:'C_pdf',c:'out',t:'Контрольный PDF',sub:'layout_render.py',d:'RGB PDF: текст, фото, фигуры, прозрачность, загруженные ресурсы. Печатного профиля пока нет.'},
+  ],
+  edges:[
+    ['design','package','содержит','ref'],['design','block','библиотека','ref'],['package','draft','1:1','ref'],['draft','doc','document','ref'],['draft','edition','«Опубликовать»','snap'],['edition','offer','создаёт','flow'],
+    ['doc','safety','','ref'],['doc','photoRules','','ref'],['doc','fonts','','ref'],['doc','textStyles','','ref'],['doc','section','sections[] 1–30','ref'],['section','spread','1–100','ref'],['spread','page','2 страницы','ref'],['page','layer','≤ 100','ref'],
+    ['section','cover','первый раздел','ref'],['section','fixed','kind','ref'],['section','flow','kind','ref'],['section','repeat','kind','ref'],['doc','repeat','personalMode','flow'],['flow','L_grid','только здесь','flow'],
+    ['layer','L_text','','ref'],['layer','L_photo','','ref'],['layer','L_collage','','ref'],['layer','L_grid','','ref'],['layer','L_rect','','ref'],['layer','L_ellipse','','ref'],['layer','L_line','','ref'],['layer','L_svg','','ref'],
+    ['layer','P_geom','у любого слоя','flow'],['layer','P_stroke','у любого слоя','flow'],['layer','P_shadow','у любого слоя','flow'],
+    ['L_rect','P_look','','flow'],['L_ellipse','P_look','','flow'],['L_svg','P_look','','flow'],['L_line','P_look','','flow'],
+    ['L_text','P_type','','flow'],['L_text','P_bind','','flow'],['L_text','textStyles','styleId','ref'],['textStyles','fonts','font','ref'],
+    ['L_photo','P_source','','flow'],['L_photo','P_pick','если общее фото','flow'],['L_photo','P_crop','','flow'],
+    ['L_collage','P_source','у каждого кадра','flow'],['L_collage','P_pick','у каждого кадра','flow'],['L_collage','P_crop','','flow'],
+    ['L_grid','P_type','имя','flow'],['L_grid','P_vignette','','flow'],['L_grid','P_detail','','flow'],
+    ['U_tools','layer','создаёт','flow'],['U_spreads','section','','flow'],['U_spreads','spread','','flow'],['U_rules','section','правило, ориентир','flow'],['U_rules','photoRules','','flow'],['U_rules','repeat','','flow'],
+    ['U_templates','block','','flow'],['U_props','P_geom','','flow'],['U_props','P_type','','flow'],['U_props','P_pick','','flow'],['U_props','textStyles','','flow'],['U_props','fonts','добавить шрифт','flow'],
+    ['U_safety','safety','','flow'],['U_safety','cover','','flow'],['U_vign','P_vignette','','flow'],['U_vign','P_detail','','flow'],['U_test','C_preview','','flow'],['U_package','package','','flow'],['U_package','edition','','flow'],['U_file','doc','импорт / экспорт','flow'],
+    ['draft','C_validate','при сохранении','flow'],['P_pick','C_pick','роль и фильтры','flow'],['photoRules','C_pick','','flow'],['C_preview','C_pick','','flow'],
+    ['edition','C_compile','в каждом заказе','flow'],['C_pick','C_compile','','flow'],['C_compile','C_layout','','flow'],['C_layout','C_pdf','','flow'],
+  ]
+};
+
+/* Settings registry: [name, scope, path, ui, values, effect, unvalidated?] */
+const SETTINGS = [
+  ['Название макета','Документ','name','Шапка · Комплектация','до 80 символов','Имя в каталоге и при выборе в заказе'],
+  ['Размер внутренних страниц','Документ','pageSize','Линии безопасности → Все страницы','50–500 мм, по умолчанию 210 × 280','Геометрия всех разворотов кроме обложки, PDF'],
+  ['Режим личных разворотов','Документ','personalMode','Правила → Личные развороты','all · owner · off','Сколько личных разворотов в каждом альбоме'],
+  ['Безопасная зона','Документ','safety.safe','Линии безопасности','мм, до половины страницы','Только направляющая в редакторе'],
+  ['Вылет','Документ','safety.bleed','Линии безопасности','0–30 мм','Направляющая; печатной развёртки пока нет'],
+  ['Свои шрифты','Документ','fonts[]','Свойства текста → Добавить шрифт','до 12, TTF/OTF ≤ 1,5 МБ','Шрифты текстов и виньеток; в PDF жирный и курсив только у Arial, Georgia, Times'],
+  ['Стили текста','Документ','textStyles[]','Свойства текста → Стили текста','до 50; шрифт, кегль, цвет, начертание, выравнивание, интервалы','Правка стиля меняет все связанные тексты макета'],
+  ['Повторы общих снимков','Общие фото','photoRules.reuse','Правила → Общие фото альбома','album · section · allow','Может ли один снимок встретиться дважды'],
+  ['Минимум появлений ученика','Общие фото','photoRules.coverageMin','Правила → Общие фото альбома','0–10','Подбор старается показать каждого не реже'],
+  ['Максимум появлений ученика','Общие фото','photoRules.coverageMax','Правила → Общие фото альбома','0–50, 0 — без предела','Ограничивает «звёзд» альбома'],
+  ['Чередовать крупность','Общие фото','photoRules.rhythm','Правила → Общие фото альбома','да / нет','Разные планы на одном развороте'],
+  ['Порядок по времени съёмки','Общие фото','photoRules.chronology','Правила → Общие фото альбома','да / нет','Снимки идут в хронологии'],
+  ['Размер обложки','Раздел','sections[0].pageSize','Линии безопасности → Обложка','50–500 мм, одна сторона','Первый лист PDF'],
+  ['Корешок','Раздел','sections[0].safety.spine','Линии безопасности → Обложка','мм','Направляющая обложки'],
+  ['Расстав','Раздел','sections[0].safety.gap','Линии безопасности → Обложка','мм','Зазор у корешка для сгиба'],
+  ['Название раздела','Раздел','sections[].name','Развороты','до 100 символов','Только для навигации'],
+  ['Правило раздела','Раздел','sections[].kind','Правила → Как добавлять страницы','fixed · flow · repeat','Как считается число разворотов раздела'],
+  ['Ориентир разворотов','Раздел','sections[].target','Правила','1–100','fixed — точное число; flow — мягкий ориентир'],
+  ['Строгий минимум','Раздел','sections[].strictMin','Правила','да / нет','Неполная последняя страница — ошибка вместо предупреждения',true],
+  ['Не повторять руководителя','Раздел','sections[].excludeLead','Правила','да / нет','Руководитель с отдельной рамкой не попадает в виньетки учителей',true],
+  ['Шаблоны разворотов','Раздел','sections[].spreads[]','Развороты','1–100','Из чего строится раздел; при нехватке повторяется последний'],
+  ['Фон страницы','Страница','pages[].background','Свойства (ничего не выбрано)','#RRGGBB','Цвет страницы'],
+  ['Положение и размер','Любой слой','box.x/y/w/h','Свойства → Положение','мм, внутри страницы','Геометрия на странице и в PDF'],
+  ['Поворот','Любой слой','angle','Свойства → Положение','−180…180°',''],
+  ['Отражение','Любой слой','flipX, flipY','Свойства → Отразить','да / нет','',true],
+  ['Закрепить положение','Любой слой','locked','Свойства · список слоёв','да / нет','Только в редакторе',true],
+  ['Скрыть','Любой слой','hidden','Список слоёв','да / нет','Скрытый слой не попадает в альбом',true],
+  ['Непрозрачность','Любой слой','opacity','Свойства → Оформление','0–100 %',''],
+  ['Радиус углов','Любой слой','radius','Свойства → Оформление','0–100 мм','Скругление рамок и фигур'],
+  ['Обводка','Любой слой','strokeOn, strokeWidth, stroke','Свойства → Обводка','0–10, цвет','' ],
+  ['Штрих обводки','Любой слой','strokeDash','Свойства → Обводка','сплошная · пунктир · точки',''],
+  ['Положение обводки','Любой слой','strokeAlign','Свойства → Обводка','внутри · по центру · снаружи',''],
+  ['Концы и стыки','Любой слой','strokeCap, strokeJoin','Свойства → Концы и стыки','butt/round/square · miter/round/bevel','Линии и SVG'],
+  ['Тень','Любой слой','shadow.{color,offsetX,offsetY,blur,opacity}','Свойства → Тень','сдвиг ±30, размытие 0–40',''],
+  ['Заливка','Фигуры и SVG','fill','Свойства → Оформление','#RRGGBB','rect, ellipse, line, svg'],
+  ['SVG-код','Фигуры и SVG','svg','Фигура → SVG','до 200 КБ, без скриптов',''],
+  ['Заливка и обводка SVG','Фигуры и SVG','fillMode, strokeMode','Свойства','как в файле · свой цвет · нет',''],
+  ['Текст','Текст','text','Холст (двойной клик) · Свойства','до 2000 символов','Для привязки static'],
+  ['Привязка текста','Текст','binding','Свойства → Содержимое','static · owner.name · item.name · lead.name · class · year','Откуда текст берётся в заказе'],
+  ['Общий стиль','Текст','styleId','Свойства → Стили текста','id стиля или без стиля','Связывает оформление с другими текстами'],
+  ['Шрифт и кегль','Текст','font, fontSize, color','Свойства → Типографика','4–120 pt',''],
+  ['Начертание','Текст','bold, italic, underline, strike','Свойства → Начертание','да / нет',''],
+  ['Выравнивание','Текст','align','Свойства → Выравнивание','left · center · right · justify',''],
+  ['Интерлиньяж и интервал','Текст','lineHeight, letterSpacing','Свойства → Типографика','0,8–3 · −20…80',''],
+  ['Чьё фото','Фото','source','Свойства → Чьё фото подставить','owner · item · lead · class · custom','Какой снимок попадёт в рамку'],
+  ['Загруженное изображение','Фото','dataUrl','Свойства → Загрузить в кадр','PNG/JPEG/WebP ≤ 1 МБ','Для source custom'],
+  ['Кадрирование','Фото','cropX, cropY, cropZoom','Свойства → Масштаб фото','0–100 % · 1–4','Совпадает в редакторе, заказе и PDF'],
+  ['Роль слота','Общие фото','pick.role','Свойства → Подбор общего фото','any · hero · class_photo · life · friends · me_in_class · with_item · close_up · atmosphere','Что подбор ищет для рамки'],
+  ['Сколько людей','Общие фото','pick.buckets','Уточнить фильтры','none · solo · pair · small_group · group · class','Сужает роль'],
+  ['Крупность','Общие фото','pick.scale','Уточнить фильтры','detail · close · medium · full · wide',''],
+  ['Кто на фото','Общие фото','pick.include','Уточнить фильтры','owner · item (только в личных)',''],
+  ['Стиль и качество','Общие фото','pick.style, pick.quality','Уточнить фильтры','posed · candid · best · good',''],
+  ['Сцена','Общие фото','pick.tags','Уточнить фильтры','до 12 тегов: спортзал, природа, праздник…',''],
+  ['Ряды и кадры коллажа','Коллаж','rows[][] · cells · split','Свойства → Сетка','1–8 × 1–8, деление h/v до 4 уровней, ≤ 48 кадров',''],
+  ['Зазоры коллажа','Коллаж','gapX, gapY','Свойства → Сетка','0–40',''],
+  ['Фон пустых кадров','Коллаж','fill','Свойства','#RRGGBB',''],
+  ['Кого разместить','Виньетка','source','Настроить виньетки → Размещение','students · teachers','Один источник на раздел'],
+  ['Минимум и максимум на странице','Виньетка','min, max','Настроить виньетки → Размещение','1–100','Вместимость и равномерное распределение'],
+  ['Между карточками','Виньетка','gap','Настроить виньетки → Размещение','0–30 мм',''],
+  ['Размер фото','Виньетка','photoWidth, minPhotoWidth','Настроить виньетки → Размещение','5–180 мм, от верхнего к минимуму','Фото уменьшается, чтобы все поместились'],
+  ['Минимальный кегль имени','Виньетка','minFontSize','Настроить виньетки','4…кегль имени','Длинные имена ужимаются до него'],
+  ['Цитаты / предметы','Виньетка','showDetail','Настроить виньетки → Подписи','да / нет','Вторая строка под именем'],
+  ['Оформление подписи','Виньетка','detailFont, detailFontSize, detailColor, detailAlign, detailBold…','Настроить виньетки → Подписи','как у текста',''],
+  ['Расстояния в карточке','Виньетка','photoNameGap, nameDetailGap','Настроить виньетки → Подписи','0–20 мм','Фото → имя → подпись'],
+];
+
+const SCOPE_COLOR = {'Документ':'--c-order','Общие фото':'--c-photo','Раздел':'--c-catalog','Страница':'--c-catalog','Любой слой':'--c-client','Фигуры и SVG':'--c-client','Текст':'--c-ui','Фото':'--c-photo','Коллаж':'--c-photo','Виньетка':'--c-school'};
+
+const STAGES = [
+  {code:'new',t:'Новый',who:'Фотограф',d:'Создаёт заказ: школа, класс, год выпуска, заказчик, комплектация. Заказ получает снимок издания и цены, ссылку и коды для класса.',tables:['orders','order_terms','order_membership','offers','client_links','order_pins','order_codes']},
+  {code:'photos',t:'Фото',who:'Фотограф + автоматика',d:'Загрузка съёмок по папкам. Портреты группируются по лицам в персоны; общие фото анализируются локально. Фотограф проверяет совпадения и отмечает лучшие кадры.',tables:['shoots','photos','upload_parts','jobs','persons','photo_frames','photo_meta','photo_faces','photo_flags']},
+  {code:'forms',t:'Анкеты',who:'Класс',d:'Каждый находит себя, выбирает портрет, пишет имя и цитату. В ветке school-catalog класс также выбирает учителей, руководителя и подписывает фото учителей.',tables:['client_selections','selection_state','class_sessions','order_teachers','teacher_photos','teachers']},
+  {code:'layout',t:'Макет',who:'Фотограф',d:'Генерация по изданию из снимка заказа, ручные замены фото и текстов, контрольный PDF, затем «Опубликовать классу».',tables:['order_layouts','publications']},
+  {code:'approval',t:'Согласование',who:'Класс (ответственный)',d:'Просмотр макета, распределение экземпляров и получение. Ответственный подтверждает кодом управления. В ветке new-client-portal — замечания к именам и разворотам.',tables:['allocations','deliveries','approvals','layout_corrections']},
+  {code:'print',t:'Печать',who:'Фотограф',d:'Отдельное разрешение печати после согласования (или под ответственность фотографа) и экспортный комплект.',tables:['authorizations','export']},
+  {code:'delivery',t:'Доставка',who:'Фотограф вручную',d:'Выдача или отправка по данным получения.',tables:['deliveries']},
+  {code:'archive',t:'Архив',who:'Фотограф вручную',d:'Завершённый заказ.',tables:['orders']},
+];
+
+const BRANCHES = [
+  {name:'main',color:'var(--muted)',meta:'a5b9aab · основная ветка',items:['Карточки мастер-макетов: дублировать и удалить','Путь заказа из 8 этапов, папки съёмок, проверка фото','Локальный анализ общих фото и подбор по ролям слотов','Виньетки: промежутки, подписи, масштаб кадрирования','SVG, положение обводки, эффекты текста']},
+  {name:'school-catalog',color:'var(--b-sc)',meta:'3 коммита · отстаёт от main на 1',items:['Каталог школ студии: экран schools.js, модуль school_catalog.py (≈650 строк)','Новые таблицы: order_teachers, teacher_photos, order_teacher_state','Новые поля: schools.city; teachers.patronymic, subject, archived, portrait_by','Класс выбирает учителей и классного руководителя','Фото учителей группируются по лицу и подписываются классом']},
+  {name:'new-client-portal',color:'var(--b-cp)',meta:'1 коммит · отстаёт от main на 1',items:['Кабинет класса заново, сначала для телефона','Новые таблицы: layout_corrections, client_extras','Замечания к именам и разворотам, фотограф закрывает их','Этап для класса: выбор → ждём макет → согласование → печать → доставка','Ссылка на полный архив фото']},
+  {name:'mvp/complete',color:'var(--b-mvp)',meta:'3 коммита · содержит весь main',items:['Общее ядро коллажа collage-core.js для редактора и альбома','Предпросмотр мастер-макета на реальном классе','Перестановка, дублирование и удаление блоков альбома','Подбор общих фото по категориям','Новых таблиц нет']},
+];
+const OVERLAP = [
+  ['school-catalog','new-client-portal','client_portal.py, mvp.py, server.py, client.js, client.css, v2.js, README.md','high','Обе ветки переделывают кабинет класса и сводку. Сливать вторую после первой и разбирать client.js вручную.'],
+  ['school-catalog','mvp/complete','layout_workspace.py, master_layout.py, v2.html, v2.js','mid','Обе трогают генерацию альбома: учителя и руководитель против общего ядра коллажа.'],
+  ['new-client-portal','mvp/complete','v2.js','low','Одна общая точка в приложении фотографа.'],
+];
+
+const RISKS = [
+  {sev:'high',t:'Школа хранится дважды',p:'<b>orders.school</b> — просто текст названия, а <b>order_terms.school_id</b> — ссылка на справочник школ. Можно переименовать школу в каталоге, а в заказе останется старое название. Нужно решить, какое поле главное, и второе вычислять.',n:['orders','order_terms','schools']},
+  {sev:'high',t:'Две ветки меняют кабинет класса',p:'<b>school-catalog</b> и <b>new-client-portal</b> правят одни и те же 7 файлов. Чем дольше они живут отдельно, тем тяжелее слияние. Порядок на вкладке «Ветки».',n:['client_selections','layout_corrections','order_teachers']},
+  {sev:'mid',t:'Выбор портрета в двух таблицах',p:'<b>client_selections</b> (портрет, имя, цитата) и <b>selection_state</b> (портрет, отправлено). photo_id записан в обе. Одна таблица «Анкета ученика» проще.',n:['client_selections','selection_state']},
+  {sev:'mid',t:'Тираж и цена в двух местах',p:'<b>orders.copies / orders.price</b> — старые поля; актуальные — <b>order_terms.planned_paid, current_paid, offer_price</b>. Легко прочитать не то поле.',n:['orders','order_terms']},
+  {sev:'mid',t:'Этап заказа в двух местах',p:'<b>orders.stage</b> — действующий путь из 8 этапов. <b>order_terms.workflow</b> — старое поле, которое один раз переводится в stage при миграции.',n:['orders','order_terms']},
+  {sev:'mid',t:'Шаблон заказа: три ссылки',p:'<b>orders.master_template_id</b> указывает на черновик, <b>order_terms.offer_id / edition_id</b> — на предложение и издание, а <b>edition_json</b> — копия. Для генерации важна только копия; остальное — для навигации.',n:['orders','order_terms','editions','master_templates']},
+  {sev:'mid',t:'Комплектация = черновик',p:'У <b>master_packages</b> ключ — это id черновика <b>master_templates</b>. В коде встречаются «package», «template», «master» для одного и того же. Лучше договориться: комплектация — продукт, мастер-макет — её документ.',n:['master_packages','master_templates']},
+  {sev:'mid',t:'Коды PIN в двух видах',p:'<b>order_pins</b> хранит хэши, <b>order_codes</b> — те же коды открыто, чтобы фотограф мог их показать. Модель заказа говорит, что коды хранятся защищённо; стоит явно решить, допустимо ли это.',n:['order_pins','order_codes']},
+  {sev:'mid',t:'Портрет учителя в двух местах',p:'<b>teachers.portrait_path</b> (main) и <b>teacher_photos</b> (school-catalog). После слияния нужен один путь от загрузки до подписанного портрета.',n:['teachers','teacher_photos']},
+  {sev:'mid',t:'Классный руководитель',p:'В main руководитель — первый учитель по id. В school-catalog есть явный <b>order_teachers.is_class_teacher</b>. Пока ветка не слита, генерация в main этого не знает.',n:['order_teachers','order_layouts']},
+  {sev:'low',t:'Два формата изданий',p:'Старый CLI-формат <span class="mono">examples/editions/*.json</span> + <span class="mono">layout_engine.py</span> живёт рядом с новым мастер-макетом. Заказы без master используют встроенный шаблон.',n:['editions']},
+  {sev:'low',t:'Поля, которые сервер не проверяет',p:'<b>strictMin, excludeLead, hidden, locked, flipX/flipY</b> читает генератор, но validate() их не проверяет. В реестре настроек они помечены.',n:[]},
+  {sev:'low',t:'Ссылки без ограничений базы',p:'Большинство studio_id, order_id, school_id — обычный текст без REFERENCES. Целостность держится на коде: при удалении заказа каждый модуль чистит свои таблицы сам (функции forget).',n:['order_membership','order_terms']},
+];
+
+const GLOSSARY = [
+  ['Студия','studio','Владелец всех данных. Всё изолировано по studio_id.'],
+  ['Дизайн','design','Визуальная серия страниц. Содержит комплектации и библиотеку заготовок.'],
+  ['Комплектация','master_package','Вариант дизайна с названием и ценой. Имеет ровно один мастер-макет.'],
+  ['Мастер-макет','master_template','Редактируемый документ комплектации: программа сборки альбома.'],
+  ['Издание','edition','Опубликованная неизменяемая версия мастер-макета.'],
+  ['Предложение','offer','Опубликованная комплектация, которую выбирают в заказе.'],
+  ['Заказ','order','Альбом одного класса одной школы.'],
+  ['Персона','person','Ученик внутри заказа. Появляется из портретной съёмки.'],
+  ['Съёмка','shoot','Папка фото заказа: портретная или общая.'],
+  ['Раздел','section','Часть мастер-макета с правилом объёма: fixed, flow или repeat.'],
+  ['Разворот','spread','Две страницы. В мастер-макете — шаблон, в заказе — готовый разворот.'],
+  ['Слой','layer','Объект на странице: текст, фото, коллаж, виньетка, фигура, SVG.'],
+  ['Виньетка','grid','Автоматическая сетка карточек учеников или учителей.'],
+  ['Владелец (owner)','owner','Ученик, для которого собран персональный вариант альбома.'],
+  ['Ученик разворота (item)','item','Текущий ученик в повторяемом личном разделе.'],
+  ['Руководитель (lead)','lead','Классный руководитель.'],
+  ['Роль слота','pick.role','Что искать для рамки общего фото: главное, весь класс, с друзьями…'],
+  ['Вариант','variant','Персональная версия альбома; все варианты заказа одного объёма.'],
+  ['Рабочий макет','order_layout','Результат генерации заказа + ручные правки.'],
+  ['Редакция','revision','Опубликованная классу версия рабочего макета.'],
+  ['Согласование','approval','Подтверждение классом кодом управления.'],
+  ['Разрешение печати','authorization','Отдельное решение фотографа после согласования.'],
+];
+
+/* ============================================================
+   GRAPH ENGINE
+   ============================================================ */
+const NS='http://www.w3.org/2000/svg';
+const NW=190, NH=48, GX=18, GY=14, PAD=18, HEAD=36;
+const el=(tag,attrs={},parent)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e};
+const store={get(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+class Graph{
+  constructor(stage,data,opts={}){
+    this.stage=stage;this.data=data;this.opts=opts;
+    this.hidden=new Set();this.sel=null;this.hover=null;this.view={x:40,y:40,k:1};
+    this.byId=Object.fromEntries(data.nodes.map(n=>[n.id,n]));
+    this.clusters=Object.fromEntries(data.clusters.map(c=>[c.id,c]));
+    this.saved=store.get('afmap-pos-'+data.key)||{};
+    this.layout();this.build();
+  }
+  layout(){
+    const counts={};
+    for(const n of this.data.nodes){
+      const c=this.clusters[n.c];const i=counts[n.c]=(counts[n.c]??-1)+1;
+      n.dx=c.x+PAD+(i%c.cols)*(NW+GX);n.dy=c.y+HEAD+Math.floor(i/c.cols)*(NH+GY);
+      const s=this.saved[n.id];n.x=s?s[0]:n.dx;n.y=s?s[1]:n.dy;
+    }
+  }
+  build(){
+    this.svg=el('svg',{role:'img','aria-label':'Схема связей'});
+    const defs=el('defs',{},this.svg);
+    for(const [k,v] of [['ref','--ref'],['snap','--snap'],['flow','--flow']]){
+      const m=el('marker',{id:this.data.key+'-arr-'+k,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:'auto-start-reverse'},defs);
+      el('path',{d:'M0,1 L9,5 L0,9 z',style:`fill:var(${v})`},m);
+    }
+    this.vp=el('g',{class:'vp'},this.svg);
+    this.gClusters=el('g',{},this.vp);this.gEdges=el('g',{},this.vp);this.gLabels=el('g',{},this.vp);this.gNodes=el('g',{},this.vp);
+    this.cEls={};
+    for(const c of this.data.clusters){
+      const g=el('g',{class:'cluster',style:`--cc:var(${c.color})`},this.gClusters);
+      const r=el('rect',{rx:14},g);const t=el('text',{},g);t.textContent=c.label;this.cEls[c.id]={g,r,t};
+    }
+    this.eEls=this.data.edges.map(([a,b,label,kind])=>{
+      const p=el('path',{class:'edge '+kind,'marker-end':`url(#${this.data.key}-arr-${kind})`},this.gEdges);
+      const t=el('text',{class:'elabel','text-anchor':'middle'},this.gLabels);t.textContent=label||'';
+      return {a,b,label,kind,p,t};
+    });
+    this.nEls={};
+    for(const n of this.data.nodes){
+      const c=this.clusters[n.c];
+      const g=el('g',{class:'node'+(n.virtual?' virtual':''),style:`--cc:var(${c.color})`,tabindex:0,role:'button','aria-label':n.t},this.gNodes);
+      el('rect',{class:'card',width:NW,height:NH,rx:9},g);
+      el('rect',{class:'dot',x:12,y:12,width:7,height:7,rx:2},g);
+      const t=el('text',{class:'t',x:26,y:20},g);t.textContent=n.t;
+      const s=el('text',{class:'s',x:12,y:38},g);s.textContent=n.sub||n.id;
+      if(n.branch){const b=BR[n.branch];const bg=el('g',{class:'badge',style:`--bc:${b.color}`,transform:`translate(${NW-8-b.short.length*7-8},-8)`},g);
+        el('rect',{width:b.short.length*7+10,height:15,rx:7.5},bg);const bt=el('text',{x:5,y:11},bg);bt.textContent=b.short;}
+      if(n.changed){n.changed.forEach((br,i)=>el('circle',{class:'chg',cx:NW-10-i*10,cy:NH-10,r:4,style:`--bc:${BR[br].color}`},g));}
+      this.nEls[n.id]=g;this.bindNode(n,g);
+    }
+    this.stage.appendChild(this.svg);
+    this.bindCanvas();this.redraw();
+  }
+  visible(id){const n=this.byId[id];return !(n.branch&&this.hidden.has(n.branch))}
+  redraw(){
+    for(const n of this.data.nodes){const g=this.nEls[n.id];g.setAttribute('transform',`translate(${n.x},${n.y})`);g.style.display=this.visible(n.id)?'':'none'}
+    for(const c of this.data.clusters){
+      const ns=this.data.nodes.filter(n=>n.c===c.id&&this.visible(n.id));const E=this.cEls[c.id];
+      if(!ns.length){E.g.style.display='none';continue}E.g.style.display='';
+      const x0=Math.min(...ns.map(n=>n.x))-PAD,y0=Math.min(...ns.map(n=>n.y))-HEAD,x1=Math.max(...ns.map(n=>n.x+NW))+PAD,y1=Math.max(...ns.map(n=>n.y+NH))+PAD;
+      Object.entries({x:x0,y:y0,width:x1-x0,height:y1-y0}).forEach(([k,v])=>E.r.setAttribute(k,v));
+      E.t.setAttribute('x',x0+PAD);E.t.setAttribute('y',y0+23);
+    }
+    for(const e of this.eEls){
+      const A=this.byId[e.a],B=this.byId[e.b];const show=this.visible(e.a)&&this.visible(e.b);
+      e.p.style.display=show?'':'none';e.t.style.display=show?'':'none';if(!show)continue;
+      const ax=A.x+NW/2,ay=A.y+NH/2,bx=B.x+NW/2,by=B.y+NH/2;
+      const [sx,sy]=clip(ax,ay,bx,by,NW+4,NH+4),[tx,ty]=clip(bx,by,ax,ay,NW+8,NH+8);
+      const mx=(sx+tx)/2,my=(sy+ty)/2,dx=tx-sx,dy=ty-sy,len=Math.hypot(dx,dy)||1,bend=Math.min(40,len*.12);
+      const cx=mx-dy/len*bend,cy=my+dx/len*bend;
+      e.p.setAttribute('d',`M${sx},${sy} Q${cx},${cy} ${tx},${ty}`);
+      e.t.setAttribute('x',(sx+2*cx+tx)/4);e.t.setAttribute('y',(sy+2*cy+ty)/4+4);
+    }
+    this.applyFocus();
+  }
+  applyTransform(){this.vp.setAttribute('transform',`translate(${this.view.x},${this.view.y}) scale(${this.view.k})`)}
+  fit(){
+    const ns=this.data.nodes.filter(n=>this.visible(n.id));if(!ns.length)return;
+    const x0=Math.min(...ns.map(n=>n.x))-PAD-10,y0=Math.min(...ns.map(n=>n.y))-HEAD-10,x1=Math.max(...ns.map(n=>n.x+NW))+PAD+10,y1=Math.max(...ns.map(n=>n.y+NH))+PAD+10;
+    const r=this.stage.getBoundingClientRect();const drawer=this.drawerOpen()&&r.width>700?380:0;
+    const W=Math.max(200,r.width-drawer),H=r.height;
+    let k=Math.min(1.3,Math.max(.2,Math.min(W/(x1-x0),H/(y1-y0))));
+    if(r.width<700&&k<.5){k=.5;this.view={k,x:16-x0*k,y:16-y0*k};this.applyTransform();return}
+    this.view={k,x:(W-(x1-x0)*k)/2-x0*k,y:(H-(y1-y0)*k)/2-y0*k};this.applyTransform();
+  }
+  centerOn(id){
+    const n=this.byId[id];if(!n)return;const r=this.stage.getBoundingClientRect();
+    const drawer=r.width>700?380:0;const k=Math.max(this.view.k,.8);
+    const cx=(r.width-drawer)/2, cy=r.width>700?r.height/2:r.height*.22;
+    this.view={k,x:cx-(n.x+NW/2)*k,y:cy-(n.y+NH/2)*k};this.applyTransform();
+  }
+  neighbors(id){const s=new Set([id]);for(const e of this.eEls){if(e.a===id)s.add(e.b);if(e.b===id)s.add(e.a)}return s}
+  applyFocus(){
+    const id=this.hover||this.sel;this.svg.classList.toggle('focus',!!id);
+    const nb=id?this.neighbors(id):null;
+    for(const n of this.data.nodes){const g=this.nEls[n.id];g.classList.toggle('dim',!!nb&&!nb.has(n.id));g.classList.toggle('sel',n.id===this.sel)}
+    for(const e of this.eEls){const hot=!!id&&(e.a===id||e.b===id);e.p.classList.toggle('hot',hot);e.t.classList.toggle('hot',hot);e.p.classList.toggle('dim',!!id&&!hot)}
+    for(const c of Object.values(this.cEls))c.g.classList.toggle('dim',!!id);
+  }
+  search(q){
+    q=q.trim().toLowerCase();this.svg.classList.toggle('searching',!!q);const hits=[];
+    for(const n of this.data.nodes){const hay=[n.t,n.id,n.sub,n.d,...(n.f||[]),...(n.api||[]),n.ui||''].join(' ').toLowerCase();
+      const m=!!q&&hay.includes(q);this.nEls[n.id].classList.toggle('match',m);if(m&&this.visible(n.id))hits.push(n.id)}
+    return hits;
+  }
+  select(id,center){
+    this.sel=id;this.applyFocus();
+    if(id){this.showDrawer(this.byId[id]);if(center)this.centerOn(id)}else this.hideDrawer();
+  }
+  drawerOpen(){return this.drawer&&!this.drawer.hidden}
+  hideDrawer(){if(this.drawer)this.drawer.hidden=true}
+  showDrawer(n){
+    if(!this.drawer){this.drawer=document.createElement('aside');this.drawer.className='drawer';this.stage.appendChild(this.drawer)}
+    const c=this.clusters[n.c];this.drawer.style.setProperty('--cc',`var(${c.color})`);
+    const out=this.eEls.filter(e=>e.a===n.id&&this.visible(e.b)),inc=this.eEls.filter(e=>e.b===n.id&&this.visible(e.a));
+    const rel=(e,other,dir)=>`<li><button class="rel" data-go="${other}"><span class="dir">${dir}</span><span><span class="rn">${esc(this.byId[other].t)}</span> <span class="rl">${esc(e.label||'')}${e.kind==='snap'?' · копия':''}</span></span></button></li>`;
+    const br=n.branch?`<span class="pill ${BR[n.branch].cls}">только в ${esc(n.branch)}</span>`:(n.changed?n.changed.map(b=>`<span class="pill ${BR[b].cls}">меняется в ${esc(b)}</span>`).join(''):'');
+    this.drawer.innerHTML=`<button class="close" aria-label="Закрыть">×</button>
+      <div class="eyebrow">${esc(c.label)}</div><h2>${esc(n.t)}</h2>
+      <div class="mono" style="color:var(--muted)">${esc(n.sub||n.id)}${n.file?' · '+esc(n.file):''}</div>
+      ${br?`<p>${br}</p>`:''}<p>${esc(n.d||'')}</p>
+      ${n.f?`<h3>${this.data.key==='map'?'Поля':'Содержимое'}</h3><ul>${n.f.map(f=>{const[a,...b]=f.split(' — ');const isNew=/\((SC|CP)\)/.test(f);return `<li class="f${isNew?' new':''}">${esc(a)}${b.length?` <i>— ${esc(b.join(' — '))}</i>`:''}</li>`}).join('')}</ul>`:''}
+      ${n.ui?`<h3>Где в интерфейсе</h3><p>${esc(n.ui)}</p>`:''}
+      ${n.api?`<h3>API</h3><ul>${n.api.map(a=>`<li class="f">${esc(a)}</li>`).join('')}</ul>`:''}
+      ${out.length?`<h3>${this.data.key==='map'?'Ссылается на':'Ведёт к'}</h3><ul>${out.map(e=>rel(e,e.b,'→')).join('')}</ul>`:''}
+      ${inc.length?`<h3>${this.data.key==='map'?'На неё ссылаются':'Приходит из'}</h3><ul>${inc.map(e=>rel(e,e.a,'←')).join('')}</ul>`:''}
+      ${this.opts.extra?this.opts.extra(n):''}`;
+    this.drawer.hidden=false;
+    this.drawer.querySelector('.close').onclick=()=>this.select(null);
+    this.drawer.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>this.select(b.dataset.go,true));
+    this.drawer.scrollTop=0;
+  }
+  bindNode(n,g){
+    g.addEventListener('pointerenter',()=>{if(!this.drag){this.hover=n.id;this.applyFocus()}});
+    g.addEventListener('pointerleave',()=>{this.hover=null;this.applyFocus()});
+    g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();this.select(n.id,true)}});
+    g.addEventListener('pointerdown',e=>{
+      e.stopPropagation();const p=this.toWorld(e);this.drag={n,ox:p.x-n.x,oy:p.y-n.y,moved:false,sx:e.clientX,sy:e.clientY,id:e.pointerId};
+      g.setPointerCapture(e.pointerId);
+    });
+    g.addEventListener('pointermove',e=>{
+      const d=this.drag;if(!d||d.n!==n)return;
+      if(!d.moved&&Math.hypot(e.clientX-d.sx,e.clientY-d.sy)<4)return;d.moved=true;
+      const p=this.toWorld(e);n.x=Math.round(p.x-d.ox);n.y=Math.round(p.y-d.oy);this.redraw();
+    });
+    g.addEventListener('pointerup',()=>{
+      const d=this.drag;this.drag=null;if(!d)return;
+      if(d.moved){this.saved[n.id]=[n.x,n.y];store.set('afmap-pos-'+this.data.key,this.saved)}
+      else this.select(this.sel===n.id?null:n.id);
+    });
+  }
+  toWorld(e){const r=this.svg.getBoundingClientRect();return {x:(e.clientX-r.left-this.view.x)/this.view.k,y:(e.clientY-r.top-this.view.y)/this.view.k}}
+  zoomAt(f,cx,cy){const k=Math.min(2.5,Math.max(.15,this.view.k*f));const r=k/this.view.k;this.view.x=cx-(cx-this.view.x)*r;this.view.y=cy-(cy-this.view.y)*r;this.view.k=k;this.applyTransform()}
+  bindCanvas(){
+    const pts=new Map();let pan=null,pinch=null;
+    this.svg.addEventListener('wheel',e=>{e.preventDefault();const r=this.svg.getBoundingClientRect();this.zoomAt(Math.exp(-e.deltaY*(e.ctrlKey?.01:.0015)),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+    this.svg.addEventListener('pointerdown',e=>{
+      pts.set(e.pointerId,{x:e.clientX,y:e.clientY});this.svg.setPointerCapture(e.pointerId);
+      if(pts.size===2){const [a,b]=[...pts.values()];pinch={d:Math.hypot(a.x-b.x,a.y-b.y)};pan=null}
+      else{pan={x:e.clientX,y:e.clientY,vx:this.view.x,vy:this.view.y,moved:false};this.svg.classList.add('panning')}
+    });
+    this.svg.addEventListener('pointermove',e=>{
+      if(!pts.has(e.pointerId))return;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      if(pinch&&pts.size===2){const [a,b]=[...pts.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);const r=this.svg.getBoundingClientRect();
+        this.zoomAt(d/pinch.d,(a.x+b.x)/2-r.left,(a.y+b.y)/2-r.top);pinch.d=d;return}
+      if(pan){const dx=e.clientX-pan.x,dy=e.clientY-pan.y;if(Math.hypot(dx,dy)>3)pan.moved=true;this.view.x=pan.vx+dx;this.view.y=pan.vy+dy;this.applyTransform()}
+    });
+    const end=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=null;
+      if(pan&&!pan.moved&&pts.size===0&&e.type==='pointerup')this.select(null);
+      if(pts.size===0){pan=null;this.svg.classList.remove('panning')}};
+    this.svg.addEventListener('pointerup',end);this.svg.addEventListener('pointercancel',end);
+  }
+  resetLayout(){this.saved={};store.set('afmap-pos-'+this.data.key,{});for(const n of this.data.nodes){n.x=n.dx;n.y=n.dy}this.redraw();this.fit()}
+}
+function clip(ax,ay,bx,by,w,h){const dx=bx-ax,dy=by-ay;if(!dx&&!dy)return[ax,ay];const t=Math.min((w/2)/Math.abs(dx||1e-9),(h/2)/Math.abs(dy||1e-9));return[ax+dx*t,ay+dy*t]}
+
+/* ============================================================
+   VIEWS
+   ============================================================ */
+const graphs={};
+function setupGraph(viewId,stageId,data,searchId,opts){
+  const g=new Graph(document.getElementById(stageId),data,opts);graphs[viewId]=g;
+  const view=document.getElementById('view-'+viewId);
+  view.querySelector('[data-act=fit]').onclick=()=>g.fit();
+  view.querySelector('[data-act=reset]').onclick=()=>g.resetLayout();
+  const s=document.getElementById(searchId);
+  s.addEventListener('input',()=>g.search(s.value));
+  s.addEventListener('keydown',e=>{if(e.key==='Enter'){const h=g.search(s.value);if(h[0])g.select(h[0],true)}if(e.key==='Escape'){s.value='';g.search('')}});
+  view.querySelectorAll('.chip[data-branch]').forEach(ch=>{
+    const toggle=()=>{const on=ch.getAttribute('aria-pressed')!=='true';ch.setAttribute('aria-pressed',on);on?g.hidden.delete(ch.dataset.branch):g.hidden.add(ch.dataset.branch);
+      if(g.sel&&!g.visible(g.sel))g.select(null);g.redraw()};
+    ch.onclick=toggle;ch.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
+  });
+  return g;
+}
+
+const editorExtra=n=>{
+  const map={U_tools:null,U_spreads:['Раздел'],U_rules:['Раздел','Общие фото','Документ'],U_props:['Любой слой','Текст','Фото','Коллаж','Фигуры и SVG','Страница'],U_safety:['Документ','Раздел'],U_vign:['Виньетка'],
+    safety:null,photoRules:['Общие фото'],fonts:null,textStyles:null,section:['Раздел'],page:['Страница'],layer:['Любой слой'],L_text:['Текст'],L_photo:['Фото','Общие фото'],L_collage:['Коллаж'],L_grid:['Виньетка'],L_svg:['Фигуры и SVG'],L_rect:['Фигуры и SVG'],L_ellipse:['Фигуры и SVG'],L_line:['Фигуры и SVG'],
+    P_pick:['Общие фото'],P_vignette:['Виньетка'],P_detail:['Виньетка'],P_type:['Текст'],P_stroke:['Любой слой'],P_geom:['Любой слой']};
+  const scopes=map[n.id];if(!scopes)return'';
+  const rows=SETTINGS.filter(r=>scopes.includes(r[1]));
+  return `<h3>Настройки (${rows.length})</h3><ul>${rows.map(r=>`<li class="f">${esc(r[2])} <i>— ${esc(r[0])}</i></li>`).join('')}</ul>`;
+};
+
+function renderInventory(){
+  const scopes=['Все',...new Set(SETTINGS.map(r=>r[1]))];let cur='Все';
+  const box=document.getElementById('inv-scopes');
+  box.innerHTML=scopes.map(s=>`<button class="chip" aria-pressed="${s==='Все'}" data-s="${esc(s)}">${s==='Все'?'':`<span class="sw" style="background:var(${SCOPE_COLOR[s]})"></span>`}${esc(s)}</button>`).join('');
+  box.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{cur=b.dataset.s;box.querySelectorAll('.chip').forEach(x=>x.setAttribute('aria-pressed',x===b));draw()});
+  // styling: pressed=false dims; for this group keep non-selected readable
+  box.querySelectorAll('.chip').forEach(b=>b.style.textDecoration='none');
+  const q=document.getElementById('inv-search');q.addEventListener('input',draw);
+  function draw(){
+    const t=q.value.trim().toLowerCase();
+    const rows=SETTINGS.filter(r=>(cur==='Все'||r[1]===cur)&&(!t||r.slice(0,6).join(' ').toLowerCase().includes(t)));
+    document.getElementById('inv-body').innerHTML=rows.map(r=>`<tr class="${r[6]?'warn':''}"><td>${esc(r[0])}</td><td class="scope" style="--cc:var(${SCOPE_COLOR[r[1]]})"><span>${esc(r[1])}</span></td><td class="path">${esc(r[2])}</td><td>${esc(r[3])}</td><td>${esc(r[4])}</td><td>${esc(r[5]||'—')}</td></tr>`).join('');
+    document.getElementById('inv-count').textContent=`${rows.length} из ${SETTINGS.length}`;
+  }
+  draw();
+}
+
+function renderFlow(){
+  document.getElementById('flow-strip').innerHTML=STAGES.map((s,i)=>`<b>${esc(s.t)}</b>${i<STAGES.length-1?(i>=5?'<span>⇢</span>':'<span>→</span>'):''}`).join('')+'<span class="hint" style="margin-left:8px">⇢ — вручную</span>';
+  const byId=Object.fromEntries(MAP.nodes.map(n=>[n.id,n]));
+  document.getElementById('flow-cards').innerHTML=STAGES.map(s=>`<article class="stagecard"><div class="code">stage = ${s.code}</div><h3>${esc(s.t)}</h3><div class="who">${esc(s.who)}</div><p>${esc(s.d)}</p>
+    <div class="tags">${s.tables.map(t=>`<button class="tag" data-node="${t}" title="${esc(byId[t]?.t||t)}">${esc(t)}${byId[t]?.branch?' · '+BR[byId[t].branch].short:''}</button>`).join('')}</div></article>`).join('');
+}
+
+function renderBranches(){
+  document.getElementById('branch-cards').innerHTML=BRANCHES.map(b=>`<article class="bcard" style="--bc:${b.color}"><h3>${esc(b.name)}</h3><div class="meta">${esc(b.meta)}</div><ul>${b.items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul></article>`).join('');
+  const label={high:'высокий',mid:'средний',low:'низкий'};
+  document.getElementById('overlap').innerHTML=`<thead><tr><th>Ветки</th><th>Общие файлы</th><th>Риск</th><th>Что делать</th></tr></thead><tbody>${OVERLAP.map(o=>`<tr><td class="mono">${esc(o[0])}<br>${esc(o[1])}</td><td class="files">${esc(o[2])}</td><td class="risk ${o[3]}">${label[o[3]]}</td><td>${esc(o[4])}</td></tr>`).join('')}
+  <tr><td colspan="4" style="color:var(--muted)">Предлагаемый порядок слияния: <b style="color:var(--ink)">mvp/complete</b> (уже содержит main, новых таблиц нет) → <b style="color:var(--ink)">school-catalog</b> (меняет генерацию и справочник) → <b style="color:var(--ink)">new-client-portal</b> (разобрать кабинет класса поверх учителей).</td></tr></tbody>`;
+}
+
+function renderRisks(){
+  const label={high:'Важно',mid:'Стоит решить',low:'Знать'};
+  document.getElementById('risk-list').innerHTML=RISKS.map(r=>`<article class="riskitem"><div class="sev risk ${r.sev}">${label[r.sev]}</div><h3>${esc(r.t)}</h3><p>${r.p}</p>${r.n.length?`<div class="tags">${r.n.map(t=>`<button class="tag" data-node="${t}">${esc(t)}</button>`).join('')}</div>`:''}</article>`).join('');
+}
+
+function renderGlossary(){
+  document.getElementById('gloss').innerHTML=GLOSSARY.map(([a,b,c])=>`<dt>${esc(a)}<small>${esc(b)}</small></dt><dd>${esc(c)}</dd>`).join('');
+}
+
+/* tabs */
+const tabs=[...document.querySelectorAll('nav.tabs button')];
+function show(view){
+  if(!document.getElementById('view-'+view))view='map';
+  tabs.forEach(t=>t.setAttribute('aria-selected',t.dataset.view===view));
+  document.querySelectorAll('section.view').forEach(s=>s.hidden=s.id!=='view-'+view);
+  if(view==='map'&&!graphs.map){setupGraph('map','map-stage',MAP,'map-search');requestAnimationFrame(()=>graphs.map.fit())}
+  if(view==='editor'&&!graphs.editor){setupGraph('editor','ed-stage',EDITOR,'ed-search',{extra:editorExtra});requestAnimationFrame(()=>graphs.editor.fit())}
+  try{history.replaceState(null,'','#'+view)}catch(e){}
+  store.set('afmap-tab',view);
+}
+tabs.forEach(t=>t.onclick=()=>show(t.dataset.view));
+document.addEventListener('click',e=>{const b=e.target.closest('[data-node]');if(!b)return;show('map');const id=b.dataset.node;const g=graphs.map;
+  const n=g.byId[id];if(n&&n.branch&&g.hidden.has(n.branch)){g.hidden.delete(n.branch);document.querySelector(`#view-map .chip[data-branch="${n.branch}"]`)?.setAttribute('aria-pressed','true');g.redraw()}
+  requestAnimationFrame(()=>g.select(id,true));window.scrollTo({top:0})});
+
+renderInventory();renderFlow();renderBranches();renderRisks();renderGlossary();
+show((location.hash||'').slice(1)||store.get('afmap-tab')||'map');
+</script>
+</body></html>
