@@ -221,8 +221,8 @@
 
 /* Master designs: the same cards as the former standalone catalog */
 .v2 .design-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px}
-.v2 .design-card{background:#fff;border-radius:19px;overflow:hidden;border:1px solid var(--line);box-shadow:var(--card-shadow)}
-.v2 .design-cover{height:220px;background:#e9e5df;padding:32px;display:flex;align-items:center;justify-content:center}
+.v2 .design-card{display:flex;flex-direction:column;background:#fff;border-radius:19px;overflow:hidden;border:1px solid var(--line);box-shadow:var(--card-shadow)}
+.v2 .design-cover{position:relative;height:220px;background:#e9e5df;padding:32px;display:flex;align-items:center;justify-content:center}
 .v2 .cover-1{background:#e6e1eb}.v2 .cover-2{background:#dfe7e2}
 .v2 .cover-book{width:240px;height:160px;display:flex;background:#fcfaf7;box-shadow:4px 8px 18px #28212f19;transform:rotate(-3deg)}
 .v2 .cover-book>div{width:50%;padding:15px;display:flex;flex-direction:column;justify-content:space-between}
@@ -233,17 +233,27 @@
 .v2 .cover-art i{width:30px;height:86px;background:#a59c93;border-radius:30px 30px 0 0}
 .v2 .cover-art i:nth-child(2){height:112px;background:#e4ded4}
 .v2 .cover-art i:nth-child(3){height:98px;background:#8d8a83}
-.v2 .design-card-content{padding:20px}
+.v2 .design-card-content{padding:20px;flex:1;display:flex;flex-direction:column}
 .v2 .card-heading{display:flex;align-items:center;justify-content:space-between}
 .v2 .card-heading h2{margin:0;font-size:17px}
 .v2 .card-heading>span{font-size:11px;color:#aaa}
-.v2 .package-list{margin-top:18px}
-.v2 .package-list a{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-top:1px solid #f1f0f3;font-size:13px}
-.v2 .package-list strong{font-weight:500;display:block}
-.v2 .package-list small{font-size:11px;color:#aba5b0;display:block;margin-top:3px}
-.v2 .package-list b{color:#a69cac;padding-left:9px}
-.v2 .add-package{width:100%;margin-top:10px;padding:10px;border-radius:10px;background:#f5f3f7;font-size:12px}
+.v2 .design-card .package-list{margin:18px 0 10px}
+.v2 .design-card .package-list a{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-top:1px solid #f1f0f3;font-size:13px}
+.v2 .design-card .package-list strong{font-weight:500;display:block}
+.v2 .design-card .package-list small{font-size:11px;color:#aba5b0;display:block;margin-top:3px}
+.v2 .design-card .package-list b{color:#a69cac;padding-left:9px}
+.v2 .add-package{width:100%;margin-top:auto;padding:10px;border-radius:10px;background:#f5f3f7;font-size:12px}
 .v2 .add-package:hover{background:#ffd400}
+.v2 .design-menu{position:absolute;top:12px;right:12px;z-index:5}
+.v2 .design-menu-toggle{width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;border:0;border-radius:10px;background:#ffffffe6;color:#5f5b64;cursor:pointer;box-shadow:0 2px 8px #28212f14;opacity:.85;transition:opacity .15s,background .15s}
+.v2 .design-card:hover .design-menu-toggle,.v2 .design-menu.open .design-menu-toggle,.v2 .design-menu-toggle:focus-visible{opacity:1}
+.v2 .design-menu-toggle:hover,.v2 .design-menu.open .design-menu-toggle{background:#fff;color:#242522}
+.v2 .design-menu-list{position:absolute;top:40px;right:0;min-width:180px;padding:6px;border:1px solid #ecebe6;border-radius:12px;background:#fff;box-shadow:0 14px 40px #28212f24}
+.v2 .design-menu-list button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border:0;border-radius:8px;background:none;font:inherit;font-size:13px;color:#242522;text-align:left;cursor:pointer}
+.v2 .design-menu-list button:hover,.v2 .design-menu-list button:focus-visible{background:#f4f5f6;outline:none}
+.v2 .design-menu-list .ico{flex:none;color:#8d8792}
+.v2 .design-menu-list .danger,.v2 .design-menu-list .danger .ico{color:#c0392b}
+.v2 .design-menu-list .danger:hover,.v2 .design-menu-list .danger:focus-visible{background:#fdf0ee}
 .v2 .empty-card{padding:40px;background:#fff;border-radius:16px;border:1px solid var(--line);grid-column:1/-1}
 
 /* Second home and searchable order registry. */
@@ -291,7 +301,7 @@
 .v2 .package-select.open .package-trigger{border-color:#5275f6;background:#fff}
 .v2 .package-trigger>.ico{flex:none;color:#9a9b95;transition:transform .15s}
 .v2 .package-select.open .package-trigger>.ico{transform:rotate(180deg)}
-.v2 .package-list{position:fixed;z-index:40;overflow:auto;padding:6px;border:1px solid #ecebe6;border-radius:12px;background:#fff;box-shadow:0 14px 40px #28212f24}
+.v2 .package-select .package-list{position:fixed;z-index:40;overflow:auto;padding:6px;border:1px solid #ecebe6;border-radius:12px;background:#fff;box-shadow:0 14px 40px #28212f24}
 .v2 .package-group h3{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:10px 10px 4px}
 .v2 .package-item{padding:6px 10px 6px 6px;border-radius:9px;background:none}
 .v2 .package-item:hover,.v2 .package-item:focus-visible{background:#f4f5f6;outline:none}

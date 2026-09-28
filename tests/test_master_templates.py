@@ -356,6 +356,30 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(self.client.put(f'/api/master-templates/{target}/package',json={'name':'Wrong','price':1,'revision':2}).status_code,409)
         self.assertEqual(next(o for o in self.client.get('/api/offers').json() if o['id']==offer['id'])['price'],1500)
 
+    def test_design_duplicate_and_delete_keep_orders(self):
+        design=self.client.post('/api/designs',json={'name':'Осень','package_name':'Стандарт','price':2500,'document':master()}).json()
+        source=design['packages'][0]['template_id']
+        self.client.post(f'/api/designs/{design["id"]}/packages',json={'name':'Эконом','price':1500,'source_id':source})
+        self.client.post(f'/api/designs/{design["id"]}/blocks',json={'name':'Ученики','section':master()['sections'][0]})
+        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9 Б','copies':10,'master_template_id':source}).json()['id']
+        copy=self.client.post(f'/api/designs/{design["id"]}/duplicate')
+        self.assertEqual(copy.status_code,201,copy.text)
+        copy=copy.json()
+        self.assertEqual(copy['name'],'Осень (копия)')
+        self.assertEqual([(p['name'],p['price'],p['revision']) for p in copy['packages']],[('Стандарт',2500,1),('Эконом',1500,1)])
+        self.assertNotIn(source,[p['template_id'] for p in copy['packages']])
+        self.assertEqual(len(copy['blocks']),1)
+        self.assertEqual(self.client.delete(f'/api/designs/{design["id"]}').status_code,200)
+        self.assertEqual(self.client.get(f'/api/designs/{design["id"]}').status_code,404)
+        self.assertEqual(self.client.get(f'/api/master-templates/{source}').status_code,404)
+        self.assertEqual([d['id'] for d in self.client.get('/api/designs').json()],[copy['id']])
+        self.assertEqual(self.client.get(f'/api/orders/{order}').status_code,200)
+        self.assertEqual(self.client.post(f'/api/orders/{order}/layout',json={}).status_code,200)
+        other=TestClient(s.app);other.headers['origin']='http://testserver'
+        other.post('/api/register',json={'email':'dup@other.test','password':'secret-pass','studio_name':'Другая'})
+        self.assertEqual(other.post(f'/api/designs/{copy["id"]}/duplicate').status_code,404)
+        self.assertEqual(other.delete(f'/api/designs/{copy["id"]}').status_code,404)
+
     def test_design_access_and_foreign_copy(self):
         first=self.client.post('/api/designs',json={'name':'Первый','document':master()}).json()
         second=self.client.post('/api/designs',json={'name':'Второй','document':master()}).json()

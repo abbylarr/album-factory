@@ -480,6 +480,32 @@ def install(app, s):
     def get_design(key: str):
         with s.db() as con: return design_result(con,design_owned(con,key))
 
+    @app.post('/api/designs/{key}/duplicate', status_code=201)
+    def duplicate_design(key: str):
+        with s.db() as con:
+            source = design_owned(con,key)
+            copy_id = s.uid()
+            con.execute('INSERT INTO designs VALUES (?,?,?,?)', (copy_id,_studio(),source['name']+' (копия)',s.now()))
+            for p in con.execute('SELECT p.*,m.document FROM master_packages p JOIN master_templates m ON m.id=p.template_id WHERE p.design_id=? ORDER BY m.updated_at,p.template_id', (key,)).fetchall():
+                template_id = s.uid()
+                con.execute('INSERT INTO master_templates VALUES (?,?,?,?,?)', (template_id,_studio(),p['document'],1,s.now()))
+                con.execute('INSERT INTO master_packages VALUES (?,?,?,?)', (template_id,copy_id,p['name'],p['price']))
+            for b in con.execute('SELECT * FROM design_blocks WHERE design_id=? ORDER BY rowid', (key,)).fetchall():
+                con.execute('INSERT INTO design_blocks VALUES (?,?,?,?)', (s.uid(),copy_id,b['name'],b['document']))
+            return design_result(con,design_owned(con,copy_id))
+
+    @app.delete('/api/designs/{key}')
+    def delete_design(key: str):
+        # Orders keep their frozen edition copy, so removing the source design never changes them.
+        with s.db() as con:
+            design_owned(con,key)
+            templates = [r['template_id'] for r in con.execute('SELECT template_id FROM master_packages WHERE design_id=?', (key,))]
+            con.execute('DELETE FROM design_blocks WHERE design_id=?', (key,))
+            con.execute('DELETE FROM master_packages WHERE design_id=?', (key,))
+            con.executemany('DELETE FROM master_templates WHERE id=?', [(t,) for t in templates])
+            con.execute('DELETE FROM designs WHERE id=?', (key,))
+        return {'deleted': key}
+
     @app.post('/api/designs/{key}/packages', status_code=201)
     def copy_package(key: str, payload: PackageInput):
         if not payload.name.strip(): raise HTTPException(422,'Укажите название комплектации')
