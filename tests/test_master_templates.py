@@ -21,6 +21,22 @@ def master():
 class MasterTests(unittest.TestCase):
     setUp = test_server_v2.V2Tests.setUp
 
+    def test_photo_crop_zoom_is_saved_in_compiled_layout(self):
+        doc = master()
+        photo = {'id':'portrait','type':'photo','box':{'x':20,'y':40,'w':100,'h':50},
+                 'source':'owner','cropX':50,'cropY':50,'cropZoom':2}
+        doc['sections'][0]['spreads'][0]['pages'][1]['layers'].append(photo)
+        snapshot = {'students':[{'id':'1','first_name':'Ученик','last_name':'Один'}],
+                    'teachers':[], 'photos':{'photo-1':{'width':400,'height':400,'path':'unused'}},
+                    'selections':[{'owner':'student:1','role':'main_portrait','photo':'photo-1'}],
+                    'order':{'class_name':'11А','year':'2026'}}
+        compiled = generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        rendered = next(e for spread in compiled['variant_spreads']['student:1'].values()
+                        for e in spread['elements'] if e.get('key','').endswith('/portrait'))
+        self.assertEqual(rendered['crop'],[100,150,200,100])
+        photo['cropZoom'] = 4.1
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,422)
+
     def create(self):
         response=self.client.post('/api/master-templates',json={'document':master()})
         self.assertEqual(response.status_code,201,response.text)
@@ -218,6 +234,49 @@ class MasterTests(unittest.TestCase):
         generated=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
         names=[e['text'] for spread in generated['variant_spreads']['student:s'].values() for e in spread['elements'] if e['key'].endswith('/name')]
         self.assertEqual(len(names),19);self.assertNotIn('Учитель 0',names)
+
+    def test_vignette_detail_uses_quote_or_school_subject(self):
+        doc=master()
+        student_grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        student_grid.update(showDetail=True,detailFont='Georgia',detailFontSize=9,detailColor='#554433',detailAlign='center')
+        teacher_section=deepcopy(doc['sections'][0]);teacher_section['id']='teachers';teacher_section['name']='Учителя'
+        teacher_section['spreads'][0]['id']='teachers-spread'
+        teacher_section['spreads'][0]['pages'][0]['id']='teachers-page'
+        teacher_section['spreads'][0]['pages'][1]['id']='teachers-title-page'
+        teacher_section['spreads'][0]['pages'][1]['layers'][0]['id']='teachers-title'
+        teacher_grid=teacher_section['spreads'][0]['pages'][0]['layers'][0]
+        teacher_grid.update(id='teacher-grid',source='teachers',showDetail=True)
+        doc['sections'].insert(1,teacher_section)
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        snapshot={'students':[{'id':'s','first_name':'Анна','last_name':'Иванова','quote':'Мечтай смело'}],
+                  'teachers':[{'id':'t','first_name':'Мария','last_name':'Петрова','school_subject':'Математика'}],
+                  'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        details=[e for spread in compiled['variant_spreads']['student:s'].values()
+                 for e in spread['elements'] if e['key'].endswith('/detail')]
+        self.assertEqual({e['text'] for e in details},{'Мечтай смело','Математика'})
+        quote=next(e for e in details if e['text']=='Мечтай смело')
+        self.assertEqual((quote['font'],quote['size'],quote['color']),('display',9,'#554433'))
+
+    def test_vignette_spacing_controls_actual_elements(self):
+        doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        grid['box']['h']=90
+        grid.update(gap=0,photoWidth=30,minPhotoWidth=20,photoNameGap=7,
+                    nameDetailGap=5,showDetail=True,detailFontSize=8)
+        people=[{'id':str(i),'first_name':'Анна','last_name':'Иванова','quote':'Привет'} for i in range(2)]
+        snapshot={'students':people,'teachers':[],'photos':{},'selections':[],
+                  'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        elements=[e for spread in compiled['variant_spreads']['student:0'].values()
+                  for e in spread['elements'] if '/card[student:' in e['key']]
+        photos=sorted((e for e in elements if e['key'].endswith('/photo')),key=lambda e:e['box'][0])
+        self.assertEqual(len(photos),2)
+        self.assertAlmostEqual(photos[1]['box'][0]-(photos[0]['box'][0]+photos[0]['box'][2]),0)
+        name=next(e for e in elements if e['key'].endswith('student:0]/name'))
+        detail=next(e for e in elements if e['key'].endswith('student:0]/detail'))
+        self.assertAlmostEqual(name['box'][1]-(photos[0]['box'][1]+photos[0]['box'][3]),7)
+        actual_name_height=measurer().height(name['text'],name['font'],name['size'],name['leading'],name['box'][2],name.get('letterSpacing') or 0)
+        self.assertAlmostEqual(detail['box'][1]-(name['box'][1]+actual_name_height),5)
 
     def test_design_packages_copy_and_shared_library(self):
         response=self.client.post('/api/designs',json={'name':'Осень','package_name':'Стандарт','price':2500,'document':master()})

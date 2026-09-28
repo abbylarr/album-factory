@@ -12,7 +12,7 @@ window.MasterDefaults=(()=>{const id=()=>crypto.randomUUID();
     {id:'text-body',name:'Основной текст',font:'Arial',fontSize:14,color:'#333333',align:'left',bold:false,italic:false,underline:false,strike:false,lineHeight:1.3,letterSpacing:0}
   ];
   const photo = (x,y,w,h,source,name) => layer('photo',box(x,y,w,h),{name,source,cropX:50,cropY:50});
-  const grid = source => layer('grid',box(16,33,178,224),{name:source==='teachers'?'Виньетки учителей':'Виньетки учеников',source,min:4,max:12,gap:5,minPhotoWidth:32,font:'Georgia',fontSize:12,minFontSize:10,color:'#34332f',strictMin:false,excludeLead:source==='teachers',styleGroup:source});
+  const grid = source => layer('grid',box(16,33,178,224),{name:source==='teachers'?'Виньетки учителей':'Виньетки учеников',source,min:4,max:12,gap:5,minPhotoWidth:32,photoWidth:85,photoNameGap:3,nameDetailGap:2,font:'Georgia',fontSize:12,minFontSize:10,color:'#34332f',strictMin:false,excludeLead:source==='teachers',styleGroup:source});
   const cover = (pageSize=[210,280]) => ({id:id(),name:'Обложка',cover:true,kind:'fixed',pageSize:[Math.min(pageSize[0]+6,500),Math.min(pageSize[1]+6,500)],safety:{safe:8,bleed:3,spine:8,gap:2},spreads:[spread(page([]),page([]))]});
   function defaultDocument(){
     const studentPages=Array.from({length:4},()=>page([grid('students')]));

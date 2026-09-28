@@ -42,16 +42,29 @@ def collage_frames(layer):
 
 def geometry(count, layer):
     best = None
+    gap = float(layer['gap'])
+    photo_name_gap = float(layer.get('photoNameGap', 3))
+    name_detail_gap = float(layer.get('nameDetailGap', 2))
+    name_h = layer['fontSize']*.3528*float(layer.get('lineHeight') or 1.25)*2
+    detail_h = layer.get('detailFontSize', 9)*.3528*float(layer.get('detailLineHeight') or 1.25)*2 if layer.get('showDetail') else 0
+    caption_h = photo_name_gap + name_h + (name_detail_gap + detail_h if layer.get('showDetail') else 0)
     for cols in range(1, min(6, count) + 1):
         rows = math.ceil(count / cols)
-        cw = (layer['box']['w'] - (cols-1)*layer['gap']) / cols
-        ch = (layer['box']['h'] - (rows-1)*layer['gap']) / rows
-        pw = min(cw*.86, (ch-layer['fontSize']*.3528*2.5-7)*.75, 85)
+        slot_w = (layer['box']['w'] - (cols-1)*gap) / cols
+        slot_h = (layer['box']['h'] - (rows-1)*gap) / rows
+        pw = min(slot_w, (slot_h-caption_h)*.75, float(layer.get('photoWidth') or 85))
         if pw < layer['minPhotoWidth']:
             continue
+        card_h = pw/.75 + caption_h
+        offset_x = (layer['box']['w'] - cols*pw - (cols-1)*gap)/2
+        offset_y = (layer['box']['h'] - rows*card_h - (rows-1)*gap)/2
         score = pw*pw*count - (cols*rows-count)*pw*.01
-        if best is None or score > best[0]:
-            best = (score, cols, cw, ch, pw)
+        if best is None or score > best['score']:
+            best = dict(score=score, cols=cols, cell_w=pw, cell_h=card_h,
+                        photo_w=pw, photo_h=pw/.75, name_h=name_h,
+                        detail_h=detail_h, photo_name_gap=photo_name_gap,
+                        name_detail_gap=name_detail_gap, offset_x=offset_x,
+                        offset_y=offset_y)
     return best
 
 
@@ -111,9 +124,11 @@ def generate(edition, snapshot, measurer, overrides=()):
         if not person:
             return None
         return selections.get(('student:'+person['id'],'main_portrait')) or selections.get(('teacher:'+person['id'],'main_portrait'))
-    def crop(photo, b, x=50, y=50):
+    def crop(photo, b, x=50, y=50, zoom=1):
         meta = snapshot['photos'][photo]; w,h=meta['width'],meta['height']; ratio=b[2]/b[3]
         cw,ch = (h*ratio,h) if w/h>ratio else (w,w/ratio)
+        zoom = max(1, min(float(zoom), 4))
+        cw,ch = cw/zoom,ch/zoom
         return [(w-cw)*x/100,(h-ch)*y/100,cw,ch]
     def font_key(layer):
         raw = layer.get('font')
@@ -182,13 +197,13 @@ def generate(edition, snapshot, measurer, overrides=()):
                         font=font_key(layer)
                         def text_element(key, bounds, value, size):
                             leading=size*float(layer.get('lineHeight') or 1.25)
-                            element={'key':key,'type':'text','box':bounds,'text':value,'font':font,'size':size,'leading':leading,'align':layer.get('align','center') if layer['type']!='grid' else 'center','valign':'top','color':layer['color'],'opacity':layer.get('opacity',100)}
+                            element={'key':key,'type':'text','box':bounds,'text':value,'font':font,'size':size,'leading':leading,'align':layer.get('align','center'),'valign':'top','color':layer['color'],'opacity':layer.get('opacity',100)}
                             if layer.get('letterSpacing'): element['letterSpacing']=layer['letterSpacing']
                             if layer.get('underline'): element['underline']=True
                             if layer.get('strike'): element['strike']=True
                             return element
                         def photo_element(key,bounds,photo):
-                            return {'key':key,'type':'photo','box':bounds,'photo':photo,'crop':crop(photo,bounds,layer.get('cropX',50),layer.get('cropY',50)) if photo else None,'mask':'rect','required':True,'opacity':layer.get('opacity',100)}
+                            return {'key':key,'type':'photo','box':bounds,'photo':photo,'crop':crop(photo,bounds,layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1)) if photo else None,'mask':'rect','required':True,'opacity':layer.get('opacity',100)}
                         if layer['type']=='text':
                             binding=layer.get('binding','static')
                             value={'owner.name':name(owner),'item.name':name(item),'lead.name':name(lead),'class':snapshot['order']['class_name'],'year':snapshot['order']['year']}.get(binding,layer['text'])
@@ -227,16 +242,28 @@ def generate(edition, snapshot, measurer, overrides=()):
                                 add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
                             if layer.get('shadow') or (stroke_width and layer.get('strokeAlign')=='outside'):
                                 add({'key':key+'/backing','type':'rect','box':bounds,'fill':page['background'],'opacity':layer.get('opacity',100),'shadow':layer.get('shadow'),'strokeWidth':0},False)
-                            _,cols,cw,ch,pw=geo
+                            cols=geo['cols']; cw=geo['cell_w']; ch=geo['cell_h']; pw=geo['photo_w']
                             size=layer['fontSize']
                             # Shared reduction for the complete source, not individual cards.
                             all_people=snapshot[layer['source']]
-                            while size>layer['minFontSize'] and any(measurer.height(name(p),font,size,size*float(layer.get('lineHeight') or 1.25),cw*.97, layer.get('letterSpacing') or 0)>size*.3528*2.5+.1 for p in all_people): size=max(layer['minFontSize'],size-.5)
+                            while size>layer['minFontSize'] and any(measurer.height(name(p),font,size,size*float(layer.get('lineHeight') or 1.25),cw*.97, layer.get('letterSpacing') or 0)>geo['name_h']+.1 for p in all_people): size=max(layer['minFontSize'],size-.5)
                             for i,person in enumerate(records):
-                                x=bounds[0]+(i%cols)*(cw+layer['gap']); y=bounds[1]+(i//cols)*(ch+layer['gap'])
+                                x=bounds[0]+geo['offset_x']+(i%cols)*(cw+layer['gap']); y=bounds[1]+geo['offset_y']+(i//cols)*(ch+layer['gap'])
                                 pk=key+'/card['+('student:' if layer['source']=='students' else 'teacher:')+person['id']+']'
-                                add(photo_element(pk+'/photo',[x+(cw-pw)/2,y,pw,pw/.75],photo_for(person)),False)
-                                add(text_element(pk+'/name',[x,y+pw/.75+3,cw,ch-pw/.75-3],name(person),size),False)
+                                add(photo_element(pk+'/photo',[x,y,pw,geo['photo_h']],photo_for(person)),False)
+                                name_y=y+geo['photo_h']+geo['photo_name_gap']
+                                name_height=measurer.height(name(person),font,size,size*float(layer.get('lineHeight') or 1.25),cw,layer.get('letterSpacing') or 0)
+                                add(text_element(pk+'/name',[x,name_y,cw,geo['name_h']],name(person),size),False)
+                                if layer.get('showDetail'):
+                                    detail = person.get('quote','') if layer['source']=='students' else person.get('school_subject','')
+                                    if detail:
+                                        detail_style={'font':layer.get('detailFont',layer['font']),'bold':layer.get('detailBold',False),'italic':layer.get('detailItalic',False)}
+                                        detail_size=layer.get('detailFontSize',9)
+                                        detail_element={'key':pk+'/detail','type':'text','box':[x,name_y+name_height+geo['name_detail_gap'],cw,geo['detail_h']],'text':detail,'font':font_key(detail_style),'size':detail_size,'leading':detail_size*layer.get('detailLineHeight',1.25),'align':layer.get('detailAlign','center'),'valign':'top','color':layer.get('detailColor',layer['color']),'opacity':layer.get('opacity',100)}
+                                        if layer.get('detailLetterSpacing'): detail_element['letterSpacing']=layer['detailLetterSpacing']
+                                        if layer.get('detailUnderline'): detail_element['underline']=True
+                                        if layer.get('detailStrike'): detail_element['strike']=True
+                                        add(detail_element,False)
                             if stroke_width and layer.get('strokeAlign')!='outside':
                                 add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
                         elif layer['type']=='svg':

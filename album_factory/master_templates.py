@@ -185,6 +185,7 @@ def validate(document):
                     if kind == 'photo':
                         check(layer.get('source') in {'lead','owner','item','class','custom'}, 'Неверный источник фото')
                         check(all(number(layer.get(k,50),0,100) for k in ('cropX','cropY')), 'Неверное кадрирование')
+                        check(number(layer.get('cropZoom',1),1,4), 'Неверный масштаб кадрирования')
                         if layer.get('dataUrl'):
                             image_data(layer['dataUrl'])
                     if kind == 'collage':
@@ -218,9 +219,17 @@ def validate(document):
                     if kind == 'grid':
                         check(section['kind'] == 'flow', 'Автовиньетка требует расширяемого раздела')
                         check(layer.get('source') in {'students','teachers'}, 'Неверный список виньеток')
+                        check(isinstance(layer.get('showDetail', False), bool), 'Неверная настройка дополнительной подписи')
+                        check(layer.get('detailFont', layer.get('font')) in known_fonts and number(layer.get('detailFontSize', 9), 4, 120) and color(layer.get('detailColor', layer.get('color'))), 'Неверный стиль дополнительной подписи')
+                        check(layer.get('align', 'center') in {'left','center','right','justify'} and layer.get('detailAlign', 'center') in {'left','center','right','justify'}, 'Неверное выравнивание виньеток')
+                        check(number(layer.get('detailLineHeight', 1.25), 0.8, 3) and number(layer.get('detailLetterSpacing', 0), -20, 80), 'Неверные интервалы дополнительной подписи')
+                        for flag in ('detailBold','detailItalic','detailUnderline','detailStrike'):
+                            if flag in layer: check(isinstance(layer[flag], bool), 'Неверное начертание дополнительной подписи')
                         grid_sources.add(layer['source'])
                         check(number(layer.get('min'),1,100) and number(layer.get('max'),1,100) and layer['min'] <= layer['max'], 'Неверные границы виньеток')
                         check(number(layer.get('gap'),0,30) and number(layer.get('minPhotoWidth'),5,180), 'Неверные отступы или ширина фото')
+                        check(number(layer.get('minPhotoWidth'),5,180) and number(layer.get('photoWidth', 85),5,180) and layer['minPhotoWidth'] <= layer.get('photoWidth', 85), 'Неверный диапазон ширины фото')
+                        check(number(layer.get('photoNameGap',3),0,20) and number(layer.get('nameDetailGap',2),0,20), 'Неверное расстояние между фото и подписями')
                         check(number(layer.get('minFontSize'),4,layer['fontSize']), 'Неверный минимальный кегль')
         check(len(grid_sources) <= 1, 'В одном разделе нужен один источник виньеток')
     return document
