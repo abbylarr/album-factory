@@ -137,7 +137,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     entry_by_id = {e['id']: e for e in entries}
     slots = []
     def name(person):
-        return ' '.join(str(person.get(k,'')) for k in ('first_name','last_name')).strip() if person else ''
+        return ' '.join(str(person[k]) for k in ('first_name','patronymic','last_name') if person.get(k)) if person else ''
     def photo_for(person):
         if not person:
             return None

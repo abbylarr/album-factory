@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import secrets
 
-from . import mvp, order_stages
+from . import mvp, order_stages, school_catalog
 
 
 DEFAULT_TEMPLATES = {
@@ -145,7 +145,8 @@ def install(app, s):
             published = con.execute("SELECT 1 FROM publications WHERE order_id=?", (order['id'],)).fetchone()
             return {'school': order['school'], 'class_name': order['class_name'], 'persons': people, 'photos': photos,
                     'completed': sum(bool(p['photo_id']) for p in people), 'quote_limit': mvp.quote_limit(con, order['id']),
-                    'layout_published': published is not None, 'stage': 'selection'}
+                    'layout_published': published is not None, 'stage': 'selection',
+                    'teachers': school_catalog.client_summary(con, order['id'])}
 
     @app.put('/client-api/{token}/persons/{person_id}')
     def select(token: str, person_id: str, payload: Selection, request: Request):

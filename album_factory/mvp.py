@@ -186,6 +186,8 @@ def forget(con, order_id):
                   "publications", "approvals", "authorizations"):
         con.execute(f"DELETE FROM {table} WHERE order_id=?", (order_id,))
     con.execute("DELETE FROM class_sessions WHERE order_id=?", (order_id,))
+    from . import school_catalog
+    school_catalog.forget(con, order_id)
 
 
 def quote_limit(con, order_id):
@@ -413,11 +415,6 @@ class ProfileInput(BaseModel):
     delivery_modes: str
 
 
-class SchoolInput(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    address: str = Field(default="", max_length=200)
-
-
 class EditionInput(BaseModel):
     document: dict
 
@@ -508,25 +505,6 @@ def install(app, s):
             con.execute("INSERT INTO profiles (studio_id, teacher_gift, delivery_modes) VALUES (?,?,?) ON CONFLICT(studio_id) DO UPDATE SET teacher_gift=excluded.teacher_gift, delivery_modes=excluded.delivery_modes",
                         (_studio(), int(payload.teacher_gift), payload.delivery_modes))
         return {"teacher_gift": payload.teacher_gift, "delivery_modes": payload.delivery_modes}
-
-    @app.get("/api/schools")
-    def list_schools():
-        with s.db() as con:
-            return [dict(row) for row in con.execute("SELECT id,name,address FROM schools WHERE studio_id=? ORDER BY name", (_studio(),))]
-
-    @app.post("/api/schools", status_code=201)
-    def create_school(payload: SchoolInput):
-        name = " ".join(payload.name.split())
-        if not name:
-            raise HTTPException(422, "Укажите название школы")
-        with s.db() as con:
-            # Creating a school that already exists selects it instead of adding a duplicate.
-            for row in con.execute("SELECT id,name FROM schools WHERE studio_id=?", (_studio(),)):
-                if row["name"].casefold() == name.casefold():
-                    return {"id": row["id"], "name": row["name"]}
-            school_id = s.uid()
-            con.execute("INSERT INTO schools VALUES (?,?,?,?)", (school_id, _studio(), name, payload.address.strip()))
-        return {"id": school_id, "name": name}
 
     @app.post("/api/catalog/editions", status_code=201)
     def publish_edition(payload: EditionInput):
