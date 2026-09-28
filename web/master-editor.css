@@ -402,3 +402,22 @@ body.color-picking #canvas-host{cursor:crosshair}
 .photo-crop-actions [data-crop-zoom]{width:94px;padding:0;accent-color:#7712b3}
 .photo-crop-actions [data-crop-zoom-value]{min-width:34px;color:#817987;font-size:10px;text-align:center;font-variant-numeric:tabular-nums}
 .photo-crop-actions [data-crop-save]{background:#7712b3;color:white}
+/* General photo roles */
+.pick-section select{width:100%}
+.pick-stats{margin:10px 0 0;padding:9px 10px;border-radius:9px;background:#faf7fc;color:#6d6573;font-size:11px;line-height:1.5}
+.pick-stats strong{color:#602083}
+.pick-stats.warning{background:#fff8e6;color:#8f7a3c}
+.pick-more{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.pick-more summary{cursor:pointer;font-size:11px;color:#746e79;list-style:none;display:flex;align-items:center;gap:6px}
+.pick-more summary::-webkit-details-marker{display:none}
+.pick-more summary::before{content:'›';font-size:15px;line-height:1;transition:transform .15s}
+.pick-more[open] summary::before{transform:rotate(90deg)}
+.pick-field{display:flex;flex-direction:column;gap:6px;margin-top:12px;color:#85818b;font-size:11px}
+.pick-chips{display:flex;flex-wrap:wrap;gap:5px}
+.pick-chips button{width:auto;height:auto;min-width:0;margin:0;padding:6px 9px;border-radius:8px;background:#f4f4f6;color:#746e79;font-size:10px;line-height:1.2;white-space:nowrap}
+.pick-chips button:hover{background:#eeebf0}
+.pick-chips button.active{background:var(--soft);color:#602083;font-weight:600}
+.pick-segmented{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:3px;padding:3px;background:#f4f4f6;border-radius:10px}
+.pick-segmented button{background:transparent}
+.pick-segmented button.active{background:#fff;box-shadow:0 1px 3px #22222214;color:#332d38}
+.pick-more .wide{margin-top:12px;width:100%;font-size:11px}

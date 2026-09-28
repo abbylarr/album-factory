@@ -6,11 +6,15 @@ from io import BytesIO
 import json
 import math
 import re
+from .photo_pick import RELAX_TEXT
+RELAX_MESSAGES = set(RELAX_TEXT.values())
 from PIL import Image
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from .layout_engine import canonical_hash, LayoutError
 from .svg_draw import svg_is_safe
+from . import general_meta as gm
+from .vision import TAGS
 
 
 def init(con):
@@ -63,6 +67,25 @@ def validate(document):
         check(value.get('safe', 0) + value.get('bleed', 0) < limit, 'Зона безопасности не помещается')
     if 'safety' in document:
         safety(document['safety'], page_width, page_height)
+    if 'photoRules' in document:
+        rules = document['photoRules']
+        check(isinstance(rules, dict) and set(rules) <= {'reuse', 'coverageMin', 'coverageMax', 'rhythm', 'chronology'}, 'Неверные правила общих фото')
+        check(rules.get('reuse', 'album') in {'album', 'section', 'allow'}, 'Неверное правило повторов')
+        check(isinstance(rules.get('coverageMin', 1), int) and 0 <= rules.get('coverageMin', 1) <= 10, 'Неверный минимум появлений')
+        check(isinstance(rules.get('coverageMax', 0), int) and 0 <= rules.get('coverageMax', 0) <= 50, 'Неверный максимум появлений')
+        check(not rules.get('coverageMax') or rules['coverageMax'] >= rules.get('coverageMin', 1), 'Максимум появлений меньше минимума')
+        check(all(isinstance(rules.get(k, True), bool) for k in ('rhythm', 'chronology')), 'Неверные правила общих фото')
+    def pick(value, section):
+        from .photo_pick import ROLES
+        check(isinstance(value, dict) and set(value) <= {'role', 'buckets', 'include', 'scale', 'tags', 'style', 'quality'}, 'Неверный подбор общего фото')
+        check(value.get('role', 'any') in ROLES, 'Неизвестная роль слота')
+        def subset(key, allowed, limit):
+            items = value.get(key)
+            check(items is None or (isinstance(items, list) and len(items) <= limit and len(set(items)) == len(items) and set(items) <= set(allowed)), 'Неверный фильтр общего фото')
+        subset('buckets', gm.BUCKETS, 6); subset('scale', gm.SCALES, 5); subset('tags', TAGS, 12)
+        check(value.get('include') in {None, 'owner', 'item'}, 'Неверное условие «кто на фото»')
+        check(value.get('include') != 'item' or section.get('kind') == 'repeat', 'Ученик разворота доступен только в личных разворотах')
+        check(value.get('style') in {None, 'posed', 'candid'} and value.get('quality') in {None, 'best', 'good'}, 'Неверный фильтр общего фото')
     def color(value):
         return isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value)
     def image_data(value):
@@ -184,6 +207,8 @@ def validate(document):
                         check(layer.get('align') in {'left','center','right','justify'}, 'Неверное выравнивание')
                     if kind == 'photo':
                         check(layer.get('source') in {'lead','owner','item','class','custom'}, 'Неверный источник фото')
+                        if 'pick' in layer:
+                            pick(layer['pick'], section)
                         check(all(number(layer.get(k,50),0,100) for k in ('cropX','cropY')), 'Неверное кадрирование')
                         check(number(layer.get('cropZoom',1),1,4), 'Неверный масштаб кадрирования')
                         if layer.get('dataUrl'):
@@ -208,6 +233,8 @@ def validate(document):
                             else:
                                 leaves += 1
                                 check(cell.get('source', 'class') in {'lead', 'owner', 'item', 'class', 'custom'}, 'Неверный источник фото')
+                                if 'pick' in cell:
+                                    pick(cell['pick'], section)
                                 check(all(number(cell.get(k, 50), 0, 100) for k in ('cropX', 'cropY')), 'Неверное кадрирование')
                                 if cell.get('dataUrl'):
                                     image_data(cell['dataUrl'])
@@ -269,6 +296,67 @@ class Publish(BaseModel):
     price: int | None = Field(default=None, ge=0, le=1_000_000)
 
 
+class PhotoPreview(BaseModel):
+    document: dict
+    students: int = Field(default=12, ge=1, le=60)
+    teachers: int = Field(default=10, ge=0, le=40)
+    owner: str = Field(default='s0', max_length=10)
+
+
+class _FlatMeasurer:
+    """Text is irrelevant for photo previews; everything fits."""
+    def height(self, *args, **kwargs):
+        return 0
+
+    def missing_glyphs(self, *args, **kwargs):
+        return set()
+
+
+def preview_photos(document, students, teachers, owner):
+    """Run the real picker on a synthetic shoot: what each automatic slot of the draft would receive."""
+    from .master_layout import generate
+    from .test_shoot import synthetic
+    people = [{'id': f's{i}', 'first_name': 'Ученик', 'last_name': str(i + 1), 'quote': ''} for i in range(students)]
+    staff = [{'id': f't{i}', 'first_name': 'Учитель', 'last_name': str(i + 1), 'school_subject': ''} for i in range(teachers)]
+    entries, photos = synthetic(people)
+    for person in people + staff:
+        photos['portrait-' + person['id']] = {'width': 3000, 'height': 4000, 'path': ''}
+    selections = [{'owner': ('student:' if p in people else 'teacher:') + p['id'], 'role': 'main_portrait', 'photo': 'portrait-' + p['id']} for p in people + staff]
+    snapshot = {'schema_version': 2, 'order': {'id': 'preview', 'school': 'Школа', 'class_name': '11 А', 'year': '2026', 'studio': ''},
+                'students': people, 'teachers': staff, 'photos': photos, 'selections': selections, 'general': entries,
+                'general_photos': [e['id'] for e in entries], 'master_assets': {}}
+    if owner not in {p['id'] for p in people}:
+        owner = people[0]['id']
+    try:
+        result = generate({'id': 'preview', 'version': 0, 'master': document}, snapshot, _FlatMeasurer(), only_owner=owner)
+    except (KeyError, TypeError, ValueError, IndexError, ZeroDivisionError) as exc:
+        raise HTTPException(422, 'Не удалось построить превью: ' + str(exc)[:120]) from exc
+    by_id = {e['id']: e for e in entries}
+    slots = {}
+    spreads = list(result['variant_spreads'].get('student:' + owner, {}).values()) + [result['covers'].get('student:' + owner) or {'elements': []}]
+    for spread in spreads:
+        for element in spread['elements']:
+            if not element.get('slot'):
+                continue
+            match = re.match(r'^(?:cover|([\w-]+))\[student:[^\]]+\](?::(\d+))?/(\d)/(.+)$', element['key'])
+            if not match:
+                continue
+            section = match.group(1) or next((s['id'] for s in document['sections'] if s.get('cover')), 'cover')
+            page = int(match.group(2) or 0) * 2 + int(match.group(3))
+            entry = by_id.get(element.get('photo'))
+            info = result['photo_report']['slots'].get(element['slot'], {})
+            item = {'candidates': info.get('candidates', 0), 'relaxed': info.get('relaxed', [])}
+            if entry:
+                w, h = photos[entry['id']]['width'], photos[entry['id']]['height']
+                x, y, cw, ch = element['crop']
+                item.update({'photo': entry['id'], 'size': [w, h], 'crop': [x / w, y / h, cw / w, ch / h], 'bucket': entry['bucket'],
+                             'scale': entry['scale'], 'persons': [{'box': p['box'], 'face': p['face'], 'owner': p['subject'] == owner} for p in entry['persons']]})
+            slots[f'{section}:{page}/{match.group(4)}'] = item
+    coverage = result['photo_report']['coverage']
+    return {'slots': slots, 'coverage': {k: v for k, v in coverage.items() if k.startswith('s')}, 'photos': len(entries),
+            'issues': [i for i in result['issues'] if i['key'].startswith(('coverage', 'must')) or '[*]' in i['key'] or '[student:' in i['key'] and i['message'] in RELAX_MESSAGES]}
+
+
 def install(app, s):
     from .mvp import _studio
     def owned(con, key):
@@ -297,6 +385,10 @@ def install(app, s):
     def validate_import(payload: Save):
         validate(payload.document)
         return {'valid': True}
+    @app.post('/api/master-templates/photo-preview')
+    def photo_preview(payload: PhotoPreview):
+        return preview_photos(payload.document, payload.students, payload.teachers, payload.owner)
+
     @app.get('/api/master-templates/{key}')
     def get(key: str):
         with s.db() as con:

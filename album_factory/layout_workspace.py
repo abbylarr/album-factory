@@ -79,6 +79,11 @@ def edition(root):
     return deepcopy(load_edition(root / 'examples/editions/editorial-v2.json'))
 
 
+def general_entries(con, order_id):
+    from .general_photos import snapshot_entries
+    return snapshot_entries(con, order_id)
+
+
 def snapshot_for(con, order, data, master=False):
     photos = {}
     for photo in data['photos']:
@@ -114,6 +119,7 @@ def snapshot_for(con, order, data, master=False):
                       'year': str(datetime.now().year), 'studio': ''},
             'students': students, 'teachers': [], 'photos': photos, 'selections': selections,
             'general_photos': [p['id'] for p in data['photos'] if p['id'] in photos and p['shoot_type'] == 'general'],
+            'general': [e for e in general_entries(con, order['id']) if e['id'] in photos],
             'teacher_variant': {'enabled': False}}
 
 
@@ -128,9 +134,11 @@ def read_layout(con, order_id):
 def install(app, s):
     def response(layout):
         document = layout['document']
+        general = {e['id']: e for e in layout['snapshot'].get('general') or [] if not e.get('legacy')}
         return {'document': document, 'generated_at': layout['generated_at'],
                 'photos': [{'id': id, 'filename': p['filename'], 'shoot_type': p['shoot_type'],
                             'person_id': p['person_id'],
+                            **({k: general[id].get(k) for k in ('bucket', 'scale', 'style', 'quality', 'alt')} if id in general else {}),
                             'width': layout['snapshot']['photos'][id]['width'],
                             'height': layout['snapshot']['photos'][id]['height']}
                            for id, p in layout['photo_info'].items() if id in layout['snapshot']['photos']] + [
@@ -277,7 +285,7 @@ def install(app, s):
         with s.db() as con:
             s.require_order(con, order_id)
             layout = read_layout(con, order_id)
-            edition = order_edition(con, order_id, s.DATA)
+            edition = order_edition(con, order_id, s.ROOT)
         document = layout['document']
         if owner not in {v['owner'] for v in document['variants']}:
             raise HTTPException(404, 'Вариант не найден')

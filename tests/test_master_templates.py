@@ -37,6 +37,24 @@ class MasterTests(unittest.TestCase):
         photo['cropZoom'] = 4.1
         self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,422)
 
+    def test_photo_roles_and_album_rules_are_validated_and_previewed(self):
+        doc = master()
+        slot = {'id':'moment','type':'photo','box':{'x':20,'y':40,'w':100,'h':70},'source':'class','pick':{'role':'hero','scale':['full','wide']}}
+        doc['sections'][1]['spreads'][0]['pages'][0]['layers'].append(slot)
+        doc['photoRules'] = {'reuse':'section','coverageMin':2,'coverageMax':4,'rhythm':True,'chronology':False}
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        preview = self.client.post('/api/master-templates/photo-preview',json={'document':doc,'students':6,'teachers':0,'owner':'s2'})
+        self.assertEqual(preview.status_code,200,preview.text)
+        self.assertIn('shared:0/moment',preview.json()['slots'])
+        for bad in ({'role':'unknown'},{'role':'any','scale':['huge']},{'role':'any','include':'item'},{'role':'any','extra':1},{'role':'any','buckets':['pair','pair']}):
+            broken = deepcopy(doc); broken['sections'][1]['spreads'][0]['pages'][0]['layers'][0]['pick'] = bad
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,bad)
+        personal = deepcopy(doc); personal['sections'][2]['spreads'][0]['pages'][0]['layers'].append({**slot,'id':'with','pick':{'role':'with_item'}})
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':personal}).status_code,201)
+        for rules in ({'reuse':'never'},{'coverageMin':3,'coverageMax':2},{'coverageMin':1.5},{'rhythm':'yes'},{'other':1}):
+            broken = deepcopy(doc); broken['photoRules'] = rules
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,rules)
+
     def create(self):
         response=self.client.post('/api/master-templates',json={'document':master()})
         self.assertEqual(response.status_code,201,response.text)

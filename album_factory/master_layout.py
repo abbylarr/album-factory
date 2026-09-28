@@ -1,7 +1,9 @@
 """Compile editable millimetre master documents into the existing layout format."""
 from copy import deepcopy
 import math
+import re
 from .layout_engine import canonical_hash
+from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
 
 
@@ -106,7 +108,19 @@ def pages_for(section, master, snapshot, owner, issue):
     return result
 
 
-def generate(edition, snapshot, measurer, overrides=()):
+def _legacy_assign(slots, general):
+    """Snapshots saved before photo analysis keep their original order: round robin, restarted per variant."""
+    counters = {}
+    for slot in slots:
+        index = counters.get(slot['owner'], 0)
+        photo = general[index % len(general)] if general else None
+        if photo or not slot.get('cell_fill'):
+            counters[slot['owner']] = index + 1
+        slot['result'] = {'photo': photo, 'crop': None, 'relaxed': [], 'dpi': GOOD_DPI} if photo else None
+    return {'slots': {}, 'coverage': {}, 'unplaced': []}
+
+
+def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     master = edition['master']
     page_width, page_height = master.get('pageSize', [210, 280])
     issues, variants, groups, plans, covers = [], [], {}, [], {}
@@ -116,8 +130,12 @@ def generate(edition, snapshot, measurer, overrides=()):
             seen.add((level,key,message)); issues.append({'level':level,'code':'master','key':key,'message':message})
     students = snapshot['students']
     owners = students or [{'id':'class','first_name':'Общий','last_name':'альбом'}]
+    if only_owner:
+        owners = [o for o in owners if o['id'] == only_owner] or owners[:1]
     selections = {(s['owner'],s['role']):s['photo'] for s in snapshot['selections']}
-    general = snapshot.get('general_photos', [])
+    entries = entries_from(snapshot)
+    entry_by_id = {e['id']: e for e in entries}
+    slots = []
     def name(person):
         return ' '.join(str(person.get(k,'')) for k in ('first_name','last_name')).strip() if person else ''
     def photo_for(person):
@@ -126,6 +144,11 @@ def generate(edition, snapshot, measurer, overrides=()):
         return selections.get(('student:'+person['id'],'main_portrait')) or selections.get(('teacher:'+person['id'],'main_portrait'))
     def crop(photo, b, x=50, y=50, zoom=1):
         meta = snapshot['photos'][photo]; w,h=meta['width'],meta['height']; ratio=b[2]/b[3]
+        entry = entry_by_id.get(photo)
+        if entry and not entry.get('legacy') and (x, y, zoom) == (50, 50, 1):
+            placed = fit(entry, ratio, w, h)
+            if placed:
+                return placed
         cw,ch = (h*ratio,h) if w/h>ratio else (w,w/ratio)
         zoom = max(1, min(float(zoom), 4))
         cw,ch = cw/zoom,ch/zoom
@@ -141,8 +164,17 @@ def generate(edition, snapshot, measurer, overrides=()):
     applied, conflicts = [], []
     overrides_by_key = {o['key']:o for o in overrides}
     found = set()
+    def slot_for(key, spread_key, bounds, pick, section, owner, item):
+        c = resolve(pick)
+        target = owner['id'] if c['include'] == 'owner' else item['id'] if c['include'] == 'item' and item else None
+        shared_key = re.sub(r'\[student:[^\]]*\]', '[*]', key)
+        personal = c['include'] == 'owner'
+        return {'key': key, 'ident': key if personal else shared_key + (f'|{target}' if target else ''), 'personal': personal,
+                'owner': owner['id'], 'target': target, 'pick': pick, 'mm': [bounds[2], bounds[3]],
+                'aspect_key': round(bounds[2] / bounds[3], 3), 'section': section['id'],
+                'spread': spread_key if personal else re.sub(r'\[student:[^\]]*\]', '[*]', spread_key)}
     for owner in owners:
-        owner_key = 'student:'+owner['id']; group = {}; sequence=[]; general_index=0
+        owner_key = 'student:'+owner['id']; group = {}; sequence=[]; slot_order=0
         for section in master['sections']:
             page_width, page_height = section.get('pageSize', master.get('pageSize', [210, 280])) if section.get('cover') else master.get('pageSize', [210, 280])
             pages = pages_for(section,master,snapshot,owner,issue)
@@ -155,9 +187,18 @@ def generate(edition, snapshot, measurer, overrides=()):
             for index in range(0,len(pages),2):
                 spread_key=f'cover[{owner_key}]' if section.get('cover') else f'{section["id"]}[{owner_key}]:{index//2}'
                 sequence.append(spread_key); elements=[]; appearance={}
-                def add(e, inherit_effects=True):
+                def add(e, inherit_effects=True, slot=None):
+                    nonlocal slot_order
                     e.update(appearance if inherit_effects else {key: appearance[key] for key in ('angle', 'rotation_center')})
-                    e.setdefault('hidden',False); e['base']=canonical_hash(e)
+                    e.setdefault('hidden',False)
+                    elements.append(e)
+                    if slot is not None:
+                        slot['element'] = e; slot['order'] = slot_order; slot_order += 1
+                        slot['finish'] = finish; slots.append(slot)
+                    else:
+                        finish(e)
+                def finish(e):
+                    e['base']=canonical_hash(e)
                     override=overrides_by_key.get(e['key'])
                     if override:
                         found.add(e['key'])
@@ -172,7 +213,6 @@ def generate(edition, snapshot, measurer, overrides=()):
                         issue('error',e['key'],'Не выбрано обязательное фото')
                     if e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
                         issue('error',e['key'],'Текст выходит за границы рамки')
-                    elements.append(e)
                 for side,(page, item, records, layout_count) in enumerate(pages[index:index+2]):
                     if page is None: continue
                     appearance={}
@@ -211,7 +251,9 @@ def generate(edition, snapshot, measurer, overrides=()):
                         elif layer['type']=='photo':
                             source=layer['source']
                             if source=='class':
-                                photo=general[general_index%len(general)] if general else None; general_index+=1
+                                add(photo_element(key,bounds,None), slot={**slot_for(key,spread_key,bounds,layer.get('pick'),section,owner,item),
+                                    'crop_pref':(layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1))})
+                                continue
                             elif source=='custom': photo=snapshot.get('master_assets',{}).get(layer['id'])
                             else: photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
                             add(photo_element(key,bounds,photo))
@@ -220,14 +262,15 @@ def generate(edition, snapshot, measurer, overrides=()):
                                 cell=frame['cell']
                                 fb=[bounds[0]+frame['x'], bounds[1]+frame['y'], frame['w'], frame['h']]
                                 source=cell.get('source','class')
+                                slot={'key':key+'/'+cell['id'],'box':fb,'opacity':layer.get('opacity',100)}
                                 if source=='class':
-                                    photo=general[general_index%len(general)] if general else None
-                                    if photo: general_index+=1
+                                    add({**slot,'type':'photo','photo':None,'crop':None,'mask':'rect','required':True},
+                                        slot={**slot_for(slot['key'],spread_key,fb,cell.get('pick'),section,owner,item),'cell_fill':layer.get('fill','#e6e1ea'),'crop_pref':(cell.get('cropX',50),cell.get('cropY',50),1)})
+                                    continue
                                 elif source=='custom':
                                     photo=snapshot.get('master_assets',{}).get(cell['id'])
                                 else:
                                     photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
-                                slot={'key':key+'/'+cell['id'],'box':fb,'opacity':layer.get('opacity',100)}
                                 if photo:
                                     add({**slot,'type':'photo','photo':photo,'crop':crop(photo,fb,cell.get('cropX',50),cell.get('cropY',50)),'mask':'rect','required':True})
                                 else:
@@ -277,12 +320,35 @@ def generate(edition, snapshot, measurer, overrides=()):
                     group[spread_key] = spread
         groups[owner_key]=group
         variants.append({'owner':owner_key,'name':name(owner),'kind':'student','sequence':sequence})
+    if 'general' in snapshot:
+        report = Picker(entries, snapshot['photos'], rules_of(master), students).assign(slots)
+    else:
+        report = _legacy_assign(slots, snapshot.get('general_photos', []))
+    for slot in slots:
+        e, result = slot['element'], slot.get('result')
+        if 'general' in snapshot:
+            e['slot'] = slot['ident']  # legacy snapshots keep their element fingerprints
+        if not result and slot.get('cell_fill') and 'general' not in snapshot:
+            e.update({'type': 'rect', 'fill': slot['cell_fill']}); e.pop('photo'); e.pop('crop'); e.pop('mask'); e.pop('required')
+        if result:
+            e['photo'], e['crop'] = result['photo'], result['crop'] or crop(result['photo'], e['box'], *slot.get('crop_pref', (50, 50, 1)))
+            for step in result['relaxed']:
+                if step in RELAX_TEXT:
+                    issue('warning', slot['ident'], RELAX_TEXT[step])
+            if result['dpi'] < GOOD_DPI:
+                issue('warning', slot['ident'], f'Разрешение снимка в слоте {result["dpi"]} dpi — ниже 200')
+        slot['finish'](e)
+    for student in students:
+        if 'general' in snapshot and entries and report['coverage'].get(student['id'], 0) < rules_of(master)['coverageMin']:
+            issue('warning', 'coverage:' + student['id'], f'{name(student)}: нет на общих фото альбома')
+    for photo in report['unplaced']:
+        issue('warning', 'must:' + photo, 'Обязательное фото не поместилось ни в один слот')
     for key in overrides_by_key.keys()-found:
         conflicts.append({'key':key,'reason':'Элемент отсутствует в новой генерации'})
     count=len(variants[0]['sequence'])
     inner_width, inner_height = master.get('pageSize', [210, 280])
     cover_section = next((s for s in master['sections'] if s.get('cover')), None)
     cover_width, cover_height = cover_section.get('pageSize', [inner_width, inner_height]) if cover_section else (inner_width, inner_height)
-    document={'schema_version':1,'master_template':True,'edition':{'id':edition['id'],'version':edition['version']},'input_hash':canonical_hash(snapshot),'spread_count':count,'page_count':count*2,'spread_size_mm':[2*inner_width,inner_height],'cover_size_mm':[2*cover_width,cover_height],'covers':covers,'shared_spreads':{},'variant_spreads':groups,'variants':variants,'plan':plans,'issues':issues,'overrides':{'applied':applied,'conflicts':conflicts}}
+    document={'schema_version':1,'master_template':True,'edition':{'id':edition['id'],'version':edition['version']},'input_hash':canonical_hash(snapshot),'spread_count':count,'page_count':count*2,'spread_size_mm':[2*inner_width,inner_height],'cover_size_mm':[2*cover_width,cover_height],'covers':covers,'shared_spreads':{},'variant_spreads':groups,'variants':variants,'plan':plans,'issues':issues,'overrides':{'applied':applied,'conflicts':conflicts},'photo_report':report}
     document['revision']=canonical_hash(document)
     return document

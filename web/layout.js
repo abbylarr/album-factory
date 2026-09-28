@@ -51,7 +51,11 @@ function layoutElementPerson(data,element){
   return layoutUI.owner?.startsWith('student:')?layoutUI.owner.slice('student:'.length):null;
 }
 function layoutVisiblePhotos(data,element){
-  if(layoutUI.photoTab==='general')return data.photos.filter(p=>p.shoot_type==='general');
+  if(['general','group','pair','report'].includes(layoutUI.photoTab)){
+    const ranked=data.document?.photo_report?.slots?.[element?.slot]?.ranked||[],rank=id=>{const i=ranked.indexOf(id);return i<0?ranked.length+1:i;};
+    const fits={general:()=>true,group:p=>['small_group','group','class'].includes(p.bucket),pair:p=>p.bucket==='pair',report:p=>p.style==='candid'}[layoutUI.photoTab];
+    return data.photos.filter(p=>p.shoot_type==='general'&&fits(p)).sort((a,b)=>rank(a.id)-rank(b.id)||(b.quality??0)-(a.quality??0));
+  }
   if(layoutUI.photoTab==='portrait'){
     const personId=layoutElementPerson(data,element);
     if(!personId)return [];
@@ -70,10 +74,10 @@ function renderLayoutPanel(){
   if(!element){layoutUI.panel=null;el.hidden=true;return;}
   el.hidden=false;el.dataset.kind=layoutUI.panel;
   if(layoutUI.panel==='photo'){
-    const photos=layoutVisiblePhotos(data,element),personId=layoutElementPerson(data,element),person=data.document.variants.find(v=>v.owner==='student:'+personId)?.name;
+    const photos=layoutVisiblePhotos(data,element),suits=new Set(data.document.photo_report?.slots?.[element.slot]?.ranked||[]),personId=layoutElementPerson(data,element),person=data.document.variants.find(v=>v.owner==='student:'+personId)?.name;
     el.innerHTML=`<div class="layout-drawer-head"><div><h2>Фотографии</h2><p class="muted small">${layoutUI.photoTab==='portrait'?(person?`Снимки: ${esc(person)}`:'Снимки выбранной персоны'):'Выберите снимок для замены в рамке'}</p></div><div class="layout-drawer-actions"><a href="#order/${state.order.id}/photos" class="secondary">Добавить</a><button data-layout="close-panel" class="layout-close" aria-label="Закрыть выбор фотографий">×</button></div></div>
       <div class="layout-photo-tabs" role="tablist" aria-label="Категории фотографий">${layoutPhotoTabs.map(([key,label])=>`<button role="tab" aria-selected="${layoutUI.photoTab===key}" class="${layoutUI.photoTab===key?'active':''}" data-layout-tab="${key}">${label}</button>`).join('')}</div>
-      ${photos.length?`<div class="layout-photo-grid">${photos.map(p=>`<button data-layout-photo="${p.id}" class="${p.id===element.photo?'selected':''}" title="${esc(p.filename)}" aria-label="Поставить ${esc(p.filename)} в рамку"><img src="${esc(p.url||(`/media/${p.id}/thumb`))}" alt="" loading="lazy"><span>${esc(p.filename)}</span></button>`).join('')}</div>`:`<div class="layout-photo-empty"><h3>Фотографий пока нет</h3><p>${layoutUI.photoTab==='general'?'Загрузите общую съёмку, затем выберите снимок здесь.':layoutUI.photoTab==='portrait'?(person?`У ${esc(person)} пока нет доступных портретов.`:'Для этой рамки нет доступных портретов.'):'Общие снимки пока не распределяются по этой категории. Все они доступны на вкладке «Общие».'}</p><a href="#order/${state.order.id}/photos" class="secondary">Открыть загрузку</a></div>`}
+      ${photos.length?`<div class="layout-photo-grid">${photos.map(p=>`<button data-layout-photo="${p.id}" class="${p.id===element.photo?'selected':''}" title="${esc(p.filename)}" aria-label="Поставить ${esc(p.filename)} в рамку"><img src="${esc(p.url||(`/media/${p.id}/thumb`))}" alt="" loading="lazy">${suits.has(p.id)?'<em>Подходит слоту</em>':''}<span>${esc(p.filename)}</span></button>`).join('')}</div>`:`<div class="layout-photo-empty"><h3>Фотографий пока нет</h3><p>${layoutUI.photoTab==='general'?'Загрузите общую съёмку, затем выберите снимок здесь.':layoutUI.photoTab==='portrait'?(person?`У ${esc(person)} пока нет доступных портретов.`:'Для этой рамки нет доступных портретов.'):'В этой категории нет проанализированных снимков. Все общие снимки доступны на вкладке «Общие».'}</p><a href="#order/${state.order.id}/photos" class="secondary">Открыть загрузку</a></div>`}
       <p class="layout-panel-error error" role="alert"></p>`;
   }else{
     el.innerHTML=`<div class="layout-drawer-head"><h2>Текст</h2><button data-layout="close-panel" class="layout-close" aria-label="Закрыть редактор текста">×</button></div><p class="muted small">${esc(element.key)}</p><form id="layout-text-edit"><label>Содержание<textarea name="value" maxlength="300" rows="7">${esc(element.text)}</textarea></label><button class="primary" type="submit">Сохранить текст</button><p class="error" role="alert"></p></form>`;

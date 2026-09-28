@@ -41,6 +41,7 @@ image_executor = ThreadPoolExecutor(max_workers=4)
 worker_lock = threading.Lock()
 upload_lock = threading.Lock()
 engine = None
+vision = None
 log = logging.getLogger("album-factory")
 
 
@@ -84,6 +85,8 @@ def init_db():
         init_mvp(con)
         from .master_templates import init as init_masters
         init_masters(con)
+        from .general_photos import init as init_general
+        init_general(con)
         con.execute("UPDATE photos SET status='pending' WHERE status='processing'")
 
 
@@ -146,6 +149,14 @@ def require_order(con, order_id):
     return row
 
 
+def general_vision():
+    global vision
+    if vision is None:
+        from .vision import GeneralVision
+        vision = GeneralVision(ROOT / "models")
+    return vision
+
+
 def process_pending():
     global engine
     with worker_lock:
@@ -157,13 +168,20 @@ def process_pending():
                     return
                 rows = [dict(r) for r in con.execute("SELECT * FROM photos WHERE order_id=? AND shoot_id IS ? AND status='pending' ORDER BY created_at,id", (first['order_id'], first['shoot_id']))]
                 shoot = con.execute('SELECT kind FROM shoots WHERE id=?', (first['shoot_id'],)).fetchone()
-                if shoot and shoot['kind'] == 'general':
-                    con.executemany("UPDATE photos SET status='ready',uncertain=0,error='' WHERE id=?", [(r['id'],) for r in rows])
-                    continue
                 for row in rows:
                     row['path'] = str(DATA / 'photos' / (row['id'] + '.jpg'))
                     row['thumbnail'] = str(DATA / 'photos' / (row['id'] + '.thumb.jpg'))
+                    row['original'] = str(DATA / 'photos' / (row['id'] + '.original'))
                 con.executemany("UPDATE photos SET status='processing' WHERE id=?", [(r['id'],) for r in rows])
+            if shoot and shoot['kind'] == 'general':
+                try:
+                    from .general_photos import process_batch as process_general_batch
+                    process_general_batch(_sys.modules[__name__], rows, general_vision())
+                except Exception:
+                    log.exception("General batch failed")
+                    with db() as con:
+                        con.executemany("UPDATE photos SET status='error',error='Не удалось проанализировать снимок. Повторите обработку.' WHERE id=? AND status='processing'", [(r['id'],) for r in rows])
+                continue
             try:
                 if engine is None:
                     engine = FaceEngine()
@@ -239,7 +257,9 @@ class OrderInput(BaseModel):
 
 @app.get("/api/status")
 def system_status():
-    return {"models_ready": all((ROOT / "models" / f).is_file() for f in ["yunet.onnx", "sface.onnx"]), "local": True, "analysis_version": "v3"}
+    from .general_meta import CONFIG
+    return {"models_ready": all((ROOT / "models" / f).is_file() for f in ["yunet.onnx", "sface.onnx"]), "local": True, "analysis_version": "v3",
+            "general_analysis": {"version": CONFIG["version"], "features": general_vision().features}}
 
 
 @app.get("/api/orders")
@@ -374,7 +394,7 @@ async def upload_photo(order_id: str, request: Request, filename: str, shoot_id:
                 raise HTTPException(409, f"Лимит заказа — {MAX_PHOTOS} фотографий")
             con.execute(
                 "INSERT INTO photos (id,order_id,filename,sha,status,created_at,shoot_id) VALUES (?,?,?,?,?,?,?)",
-                (photo_id, order_id, Path(filename).name, sha, "pending" if shoot["kind"] == "portrait" else "ready", now(), shoot_id),
+                (photo_id, order_id, Path(filename).name, sha, "pending", now(), shoot_id),
             )
             con.execute("UPDATE orders SET stage='upload' WHERE id=?", (order_id,))
     executor.submit(process_pending)
@@ -482,6 +502,8 @@ def remove_photo_files(ids):
     for photo_id in ids:
         for suffix in [".original", ".jpg", ".thumb.jpg"]:
             (DATA / "photos" / (photo_id + suffix)).unlink(missing_ok=True)
+        for face in (DATA / "photos" / "faces").glob(photo_id + "-*.jpg"):
+            face.unlink(missing_ok=True)
 
 
 @app.post("/api/orders/{order_id}/delete-photos")
@@ -574,6 +596,9 @@ _install_mvp(app, _sys.modules[__name__])
 
 from .master_templates import install as _install_masters
 _install_masters(app, _sys.modules[__name__])
+
+from .general_photos import install as _install_general
+_install_general(app, _sys.modules[__name__])
 
 @app.get('/master-editor.html')
 def master_editor_entry():

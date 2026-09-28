@@ -8,3 +8,5 @@ output/
 data/
 models/*.onnx
 examples/real-photos/
+models/*.task
+models/clip/
