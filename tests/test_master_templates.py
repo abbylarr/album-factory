@@ -246,6 +246,22 @@ class MasterTests(unittest.TestCase):
         self.assertIn(e['key'],regenerated['overrides']['applied'])
         self.assertEqual(self.client.get(f'/api/orders/{order}/layout').json()['document']['edition']['id'],pub['edition_id'])
 
+    def test_class_preview_uses_draft_and_lists_ready_classes(self):
+        draft=self.create()
+        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1}).json()['id']
+        classes={c['id']:c for c in self.client.get('/api/preview-classes').json()}
+        self.assertFalse(classes[order]['ready']);self.assertIn('нет учеников',classes[order]['missing'])
+        with s.db() as con: con.execute('INSERT INTO persons VALUES (?,?,?,?)',('missing',order,'Без портрета',s.now()))
+        classes={c['id']:c for c in self.client.get('/api/preview-classes').json()}
+        self.assertEqual(classes[order]['missing'],['нет портретов у 1 из 1 учеников','анкеты заполнили 0 из 1','нет общих фотографий'])
+        document=master();document['sections'][0]['name']='Черновик'
+        result=self.client.post(f'/api/master-templates/{draft["id"]}/class-preview',json={'document':document,'order_id':order})
+        self.assertEqual(result.status_code,200,result.text)
+        doc=result.json()['document'];self.assertTrue(doc['master_template']);self.assertEqual(len(doc['variants']),1)
+        # The preview never creates or changes the order's own layout.
+        self.assertEqual(self.client.get(f'/api/orders/{order}/layout').status_code,404)
+        self.assertEqual(self.client.post(f'/api/master-templates/{draft["id"]}/class-preview',json={'document':document,'order_id':'nope'}).status_code,404)
+
     def test_pdf_shapes_assets_and_text(self):
         import base64
         from io import BytesIO

@@ -303,6 +303,11 @@ class PhotoPreview(BaseModel):
     owner: str = Field(default='s0', max_length=10)
 
 
+class ClassPreview(BaseModel):
+    document: dict
+    order_id: str = Field(min_length=1, max_length=100)
+
+
 class _FlatMeasurer:
     """Text is irrelevant for photo previews; everything fits."""
     def height(self, *args, **kwargs):
@@ -408,6 +413,62 @@ def install(app, s):
     @app.post('/api/master-templates/photo-preview')
     def photo_preview(payload: PhotoPreview):
         return preview_photos(payload.document, payload.students, payload.teachers, payload.owner)
+
+    @app.get('/api/preview-classes')
+    def preview_classes():
+        # Classes are orders; a class is ready when every student has a portrait and a filled form and the class has general photos.
+        from . import mvp
+        from .client_portal import progress_by_order
+        studio = mvp.studio_ctx.get()
+        where, args = ('WHERE EXISTS (SELECT 1 FROM order_membership m WHERE m.order_id=o.id AND m.studio_id=?)', (studio,)) if studio is not None else ('', ())
+        with s.db() as con:
+            rows = con.execute(f'''SELECT o.id,o.school,o.class_name,o.graduation_year,o.stage,
+              (SELECT COUNT(*) FROM persons p WHERE p.order_id=o.id) AS students,
+              (SELECT COUNT(*) FROM persons p WHERE p.order_id=o.id AND EXISTS (SELECT 1 FROM photos f LEFT JOIN shoots h ON h.id=f.shoot_id
+                 WHERE f.person_id=p.id AND f.status='ready' AND COALESCE(h.kind,'portrait')='portrait')) AS with_portrait,
+              (SELECT COUNT(*) FROM photos f JOIN shoots h ON h.id=f.shoot_id WHERE f.order_id=o.id AND h.kind='general' AND f.status='ready') AS general,
+              (SELECT COUNT(*) FROM photos f WHERE f.order_id=o.id AND f.status IN ('pending','processing')) AS pending
+              FROM orders o {where} ORDER BY o.created_at DESC''', args).fetchall()
+            progress = progress_by_order(con)
+        result = []
+        for row in rows:
+            item = dict(row, forms=progress[row['id']]['completed'])
+            missing = []
+            if not item['students']:
+                missing.append('нет учеников')
+            elif item['with_portrait'] < item['students']:
+                missing.append(f"нет портретов у {item['students'] - item['with_portrait']} из {item['students']} учеников")
+            if item['pending']:
+                missing.append('фотографии ещё обрабатываются')
+            if item['students'] and item['forms'] < item['students']:
+                missing.append(f"анкеты заполнили {item['forms']} из {item['students']}")
+            if not item['general']:
+                missing.append('нет общих фотографий')
+            item['missing'] = missing
+            item['ready'] = not missing
+            result.append(item)
+        return result
+
+    @app.post('/api/master-templates/{key}/class-preview')
+    def class_preview(key: str, payload: ClassPreview):
+        # Builds the album from the unsaved draft and a real class without storing anything in the order.
+        from .layout_workspace import enrich_master_snapshot, generate_document, order_data, snapshot_for
+        master = validate(payload.document)
+        edition = {'id': 'class-preview', 'version': 0, 'master': master}
+        with s.db() as con:
+            owned(con, key)
+            order = dict(s.require_order(con, payload.order_id))
+            snapshot = snapshot_for(con, order, order_data(con, payload.order_id, s.DATA), master=True)
+            if not snapshot['students']:
+                raise HTTPException(409, 'В классе нет учеников')
+            enrich_master_snapshot(con, payload.order_id, snapshot, edition, s.DATA)
+        try:
+            document = generate_document(edition, snapshot, [])
+        except (LayoutError, KeyError, TypeError, ValueError, IndexError, ZeroDivisionError) as exc:
+            raise HTTPException(409, 'Не удалось построить предпросмотр: ' + str(exc)[:160]) from exc
+        return {'document': document,
+                'photos': [{'id': k, 'width': p['width'], 'height': p['height'], **({'url': p['url']} if p.get('url') else {})}
+                           for k, p in snapshot['photos'].items()]}
 
     @app.get('/api/master-templates/{key}')
     def get(key: str):

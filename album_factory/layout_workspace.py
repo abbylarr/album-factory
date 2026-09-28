@@ -128,6 +128,13 @@ def snapshot_for(con, order, data, master=False):
             'teacher_variant': {'enabled': False}}
 
 
+def order_data(con, order_id, data_root):
+    return {'persons': [dict(r) for r in con.execute('SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id', (order_id,))],
+            'photos': [dict(r) for r in con.execute('''SELECT p.id,p.person_id,p.status,s.kind AS shoot_type
+                FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? ORDER BY p.created_at,p.id''', (order_id,))],
+            'data_root': data_root}
+
+
 def read_layout(con, order_id):
     row = con.execute('SELECT * FROM order_layouts WHERE order_id=?', (order_id,)).fetchone()
     if row is None:
@@ -182,10 +189,7 @@ def install(app, s):
     def generate_layout(order_id: str, payload: MasterSelection | None = None):
         with s.db() as con:
             order = dict(s.require_order(con, order_id))
-            data = {'persons': [dict(r) for r in con.execute('SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id', (order_id,))],
-                    'photos': [dict(r) for r in con.execute('''SELECT p.id,p.person_id,p.status,s.kind AS shoot_type
-                        FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? ORDER BY p.created_at,p.id''', (order_id,))],
-                    'data_root': s.DATA}
+            data = order_data(con, order_id, s.DATA)
             changed_master = bool(payload and payload.master_template_id and payload.master_template_id != order.get('master_template_id'))
             if changed_master:
                 from .master_templates import select_order_master
