@@ -31,7 +31,7 @@ window.MasterPhotos=(()=>{
   function category(doc,id){const list=categories();return list.find(c=>c.id===id)||list[0];}
   /* The studio list: loaded once, saved in order after every change; a failed save reloads what the server has. */
   function loadStudio(){return fetch('/api/photo-categories').then(r=>r.ok?r.json():null).then(value=>{if(value){studio={items:value.items||[],removed:value.removed||[]};changed();}}).catch(()=>{});}
-  function changed(){sent='';if(lastView&&hooks)refresh(hooks.doc(),lastView);keepFocus(()=>hooks?.updated());}
+  function changed(){sent='';if(!lastView||!hooks)return;refresh(hooks.doc(),lastView);keepFocus(()=>hooks.updated());}
   function saveStudio(mutator){const next=JSON.parse(JSON.stringify(studio));mutator(next);for(const item of next.items)for(const k of FILTERS)if(item[k]==null||(Array.isArray(item[k])&&!item[k].length))delete item[k];studio=next;changed();const body=JSON.stringify(next);
     saving=saving.then(()=>fetch('/api/photo-categories',{method:'PUT',headers:{'Content-Type':'application/json'},body})).then(r=>{if(!r.ok)throw Error();}).catch(()=>loadStudio());}
   /* Slots saved with the first role presets become category + who. */
