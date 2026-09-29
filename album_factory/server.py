@@ -316,6 +316,7 @@ def list_orders():
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status IN ('pending','processing')) AS pending,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status NOT IN ('pending','processing') AND NOT EXISTS (SELECT 1 FROM shoots s WHERE s.id=p.shoot_id AND s.kind='general') AND (p.status!='ready' OR p.uncertain=1 OR p.person_id IS NULL)) AS review_count,
           COALESCE((SELECT photo_id FROM order_covers WHERE order_id=o.id), (SELECT id FROM photos p WHERE p.order_id=o.id ORDER BY created_at,id LIMIT 1)) AS cover_id,
+          (SELECT json_extract(l.document, '$.revision') FROM order_layouts l WHERE l.order_id=o.id) AS layout_revision,
           COALESCE((SELECT customer_name FROM order_terms WHERE order_id=o.id), '') AS customer_name,
           COALESCE((SELECT customer_contact FROM order_terms WHERE order_id=o.id), '') AS customer_contact,
           (SELECT school_id FROM order_terms WHERE order_id=o.id) AS school_id,
@@ -325,7 +326,47 @@ def list_orders():
         progress = progress_by_order(con)
         from .client_portal import open_counts
         fixes = open_counts(con)
-        return [dict(row, client_progress=progress[row["id"]], corrections_open=fixes.get(row["id"], 0)) for row in rows]
+        result = []
+        for row in rows:
+            result.append(dict(row, preview_photo_ids=order_preview_photos(con, row["id"], row["cover_id"]),
+                               client_progress=progress[row["id"]], corrections_open=fixes.get(row["id"], 0)))
+        return result
+
+
+def order_preview_photos(con, order_id: str, cover_id: str | None) -> list[str]:
+    """Choose a cover and then one ready portrait from each different person."""
+    selected = []
+    people = set()
+    if cover_id:
+        cover = con.execute(
+            "SELECT id,person_id FROM photos WHERE id=? AND order_id=? AND status!='error'",
+            (cover_id, order_id),
+        ).fetchone()
+        if cover:
+            selected.append(cover["id"])
+            if cover["person_id"]:
+                people.add(cover["person_id"])
+
+    distinct = con.execute("""SELECT id,person_id FROM (
+          SELECT id,person_id,created_at,
+                 ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY created_at,id) AS person_rank
+          FROM photos WHERE order_id=? AND person_id IS NOT NULL AND status='ready'
+        ) WHERE person_rank=1 ORDER BY created_at,id LIMIT 3""", (order_id,))
+    for photo in distinct:
+        if photo["person_id"] not in people and photo["id"] not in selected:
+            selected.append(photo["id"])
+            people.add(photo["person_id"])
+        if len(selected) == 3:
+            return selected
+
+    missing = 3 - len(selected)
+    placeholders = ",".join("?" for _ in selected)
+    extra = f" AND id NOT IN ({placeholders})" if selected else ""
+    fallback = con.execute(
+        f"SELECT id FROM photos WHERE order_id=? AND status!='error'{extra} ORDER BY created_at,id LIMIT ?",
+        (order_id, *selected, missing),
+    )
+    return selected + [photo["id"] for photo in fallback]
 
 
 def school_name(con, school_id):

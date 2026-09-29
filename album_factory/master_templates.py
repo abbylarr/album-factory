@@ -71,6 +71,19 @@ def validate(document):
         for key in ('safe', 'bleed', 'spine', 'gap'):
             check(number(value.get(key, 0), 0, limit if key != 'bleed' else 30), 'Неверные линии безопасности')
         check(value.get('safe', 0) + value.get('bleed', 0) < limit, 'Зона безопасности не помещается')
+    # The printer's product: files it takes and the spine table «volume range → spine, mm».
+    def print_profile(value):
+        check(isinstance(value, dict) and set(value) <= {'id', 'name', 'unit', 'files', 'dpi', 'spine'}, 'Неверный профиль печати')
+        check(isinstance(value.get('name'), str) and 0 < len(value['name']) <= 200 and isinstance(value.get('id', ''), str) and len(value.get('id', '')) <= 100, 'Неверный профиль печати')
+        check(value.get('unit') in {'spreads', 'pages'} and value.get('files') in {'spreads', 'pages'} and value.get('dpi') in {150, 200, 300, 400, 600}, 'Неверный профиль печати')
+        rows = value.get('spine')
+        check(isinstance(rows, list) and 1 <= len(rows) <= 60, 'Нужна таблица корешка')
+        last = 0
+        for row in rows:
+            check(isinstance(row, list) and len(row) == 3 and all(number(v, 0, 1000) for v in row), 'Неверная строка таблицы корешка')
+            low, high, mm = row
+            check(int(low) == low and int(high) == high and last < low <= high and 1 <= mm <= 100, 'Строки таблицы корешка должны идти по возрастанию без пересечений')
+            last = high
     # A book is printed page by page: bleed on the top, bottom and outer edge, a spine strip on the inner edge.
     def book_safety(value, width, height):
         check(isinstance(value, dict) and set(value) <= {'safe', 'bleed', 'outer', 'spine'}, 'Неверные линии безопасности книги')
@@ -78,6 +91,8 @@ def validate(document):
             check(number(value.get(key, 0), 0, high), 'Неверные линии безопасности книги')
         safe = value.get('safe', 0)
         check(value.get('outer', 0) + value.get('spine', 0) + 2 * safe < width and 2 * (value.get('bleed', 0) + safe) < height, 'Зона безопасности книги не помещается')
+    if 'print' in document:
+        print_profile(document['print'])
     if 'safety' in document:
         safety(document['safety'], page_width, page_height)
         if 'book' in document['safety']:
@@ -216,7 +231,11 @@ def validate(document):
                     check(kind in {'text', 'photo', 'rect', 'ellipse', 'line', 'grid', 'collage', 'svg'}, 'Неизвестный инструмент')
                     b = layer.get('box', {})
                     # Box is relative to its page; any layer but a vignette may cross the fold within the spread.
-                    left, right = (0, page_width) if kind == 'grid' else (-side * page_width, (2 - side) * page_width)
+                    # On the cover a layer may be pinned to the spine: «spine» keeps its offset from the spine centre,
+                    # «wrap» runs over the spine and grows with it (its width excludes the spine).
+                    pin = layer.get('pin')
+                    check(pin is None or section.get('cover') and side == 0 and (pin == 'spine' and kind != 'grid' or pin == 'wrap' and kind in {'photo', 'rect', 'ellipse', 'line', 'svg'}), 'Неверная привязка к корешку')
+                    left, right = (0, page_width) if kind == 'grid' else (-2 * page_width, 2 * page_width) if pin == 'spine' else (0, 2 * page_width) if pin == 'wrap' else (-side * page_width, (2 - side) * page_width)
                     check(isinstance(b, dict) and number(b.get('x'), left - .01, right) and number(b.get('y'), 0, page_height) and all(number(b.get(k), .1, 2 * max(page_width, page_height)) for k in ('w', 'h')), 'Неверные размеры слоя')
                     check(b['x'] + b['w'] <= right + .01 and b['y'] + b['h'] <= page_height + .01, 'Слой выходит за разворот')
                     check(number(layer.get('opacity', 100), 0, 100), 'Неверная прозрачность')

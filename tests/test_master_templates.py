@@ -145,7 +145,7 @@ class MasterTests(unittest.TestCase):
                   'order':{'class_name':'11А','year':'2026'}}
         compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
         self.assertEqual(compiled['spread_size_mm'],[600,400])
-        self.assertEqual(compiled['cover_size_mm'],[600,400])
+        self.assertIsNone(compiled['cover_size_mm'])
         first=next(iter(compiled['variant_spreads']['student:1'].values()))
         backgrounds=[e['box'] for e in first['elements'] if e['key'].endswith('/background')]
         self.assertEqual(backgrounds,[[0,0,300,400],[300,0,300,400]])
@@ -179,7 +179,7 @@ class MasterTests(unittest.TestCase):
         response=self.client.post(f'/api/orders/{order}/layout')
         self.assertEqual(response.status_code,200,response.text)
         generated=response.json()['document']
-        self.assertEqual(generated['cover_size_mm'],[450,290])
+        self.assertEqual(generated['cover_size_mm'],[460,290])  # two sides and the 10 mm spine
         self.assertEqual(generated['spread_size_mm'],[420,280])
         self.assertEqual(generated['variants'][0]['sequence'][0],'cover[student:class]')
         self.assertEqual(generated['covers']['student:class']['section'],'cover')
@@ -187,7 +187,7 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(pdf_response.status_code,200,pdf_response.text[:100] if pdf_response.status_code!=200 else '')
         pdf=PdfReader(BytesIO(pdf_response.content))
         self.assertEqual(len(pdf.pages),2)
-        self.assertAlmostEqual(float(pdf.pages[0].mediabox.width),450*72/25.4,delta=1)
+        self.assertAlmostEqual(float(pdf.pages[0].mediabox.width),460*72/25.4,delta=1)
         self.assertAlmostEqual(float(pdf.pages[1].mediabox.width),420*72/25.4,delta=1)
         self.assertIn('Моя обложка',pdf.pages[0].extract_text())
 
@@ -499,6 +499,74 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/master-templates',json={'document':right}).status_code,201)
         grid=deepcopy(doc);grid['sections'][0]['spreads'][0]['pages'][0]['layers'][0]['box']['w']=250
         self.assertEqual(self.client.post('/api/master-templates',json={'document':grid}).status_code,422)
+
+    def cover_book(self, spine_rows, layers=()):
+        doc=master();doc['rulesVersion']=2;doc['layout']='spreads'
+        doc['sections']=[{'id':'cover','name':'Обложка','cover':True,'kind':'fixed','pageSize':[220,300],'safety':{'safe':5,'bleed':3,'spine':6,'gap':2},
+                          'spreads':[{'id':'cs','pages':[{'id':'cb','background':'#112233','layers':list(layers)},{'id':'cf','background':'#445566','layers':[]}]}]},
+                         {'id':'shared','name':'Общие','kind':'fixed','spreads':[{'id':f'g{i}','pages':[{'id':f'g{i}l','background':'#ffffff','layers':[]},{'id':f'g{i}r','background':'#ffffff','layers':[]}]} for i in range(4)]}]
+        if spine_rows is not None:
+            doc['print']={'id':'test','name':'Тест · Лайфлат','unit':'spreads','files':'spreads','dpi':150,'spine':spine_rows}
+        return doc
+
+    def compile_cover(self, doc):
+        snapshot={'students':[{'id':'1','first_name':'Ученик','last_name':'Один'}],'teachers':[],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        return generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+
+    def test_spine_follows_the_printers_table(self):
+        compiled=self.compile_cover(self.cover_book([[1,3,8],[4,6,10]]))
+        cover=compiled['covers']['student:1']
+        self.assertEqual((cover['spine_mm'],cover['size_mm'],compiled['cover_size_mm']),(10,[450,300],[450,300]))
+        backgrounds=[e['box'] for e in cover['elements'] if e['key'].endswith('/background')]
+        self.assertEqual(backgrounds,[[0,0,225,300],[225,0,225,300]])
+        self.assertEqual(compiled['print'],{'name':'Тест · Лайфлат','files':'spreads','dpi':150})
+        self.assertFalse(compiled['issues'])
+        compiled=self.compile_cover(self.cover_book([[5,9,8]]))
+        self.assertEqual(compiled['covers']['student:1']['spine_mm'],8)
+        self.assertIn('5–9 разв., в альбоме 4',next(i['message'] for i in compiled['issues'] if i['key']=='cover:spine'))
+        compiled=self.compile_cover(self.cover_book(None))
+        self.assertEqual(compiled['covers']['student:1']['size_mm'],[446,300])  # fixed spine of the cover
+        for rows in ([[4,6,10],[1,3,8]],[[1,3,0.5]],[]):
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':self.cover_book(rows)}).status_code,422)
+
+    def test_cover_layers_keep_to_the_spine(self):
+        rect=lambda i,x,w,pin=None:{'id':i,'type':'rect','box':{'x':x,'y':10,'w':w,'h':20},'fill':'#ffffff',**({'pin':pin} if pin else {})}
+        doc=self.cover_book([[1,6,12]],[rect('back',10,50),rect('title',-4,8,'spine'),rect('wrap',0,440,'wrap')])
+        doc['sections'][0]['spreads'][0]['pages'][1]['layers']=[rect('front',10,50)]
+        boxes={e['key'].rsplit('/',1)[1]:e['box'][:3] for e in self.compile_cover(doc)['covers']['student:1']['elements']}
+        self.assertEqual(boxes['back'],[10,10,50]);self.assertEqual(boxes['front'],[242,10,50])
+        self.assertEqual(boxes['title'],[222,10,8]);self.assertEqual(boxes['wrap'],[0,10,452])
+        bad=deepcopy(doc);bad['sections'][1]['spreads'][0]['pages'][0]['layers']=[rect('x',0,10,'spine')]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+        bad=deepcopy(doc);bad['sections'][0]['spreads'][0]['pages'][0]['layers'][1]={'id':'t','type':'text','box':{'x':0,'y':0,'w':100,'h':20},'text':'x','binding':'static','font':'Arial','fontSize':12,'color':'#333333','align':'left','pin':'wrap'}
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+
+    def test_printer_files_are_jpeg_spreads_or_pages(self):
+        import zipfile
+        from io import BytesIO
+        from PIL import Image
+        doc=self.cover_book([[1,6,12]])
+        def files(document, class_name):
+            draft=self.client.post('/api/master-templates',json={'document':document})
+            self.assertEqual(draft.status_code,201,draft.text)
+            pub=self.client.post(f'/api/master-templates/{draft.json()["id"]}/publish',json={'revision':1}).json()
+            order=self.client.post('/api/orders',json={'school_city':'Казань','school':'Тест','class_name':class_name,'copies':1,'offer_id':pub['offer_id']}).json()['id']
+            self.assertEqual(self.client.post(f'/api/orders/{order}/layout').status_code,200)
+            response=self.client.get(f'/api/orders/{order}/layout/print/student:class')
+            self.assertEqual(response.status_code,200,response.text[:200])
+            return zipfile.ZipFile(BytesIO(response.content))
+        archive=files(doc,'9А')
+        self.assertEqual(archive.namelist(),['cover.jpg']+[f'spread-{i:02d}.jpg' for i in range(1,5)])
+        cover=Image.open(BytesIO(archive.read('cover.jpg')))
+        self.assertEqual((cover.format,cover.mode,cover.size,round(cover.info['dpi'][0])),('JPEG','RGB',(round(452/25.4*150),round(300/25.4*150)),150))
+        self.assertIn('icc_profile',cover.info)
+        self.assertTrue(all(abs(a-b)<=2 for a,b in zip(cover.getpixel((10,10)),(0x11,0x22,0x33))))
+        book=deepcopy(doc);book['layout']='book';book['print'].update(unit='pages',files='pages',spine=[[1,20,8]])
+        archive=files(book,'9Б')
+        self.assertEqual(archive.namelist(),['cover.jpg']+[f'page-{i:03d}.jpg' for i in range(1,7)])
+        page=Image.open(BytesIO(archive.read('page-001.jpg')))
+        self.assertEqual(page.size,(round(420/25.4*150)//2,round(280/25.4*150)))
 
     def test_svg_shape_is_saved_and_drawn(self):
         from pypdf import PdfReader

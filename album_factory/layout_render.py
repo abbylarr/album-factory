@@ -254,7 +254,8 @@ def render_variant(document: dict, owner: str, snapshot: dict, root: Path,
     pdf.setAuthor("Album Factory")
     for key in variant["sequence"]:
         if key.startswith("cover["):
-            spread, size = document["covers"][owner], document["cover_size_mm"]
+            spread = document["covers"][owner]
+            size = spread.get("size_mm") or document["cover_size_mm"]
         else:
             spread = document["shared_spreads"].get(key) or document["variant_spreads"][owner][key]
             size = document["spread_size_mm"]
@@ -283,3 +284,60 @@ def export_variants(document, snapshot, root, measurer, out_dir: Path, owners=No
         render_variant(document, variant["owner"], snapshot, root, measurer, path, images)
         paths.append(path)
     return paths
+
+
+def _variant_spreads(document: dict, owner: str):
+    """(is_cover, spread, size) of one variant in book order."""
+    variant = next((v for v in document["variants"] if v["owner"] == owner), None)
+    if variant is None:
+        raise LayoutError(f"Вариант {owner} не найден")
+    for key in variant["sequence"]:
+        if key.startswith("cover["):
+            spread = document["covers"][owner]
+            yield True, spread, spread.get("size_mm") or document["cover_size_mm"]
+        else:
+            yield False, document["shared_spreads"].get(key) or document["variant_spreads"][owner][key], document["spread_size_mm"]
+
+
+def export_print_files(document: dict, owner: str, snapshot: dict, root: Path,
+                       measurer: ReportLabMeasurer, destination: Path):
+    """Printer files of one book as a zip: one sRGB JPEG per spread, or per page for books printed page by page.
+
+    Each spread is drawn to its own PDF and rasterised by PDFium, so the files match the proof PDF exactly.
+    Pages a book does not print (the left one of the first spread, the right one of the last) are skipped.
+    """
+    import zipfile
+    import pypdfium2
+    from PIL import ImageCms
+
+    settings = document.get("print") or {}
+    dpi, per_page = settings.get("dpi", 300), settings.get("files") == "pages"
+    icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    images, spread_no, page_no = _Images(snapshot, root), 0, 0
+    with zipfile.ZipFile(destination, "w", zipfile.ZIP_STORED) as archive:
+        def put(name, image):
+            buffer = BytesIO()
+            image.save(buffer, "JPEG", quality=100, subsampling=0, dpi=(dpi, dpi), icc_profile=icc)
+            archive.writestr(name, buffer.getvalue())
+        for is_cover, spread, size in _variant_spreads(document, owner):
+            buffer = BytesIO()
+            pdf = canvas.Canvas(buffer, pagesize=(size[0] * mm, size[1] * mm), invariant=1)
+            _draw(pdf, spread, size, measurer, images)
+            pdf.showPage()
+            pdf.save()
+            pixels = round(size[0] / 25.4 * dpi), round(size[1] / 25.4 * dpi)
+            page = pypdfium2.PdfDocument(buffer.getvalue())[0]
+            image = page.render(scale=pixels[0] / page.get_width()).to_pil().convert("RGB")
+            if image.size != pixels:
+                image = image.resize(pixels, Image.LANCZOS)
+            if is_cover:
+                put("cover.jpg", image)
+            elif per_page:
+                half = pixels[0] // 2
+                for side, box in enumerate(((0, 0, half, pixels[1]), (half, 0, pixels[0], pixels[1]))):
+                    if side not in spread.get("blank", ()):
+                        page_no += 1
+                        put(f"page-{page_no:03d}.jpg", image.crop(box))
+            else:
+                spread_no += 1
+                put(f"spread-{spread_no:02d}.jpg", image)

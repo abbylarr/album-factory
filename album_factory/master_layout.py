@@ -215,6 +215,34 @@ def _legacy_assign(slots, general):
     return {'slots': {}, 'coverage': {}, 'unplaced': []}
 
 
+def cover_spine(master, spreads, pages):
+    """Spine width for a book of this volume and a problem text when the printer cannot bind it.
+
+    With a print profile the width comes from the printer's table «volume range → mm»; without one it is the
+    fixed width set on the cover."""
+    cover = next((s for s in master['sections'] if s.get('cover')), None)
+    profile = master.get('print')
+    if not profile:
+        return float((cover or {}).get('safety', {}).get('spine', 0) or 0), None
+    volume, unit = (pages, 'стр.') if profile['unit'] == 'pages' else (spreads, 'разв.')
+    rows = profile['spine']
+    for low, high, mm in rows:
+        if low <= volume <= high:
+            return float(mm), None
+    nearest = rows[0] if volume < rows[0][0] else rows[-1]
+    return float(nearest[2]), f'{profile["name"]}: переплёт принимает {rows[0][0]}–{rows[-1][1]} {unit}, в альбоме {volume}'
+
+
+def cover_box(layer, side, width, spine):
+    """Place of a cover layer on the unfolded cover «back · spine · front» (x and width, mm)."""
+    b = layer['box']
+    if layer.get('pin') == 'spine':
+        return width + spine / 2 + b['x'], b['w']
+    if layer.get('pin') == 'wrap':
+        return b['x'], b['w'] + spine
+    return b['x'] + side * (width + spine), b['w']
+
+
 def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     master = edition['master']
     page_width, page_height = master.get('pageSize', [210, 280])
@@ -282,6 +310,10 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
             if len(pages)>2000:
                 raise ValueError('Раздел превышает 1000 разворотов')
             planned.append((section, pages))
+        inner_spreads = sum(len(pages) // 2 for section, pages in planned if not section.get('cover'))
+        spine, spine_problem = cover_spine(master, inner_spreads, 2 * inner_spreads - (2 if book and inner_spreads else 0))
+        if spine_problem:
+            issue('error', 'cover:spine', spine_problem)
         # A book starts on a right page and ends on a left one: the outer pages of the inner block are not printed.
         blanks = set()
         inner = [(section['id'], len(pages)) for section, pages in planned if not section.get('cover') and pages]
@@ -322,9 +354,11 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                         issue('error',e['key'],'Текст выходит за границы рамки')
                 blank_sides = []
                 # Both page backgrounds go first: an object may cross the fold and must not be covered by the next page.
+                # On the cover each side's background also fills its half of the spine.
+                gap = spine if section.get('cover') else 0
                 for side,(page, *_) in enumerate(pages[index:index+2]):
                     if page is not None and (section['id'], index + side) not in blanks:
-                        add({'key':f'{spread_key}/{side}/background','type':'rect','box':[side*page_width,0,page_width,page_height],'fill':page['background']})
+                        add({'key':f'{spread_key}/{side}/background','type':'rect','box':[side*(page_width+gap/2),0,page_width+gap/2,page_height],'fill':page['background']})
                 for side,(page, item, records, layout_count) in enumerate(pages[index:index+2]):
                     if (section['id'], index + side) in blanks:
                         blank_sides.append(side); continue
@@ -339,7 +373,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                             layer = {**layer, 'source': section['list']['source']}
                         if layer.get('type') == 'text' and layer.get('styleId') in styles:
                             layer = {**layer, **{key: value for key, value in styles[layer['styleId']].items() if key not in {'id', 'name'}}}
-                        b=layer['box']; bounds=[b['x']+side*page_width,b['y'],b['w'],b['h']]; key=prefix+'/'+layer['id']
+                        b=layer['box']; x, w = cover_box(layer, side, page_width, spine) if section.get('cover') else (b['x']+side*page_width, b['w'])
+                        bounds=[x,b['y'],w,b['h']]; key=prefix+'/'+layer['id']
                         common={'key':key,'box':bounds,'opacity':layer.get('opacity',100)}
                         stroke_width = 0 if layer.get('strokeOn') is False else (layer.get('strokeWidth') or (0.4 if layer.get('strokeOn') is True or layer.get('strokeMode') == 'color' else 0))
                         appearance={'angle':layer.get('angle',0),'rotation_center':[bounds[0]+bounds[2]/2,bounds[1]+bounds[3]/2], 'radius':layer.get('radius',0),'stroke':layer.get('stroke','#333333'),'strokeWidth':stroke_width}
@@ -444,6 +479,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 if blank_sides:
                     spread['blank'] = blank_sides
                 if section.get('cover'):
+                    spread['size_mm'] = [2*page_width+spine, page_height]; spread['spine_mm'] = spine
                     covers[owner_key] = spread
                 else:
                     group[spread_key] = spread
@@ -494,10 +530,10 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         conflicts.append({'key':key,'reason':'Элемент отсутствует в новой генерации'})
     count=len(variants[0]['sequence'])
     inner_width, inner_height = master.get('pageSize', [210, 280])
-    cover_section = next((s for s in master['sections'] if s.get('cover')), None)
-    cover_width, cover_height = cover_section.get('pageSize', [inner_width, inner_height]) if cover_section else (inner_width, inner_height)
-    document={'schema_version':1,'master_template':True,'edition':{'id':edition['id'],'version':edition['version']},'input_hash':canonical_hash(snapshot),'spread_count':count,'page_count':count*2-(2 if book and count>1 else 0),'spread_size_mm':[2*inner_width,inner_height],'cover_size_mm':[2*cover_width,cover_height],'covers':covers,'shared_spreads':{},'variant_spreads':groups,'variants':variants,'plan':plans,'issues':issues,'overrides':{'applied':applied,'conflicts':conflicts},'photo_report':report}
+    document={'schema_version':1,'master_template':True,'edition':{'id':edition['id'],'version':edition['version']},'input_hash':canonical_hash(snapshot),'spread_count':count,'page_count':count*2-(2 if book and count>1 else 0),'spread_size_mm':[2*inner_width,inner_height],'cover_size_mm':next(iter(covers.values()))['size_mm'] if covers else None,'covers':covers,'shared_spreads':{},'variant_spreads':groups,'variants':variants,'plan':plans,'issues':issues,'overrides':{'applied':applied,'conflicts':conflicts},'photo_report':report}
     if book:
         document['layout'] = 'book'
+    profile = master.get('print')
+    document['print'] = {'name': profile['name'], 'files': profile['files'], 'dpi': profile['dpi']} if profile else {'name': '', 'files': 'pages' if book else 'spreads', 'dpi': 300}
     document['revision']=canonical_hash(document)
     return document

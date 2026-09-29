@@ -741,4 +741,22 @@ button.block-issue:hover,button.block-issue:focus-visible{transform:scale(1.2)}
 .layout-unprinted span{padding:4px 8px;border-radius:6px;background:#ffffffd9}
 
 @media(max-width:850px){.album-button span{display:none}.album-button{width:32px;padding:0;justify-content:center}}
-@media(max-width:540px){.package-bar{gap:2px}.package-button{gap:6px;padding:4px 6px}#design-title,#package-price,.bar-divider{display:none}.bar-copy strong{font-size:12px;max-width:90px}.package-pop{width:min(300px,calc(100vw - 16px))}.save-indicator{left:6px}}
+@media(max-width:540px){.package-bar{gap:2px}.package-button{gap:6px;padding:4px 6px}#design-title,#package-price,.bar-divider{display:none}.bar-copy strong{font-size:12px;max-width:90px}.package-pop{width:min(300px,calc(100vw - 16px))}.save-indicator{left:6px}}/* Print profile in album settings and the cover spine panel. */
+.print-products{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.print-product{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 11px;border:1px solid #e8e4ec;border-radius:11px;background:#fff;text-align:left;white-space:normal}
+.print-product:hover{border-color:#cdb4dc;background:#faf7fc}
+.print-product.active{border-color:#b98fd3;background:#faf6fd;box-shadow:0 0 0 1px #b98fd3}
+.print-product strong{font-size:12px}
+.print-product small{font-size:10px;color:#948e99;line-height:1.4}
+.print-row{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:8px;margin-top:10px}
+.print-row>span{font-size:11px;color:#77717c}
+.print-row .segments{margin:0;flex-wrap:wrap}
+.print-row .segments button{flex:1 0 auto}
+.section-note a{color:#7712b3}
+.spine-summary{display:flex;align-items:baseline;gap:8px;margin-top:10px}
+.spine-summary strong{font-size:18px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.spine-summary span{font-size:11px;color:#85818b}
+.spine-volume{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:11px;color:#77717c}
+.spine-volume button{width:28px;height:28px;padding:0;border-radius:8px;background:#f4f4f6;font-size:15px}
+.spine-volume output{min-width:28px;text-align:center;font-weight:600;color:#29282d;font-variant-numeric:tabular-nums}
+@media(max-width:540px){.print-row{grid-template-columns:1fr}}

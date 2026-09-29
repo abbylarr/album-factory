@@ -6,7 +6,7 @@ function layoutSpread(doc,owner,index){
   const key=variant.sequence[index];return key?.startsWith('cover[')?doc.covers[variant.owner]:doc.shared_spreads[key]||doc.variant_spreads[variant.owner]?.[key];
 }
 function layoutCanvas(spread,doc,photos,interactive=true,full=interactive){
-  const [width,height]=spread.section==='cover'?doc.cover_size_mm:doc.spread_size_mm;
+  const [width,height]=spread.section==='cover'?(spread.size_mm||doc.cover_size_mm):doc.spread_size_mm;
   const cqw=mm=>mm/width*100+'cqw',visible=spread.elements.filter(e=>!e.hidden),cast=new Set();
   const shadowOf=(e,prop='box-shadow')=>e.shadow?`${prop}:${cqw(e.shadow.offsetX||0)} ${cqw(e.shadow.offsetY||0)} ${cqw(e.shadow.blur||0)} ${layoutEscape(e.shadow.color||'#000000')}${Math.round((e.shadow.opacity??35)/100*255).toString(16).padStart(2,'0')};`:'';
   // Photo strokes are drawn only over a real photo, as in the PDF; the shadow is cast by the stroke's outer edge.

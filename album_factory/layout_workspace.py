@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from . import order_stages
 from .layout_engine import LayoutEngine, LayoutError, ReportLabMeasurer, load_edition
-from .layout_render import render_variant, variant_filename
+from .layout_render import export_print_files, render_variant, variant_filename
 from .layout_custom import PAGE_TEMPLATES, add_spread, edit_element, merge_custom, remove_spread, set_page_template
 
 FONT_DIR = Path('/System/Library/Fonts/Supplemental')
@@ -317,6 +317,31 @@ def install(app, s):
                 raise HTTPException(409, 'Не удалось создать PDF: ' + str(exc)) from exc
         return FileResponse(destination, media_type='application/pdf', filename=variant_filename(1, next(v for v in document['variants'] if v['owner']==owner)))
 
+
+    @app.get('/api/orders/{order_id}/layout/print/{owner:path}')
+    def print_files(order_id: str, owner: str):
+        """Files for the printer: a zip of JPEG spreads (or pages) of one book."""
+        with s.db() as con:
+            s.require_order(con, order_id)
+            layout = read_layout(con, order_id)
+            edition = order_edition(con, order_id, s.ROOT)
+        document = layout['document']
+        variant = next((v for v in document['variants'] if v['owner'] == owner), None)
+        if variant is None:
+            raise HTTPException(404, 'Вариант не найден')
+        if any(i['level'] == 'error' for i in document['issues']):
+            raise HTTPException(409, 'Исправьте ошибки макета перед экспортом')
+        destination = s.DATA / 'layouts' / order_id / document['revision'] / (owner.replace(':', '-') + '-print.zip')
+        if not destination.is_file():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            partial = destination.with_suffix('.part')
+            try:
+                export_print_files(document, owner, layout['snapshot'], s.DATA, measurer(edition), partial)
+                partial.replace(destination)
+            except (LayoutError, OSError) as exc:
+                partial.unlink(missing_ok=True)
+                raise HTTPException(409, 'Не удалось подготовить файлы: ' + str(exc)) from exc
+        return FileResponse(destination, media_type='application/zip', filename=variant_filename(1, variant)[:-4] + '-print.zip')
 
 def order_edition(con, order_id, root):
     row = con.execute('SELECT edition_json FROM order_terms WHERE order_id=?', (order_id,)).fetchone()
