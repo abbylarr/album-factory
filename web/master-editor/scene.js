@@ -818,33 +818,49 @@ function layerOffset(l, side) {
 function layerW(l) {
   return l.box.w + (l.pin === 'wrap' ? spineGap() : 0);
 }
-function placeOnCover(l, left, width) {
+/* A layer may hang past the page edges (a decoration half off the trim is cut in print), but a strip of it stays on the sheet so it can be picked up again. */
+const KEEP_ON_SHEET = 10;
+function keepOnSheet(pos, size, from, to) {
+  const keep = Math.min(size, KEEP_ON_SHEET);
+  return round(clamp(pos, from - size + keep, to - keep));
+}
+function maxLayerSize() {
+  return 2 * Math.max(pageWidth(), pageHeight());
+}
+/* A cover layer lives on the side that holds its centre, so it stacks above that side's layers; a wrap runs under both sides and stays with the back. */
+function placeOnCover(l, left, width, top = l.box.y, height = l.box.h) {
   const W = pageWidth(),
+    H = pageHeight(),
     s = spineGap(),
     pages = section().spreads[0].pages,
-    w = clamp(width, 1, 2 * W + s),
-    L = clamp(left, 0, 2 * W + s - w),
+    max = maxLayerSize(),
+    h = clamp(height, 1, max),
+    w = clamp(width, 1, max + s),
+    L = keepOnSheet(left, w, 0, 2 * W + s),
     R = L + w,
     eps = 0.5;
   let side = 0,
     pin = null,
     x = L,
-    bw = w;
+    bw = Math.min(w, max);
   if (R <= W + eps);
   else if (L >= W + s - eps) {
     side = 1;
     x = L - W - s;
   } else if (L <= W + eps && R >= W + s - eps && wrapKinds.has(l.type) && w - s >= W / 2) {
     pin = 'wrap';
-    bw = Math.max(1, w - s);
+    bw = clamp(w - s, 1, max);
   } else {
     pin = 'spine';
     x = L - W - s / 2;
+    side = L + w / 2 >= W + s / 2 ? 1 : 0;
   }
   if (pin) l.pin = pin;
   else delete l.pin;
   l.box.x = round(x);
   l.box.w = round(bw);
+  l.box.h = round(h);
+  l.box.y = keepOnSheet(top, l.box.h, 0, H);
   const from = pages.findIndex(p => p.layers.includes(l));
   if (from >= 0 && from !== side) {
     pages[from].layers.splice(pages[from].layers.indexOf(l), 1);
@@ -857,14 +873,9 @@ function settle(l) {
     settleSide(l);
     return;
   }
-  const H = pageHeight(),
-    left = layerOffset(l, layerSide(l)) + l.box.x,
-    width = layerW(l);
-  l.box.h = clamp(l.box.h, 1, H);
-  l.box.y = clamp(l.box.y, 0, H - l.box.h);
-  placeOnCover(l, left, width);
+  placeOnCover(l, layerOffset(l, layerSide(l)) + l.box.x, layerW(l));
 }
-/* A layer belongs to a page but may cross the fold: its box stays within the spread and it moves to the page that holds its centre. Vignettes stay on their page. */
+/* A layer belongs to a page but may cross the fold and hang past the edges: it keeps a strip on the spread and moves to the page that holds its centre. Vignettes stay inside their page. */
 function layerSide(l) {
   const i = (section().spreads[view.spread]?.pages || []).findIndex(p => p.layers.includes(l));
   return i < 0 ? 0 : i;
@@ -872,15 +883,20 @@ function layerSide(l) {
 function fitSpread(l) {
   const W = pageWidth(),
     H = pageHeight(),
-    b = l.box,
-    grid = l.type === 'grid',
-    side = layerSide(l),
-    left = grid ? 0 : -side * W,
-    right = grid ? W : (2 - side) * W;
-  b.w = clamp(b.w, 1, right - left);
-  b.h = clamp(b.h, 1, H);
-  b.x = clamp(b.x, left, right - b.w);
-  b.y = clamp(b.y, 0, H - b.h);
+    b = l.box;
+  if (l.type === 'grid') {
+    b.w = clamp(b.w, 1, W);
+    b.h = clamp(b.h, 1, H);
+    b.x = clamp(b.x, 0, W - b.w);
+    b.y = clamp(b.y, 0, H - b.h);
+    return;
+  }
+  const side = layerSide(l),
+    max = maxLayerSize();
+  b.w = clamp(b.w, 1, max);
+  b.h = clamp(b.h, 1, max);
+  b.x = keepOnSheet(b.x, b.w, -side * W, (2 - side) * W);
+  b.y = keepOnSheet(b.y, b.h, 0, H);
 }
 function settleSide(l) {
   const pages = section().spreads[view.spread]?.pages,
@@ -916,11 +932,8 @@ canvas.on('object:modified', event => {
   commit(() =>
     changes.forEach(({ l, w, h, left, side, y, angle }) => {
       if (l.type === 'svg' && l.lockAspect !== false && l.aspect && !l.pin) h = round(w / l.aspect);
-      if (section().cover) {
-        l.box.h = clamp(h, 1, pageHeight());
-        l.box.y = clamp(y, 0, pageHeight() - l.box.h);
-        placeOnCover(l, left, w);
-      } else {
+      if (section().cover) placeOnCover(l, left, w, y, h);
+      else {
         l.box = { x: left - side * pageWidth(), y, w, h };
         settle(l);
       }

@@ -491,9 +491,13 @@ class MasterTests(unittest.TestCase):
         wide=next(i for i,k in enumerate(keys) if k.endswith('/wide'))
         self.assertTrue(all(i<wide for i,k in enumerate(keys) if k.endswith('/background')))
         self.assertEqual(spread['elements'][wide]['box'],[20,20,300,100])
-        for box in ({'x':20,'y':20,'w':420,'h':100},{'x':-5,'y':20,'w':100,'h':100}):
+        # A layer may hang past the spread edges (print cuts it) but not leave the spread entirely.
+        for box in ({'x':20,'y':20,'w':420,'h':100},{'x':-5,'y':-30,'w':100,'h':100},{'x':380,'y':250,'w':100,'h':100}):
+            partial=deepcopy(doc);partial['sections'][1]['spreads'][0]['pages'][0]['layers'][0]['box']=box
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':partial}).status_code,201,box)
+        for box in ({'x':420,'y':20,'w':100,'h':100},{'x':-120,'y':20,'w':100,'h':100},{'x':20,'y':-100,'w':100,'h':100},{'x':20,'y':280,'w':100,'h':100}):
             bad=deepcopy(doc);bad['sections'][1]['spreads'][0]['pages'][0]['layers'][0]['box']=box
-            self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422,box)
         right=deepcopy(doc);right['sections'][1]['spreads'][0]['pages'][0]['layers']=[]
         right['sections'][1]['spreads'][0]['pages'][1]['layers']=[{'id':'wide','type':'rect','box':{'x':-150,'y':20,'w':300,'h':100},'fill':'#223344'}]
         self.assertEqual(self.client.post('/api/master-templates',json={'document':right}).status_code,201)
@@ -539,6 +543,13 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(boxes['back'],[10,10,50]);self.assertEqual(boxes['front'],[242,10,50])
         self.assertEqual(boxes['title'],[222,10,8]);self.assertEqual(boxes['wrap'],[0,10,452])
         bad=deepcopy(doc);bad['sections'][1]['spreads'][0]['pages'][0]['layers']=[rect('x',0,10,'spine')]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+        # A spine layer sits on the side holding its centre, stacking above that side; a wrap stays on the back.
+        front=deepcopy(doc);front['sections'][0]['spreads'][0]['pages'][1]['layers'].append(rect('late',-2,40,'spine'))
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':front}).status_code,201)
+        keys=[e['key'].rsplit('/',1)[1] for e in self.compile_cover(front)['covers']['student:1']['elements']]
+        self.assertGreater(keys.index('late'),keys.index('front'))
+        bad=deepcopy(doc);bad['sections'][0]['spreads'][0]['pages'][1]['layers'].append(rect('w2',0,440,'wrap'))
         self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
         bad=deepcopy(doc);bad['sections'][0]['spreads'][0]['pages'][0]['layers'][1]={'id':'t','type':'text','box':{'x':0,'y':0,'w':100,'h':20},'text':'x','font':'Arial','fontSize':12,'color':'#333333','align':'left','pin':'wrap'}
         self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
