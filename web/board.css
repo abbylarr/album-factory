@@ -369,4 +369,5 @@
 @media(max-width:760px){.v2 .order-head-top{flex-wrap:wrap;padding:18px}.v2 .order-head-plate{flex-wrap:wrap;margin:0 18px}.v2 .order-head .workspace-tabs{padding:0 18px}.v2 .order-head h1{font-size:23px}}
 .v2 .queue-grid .order-tile,.v2 .registry-grid .order-tile{height:100%}
 @media(max-width:560px){.v2 .order-preview{height:212px}.v2 .order-tile-content{padding:36px 14px 10px}}
+@media(max-width:420px){.v2 .sidebar-bottom .account>small{display:none}}
 @media(max-width:360px){.v2 .sidebar-bottom .account>span{display:none}}
