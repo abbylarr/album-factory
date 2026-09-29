@@ -111,6 +111,19 @@ class BlockRulesTests(unittest.TestCase):
         self.assertNotIn('layout', plain)
         self.assertFalse(any('blank' in s for s in plain['variant_spreads']['student:s0'].values()))
 
+    def test_spread_stacking_crosses_the_fold(self):
+        def order(doc):
+            result = self.build(doc, students=4)
+            spread = next(s for s in [*result['shared_spreads'].values(), *result['variant_spreads']['student:s0'].values()] if s['section'] == 'intro')
+            return [e['key'].rsplit('/', 1)[-1] for e in spread['elements'] if e['key'].rsplit('/', 1)[-1] in {'ip', 'note'}]
+        doc = master()
+        note = {'id': 'note', 'type': 'text', 'box': {'x': 150, 'y': 10, 'w': 100, 'h': 20}, 'text': 'Подпись',
+                'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'}
+        doc['sections'][0]['spreads'][0]['pages'][0]['layers'].append(note)
+        self.assertEqual(order(doc), ['note', 'ip'])  # no order yet: the left page stays under the right one
+        note['z'], doc['sections'][0]['spreads'][0]['pages'][1]['layers'][0]['z'] = 1, 0
+        self.assertEqual(order(doc), ['ip', 'note'])
+
 
 def split_master(limit=1):
     """Students split into two parts with a general block between them."""

@@ -235,6 +235,7 @@ def validate(document):
                     else:
                         check(b['x'] < right and b['x'] + b['w'] > left and b['y'] < page_height and b['y'] + b['h'] > 0, 'Слой целиком за разворотом')
                     check(number(layer.get('opacity', 100), 0, 100), 'Неверная прозрачность')
+                    check('z' not in layer or number(layer['z'], 0, 10000), 'Неверный порядок слоя')
                     check(number(layer.get('angle', 0), -180, 180), 'Неверный угол поворота')
                     check(all(isinstance(layer.get(k, False), bool) for k in ('flipX', 'flipY')), 'Неверное отражение')
                     check(number(layer.get('radius', 0), 0, 100), 'Неверный радиус')

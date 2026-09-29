@@ -260,6 +260,35 @@ function ensureCover() {
   }
   if (MasterPhotos.migrate(doc)) changed = true;
   if (MasterPlan.linkParts(doc)) changed = true;
+  for (const sec of doc.sections) for (const sp of sec.spreads || []) if (restack(sp)) changed = true;
+  return changed;
+}
+/* Stacking is one order across the spread: `z` ranks the layers of both pages, so a layer crossing the fold
+   keeps its place above or below the other page's layers. A layer without `z` yet (new, or an older design)
+   goes on top of the ones that have it, and an older design keeps its look: left page, then right page. */
+function spreadStack(spread) {
+  const list = [];
+  (spread?.pages || []).forEach((p, side) => p.layers.forEach((l, i) => list.push({ l, side, i })));
+  return list
+    .sort((a, b) => (a.l.z ?? Infinity) - (b.l.z ?? Infinity) || a.side - b.side || a.i - b.i)
+    .map(e => e.l);
+}
+/* Number the spread in the given order and keep each page's list in that order; true when anything moved. */
+function restack(spread, order = spreadStack(spread)) {
+  let changed = false;
+  order.forEach((l, i) => {
+    if (l.z !== i) {
+      l.z = i;
+      changed = true;
+    }
+  });
+  for (const p of spread?.pages || []) {
+    const sorted = [...p.layers].sort((a, b) => a.z - b.z);
+    if (sorted.some((l, i) => l !== p.layers[i])) {
+      p.layers = sorted;
+      changed = true;
+    }
+  }
   return changed;
 }
 function commit(fn) {

@@ -214,6 +214,11 @@ def _draw(pdf, spread, size, measurer, images):
             if stroke_width and align == 'center' and element['photo']:
                 pdf.drawPath(path, stroke=1, fill=0)
         elif element["type"] == "text" and element["text"]:
+            # Text past its frame is hidden, as in the editor; an outside stroke may reach past the edge.
+            pad = stroke_width or 0
+            frame = pdf.beginPath()
+            frame.rect((x - pad) * mm, (height - top - h - pad) * mm, (w + 2 * pad) * mm, (h + 2 * pad) * mm)
+            pdf.clipPath(frame, stroke=0, fill=0)
             def draw_text(color, mode=0, width_scale=1):
                 if width_scale!=1:
                     pdf.setLineWidth(stroke_width*width_scale*mm)

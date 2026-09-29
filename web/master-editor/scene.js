@@ -462,15 +462,15 @@ async function renderScene() {
               scaleX: b.w / cw,
               scaleY: b.h / ch,
             });
-            if (l.radius)
-              object.clipPath = new fabric.Rect({
-                width: cw,
-                height: ch,
-                rx: (l.radius * cw) / b.w,
-                ry: (l.radius * ch) / b.h,
-                originX: 'center',
-                originY: 'center',
-              });
+            // Always clipped to the box: an SVG photo is not cropped exactly and would spill past it.
+            object.clipPath = new fabric.Rect({
+              width: cw,
+              height: ch,
+              rx: ((Number(l.radius) || 0) * cw) / b.w,
+              ry: ((Number(l.radius) || 0) * ch) / b.h,
+              originX: 'center',
+              originY: 'center',
+            });
           } catch (e) {
             notify(e.message, true);
           }
@@ -546,15 +546,15 @@ async function renderScene() {
                 scaleY: f.h / ch,
                 strokeWidth: 0,
               });
-              if (r)
-                img.clipPath = new fabric.Rect({
-                  width: cw,
-                  height: ch,
-                  rx: (r * cw) / f.w,
-                  ry: (r * ch) / f.h,
-                  originX: 'center',
-                  originY: 'center',
-                });
+              // Always clipped to the frame: an SVG photo is not cropped exactly and would spill into the gaps.
+              img.clipPath = new fabric.Rect({
+                width: cw,
+                height: ch,
+                rx: (r * cw) / f.w,
+                ry: (r * ch) / f.h,
+                originX: 'center',
+                originY: 'center',
+              });
               tag(img, 'cell');
               placed = true;
             } catch (e) {
@@ -657,6 +657,13 @@ async function renderScene() {
     }
   }
   if (token !== renderToken) return;
+  // Both sides from one spread of the design stack as that spread says; pages paired otherwise stay side by side.
+  const ids = (pages || []).map(g => g?.templateId).filter(Boolean),
+    owner = sec.spreads.find(sp => ids.length && ids.every(id => sp.pages.some(p => p.id === id)));
+  if (owner) {
+    const rank = new Map(spreadStack(owner).map((l, i) => [l.id, i]));
+    objects.sort((a, b) => (rank.get(a.masterId) ?? 0) - (rank.get(b.masterId) ?? 0));
+  }
   changing = true;
   canvas.discardActiveObject();
   canvas.clear();
@@ -753,7 +760,6 @@ function stepZoom(direction) {
         : [...ZOOM_PRESETS].reverse().find(p => p < percent / 1.01);
   if (next) animateZoom(next / 50);
 }
-new ResizeObserver(() => fit()).observe($('#canvas-host'));
 function syncSelection() {
   if (changing) return;
   const objects = canvas.getActiveObjects(),

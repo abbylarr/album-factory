@@ -433,9 +433,15 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     def build_spread(section, spread_key, pair, owner, owner_key, counter, page_width, page_height, index=0, spine=0, blanks=frozenset()):
         """Compile one spread (two master pages) for one album owner."""
         elements=[]; appearance={}
+        # Stacking: both pages of one design spread follow its `z` order (see spreadStack in the editor);
+        # pages paired from different spreads keep the left page under the right one.
+        ids = [p['id'] for p, *_ in pair if p is not None]
+        one_spread = bool(ids) and any(all(i in {p['id'] for p in sp['pages']} for i in ids) for sp in section.get('spreads', []))
+        stack = {}; current = [(-1, -1, -1)]
         def add(e, inherit_effects=True, slot=None, late=None):
             e.update(appearance if inherit_effects else {key: appearance[key] for key in ('angle', 'rotation_center')})
             e.setdefault('hidden',False)
+            stack[id(e)] = current[0]
             elements.append(e)
             if late is not None:
                 late_texts.append((e, *late, finish, spread_key))
@@ -493,8 +499,10 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
             prefix=f'{spread_key}/{side}'
             lead = snapshot['teachers'][0] if snapshot['teachers'] else None
             styles = {style['id']: style for style in master.get('textStyles', [])}
-            for layer in page['layers']:
+            for position, layer in enumerate(page['layers']):
                 if layer.get('hidden'): continue
+                z = layer.get('z') if one_spread and isinstance(layer.get('z'), (int, float)) else math.inf
+                current[0] = (z, side, position)
                 if layer['type'] == 'grid' and v2 and section.get('list'):
                     layer = {**layer, 'source': section['list']['source']}
                 if layer.get('type') == 'text' and layer.get('styleId') in styles:
@@ -614,6 +622,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                     add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d')})
                 else:
                     add({**common,'type':layer['type'],'fill':layer['fill']})
+        elements.sort(key=lambda e: stack.get(id(e), (-1, -1, -1)))
         spread={'key':spread_key,'section':'cover' if section.get('cover') else section['id'],'elements':elements}
         if blank_sides:
             spread['blank'] = blank_sides

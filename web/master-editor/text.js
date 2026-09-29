@@ -723,6 +723,51 @@ function FrameText() {
     _wrapText(lines, desiredWidth) {
       return super._wrapText(lines, this.fit ? 1e6 : desiredWidth);
     }
+    /* Fabric widens every line to the longest word; here only a word wider than the frame sticks out. */
+    _wrapLine(lineIndex, desiredWidth, data, reserved = 0) {
+      const min = this.dynamicMinWidth;
+      this.dynamicMinWidth = 0;
+      const lines = super._wrapLine(lineIndex, desiredWidth, { ...data, largestWordWidth: 0 }, reserved);
+      this.dynamicMinWidth = min;
+      return lines;
+    }
+    /* Text past the frame is hidden, as in InDesign, and a red «+» at the corner says some of it does not fit. */
+    overflows() {
+      if (this.fit || !this._textLines) return false;
+      return (
+        (this.contentHeight ?? 0) > this.height + 0.05 ||
+        this._textLines.some((_, n) => this.getLineWidth(n) > this.width + 0.05)
+      );
+    }
+    _render(ctx) {
+      const w = this.width,
+        h = this.height,
+        pad = this.strokeWidth || 0;
+      if (this.isEditing) return super._render(ctx);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(-w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2);
+      ctx.clip();
+      super._render(ctx);
+      ctx.restore();
+      if (!this.overflows()) return;
+      const s = Math.min(3, w / 3, h / 3),
+        x = w / 2 - s,
+        y = h / 2 - s;
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#d33a2f';
+      ctx.lineWidth = s / 8;
+      ctx.fillRect(x, y, s, s);
+      ctx.strokeRect(x, y, s, s);
+      ctx.beginPath();
+      ctx.moveTo(x + s / 2, y + s * 0.22);
+      ctx.lineTo(x + s / 2, y + s * 0.78);
+      ctx.moveTo(x + s * 0.22, y + s / 2);
+      ctx.lineTo(x + s * 0.78, y + s / 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     _getTopOffset() {
       const free = this.height - (this.contentHeight ?? this.height);
       return -this.height / 2 + free * ({ middle: 0.5, bottom: 1 }[this.valign] || 0);

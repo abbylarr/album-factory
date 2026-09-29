@@ -695,18 +695,6 @@ function action(type) {
             settle(copy);
           }
         if (type === 'rotate') targets.forEach(l => (l.angle = (((l.angle || 0) + 90 + 180) % 360) - 180));
-        if (type === 'forward' || type === 'backward')
-          for (const l of targets) {
-            const i = p.layers.indexOf(l),
-              to = clamp(i + (type === 'forward' ? 1 : -1), 0, p.layers.length - 1);
-            p.layers.splice(i, 1);
-            p.layers.splice(to, 0, l);
-          }
-        if (type === 'front' || type === 'back') {
-          const mine = p.layers.filter(l => selected.includes(l.id)),
-            rest = p.layers.filter(l => !selected.includes(l.id));
-          p.layers = type === 'front' ? rest.concat(mine) : mine.concat(rest);
-        }
         if (type === 'lock') {
           const next = !targets.every(l => l.locked);
           targets.forEach(l => {
@@ -714,8 +702,27 @@ function action(type) {
           });
         }
       }
+    if (['forward', 'backward', 'front', 'back'].includes(type))
+      for (const sp of sec.spreads) {
+        const order = spreadStack(sp),
+          mine = l => selected.includes(l.id);
+        if (order.some(mine)) restack(sp, restackOrder(order, mine, type));
+      }
     if (type === 'delete') selected = [];
   });
+}
+/* The spread's stack after «up», «down», «to front» or «to back» for the chosen layers. */
+function restackOrder(order, mine, type) {
+  if (type === 'front') return order.filter(l => !mine(l)).concat(order.filter(mine));
+  if (type === 'back') return order.filter(mine).concat(order.filter(l => !mine(l)));
+  const next = [...order];
+  if (type === 'forward') {
+    for (let i = next.length - 2; i >= 0; i--)
+      if (mine(next[i]) && !mine(next[i + 1])) [next[i], next[i + 1]] = [next[i + 1], next[i]];
+  } else
+    for (let i = 1; i < next.length; i++)
+      if (mine(next[i]) && !mine(next[i - 1])) [next[i], next[i - 1]] = [next[i - 1], next[i]];
+  return next;
 }
 function copyLayers() {
   const list = chosen();
@@ -731,6 +738,7 @@ function pasteLayers() {
     .map(l => {
       const copy = clone(l);
       copy.id = uid();
+      delete copy.z;
       if (copy.type === 'collage') reidentifyCollage(copy);
       return copy;
     });
@@ -765,19 +773,17 @@ function shortcutLabel(key) {
   return (/Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+') + key;
 }
 function orderEnabled(kind) {
-  return section()
-    .spreads.flatMap(sp => sp.pages)
-    .filter(p => p.layers.some(l => selected.includes(l.id)))
-    .some(p => {
-      const idx = [];
-      p.layers.forEach((l, i) => {
-        if (selected.includes(l.id)) idx.push(i);
-      });
-      if (!idx.length) return false;
-      const atTop = idx.every((i, n) => i === p.layers.length - idx.length + n),
-        atBottom = idx.every((i, n) => i === n);
-      return kind === 'up' || kind === 'front' ? !atTop : !atBottom;
+  return section().spreads.some(sp => {
+    const order = spreadStack(sp),
+      idx = [];
+    order.forEach((l, i) => {
+      if (selected.includes(l.id)) idx.push(i);
     });
+    if (!idx.length) return false;
+    const atTop = idx.every((i, n) => i === order.length - idx.length + n),
+      atBottom = idx.every((i, n) => i === n);
+    return kind === 'up' || kind === 'front' ? !atTop : !atBottom;
+  });
 }
 function closeObjectMenu() {
   const menu = $('#object-menu');

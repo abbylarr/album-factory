@@ -1046,5 +1046,7 @@ MasterPhotos.bind({
     if (!$('#inspector').contains(active) || active.tagName === 'BUTTON') renderInspector();
   },
 });
+// Observed only now: fitting the canvas reaches helpers from every editor script, so all of them must have run.
+new ResizeObserver(() => fit()).observe($('#canvas-host'));
 if (serverId) load(serverId);
 else location.replace('/static/master-catalog.html');
