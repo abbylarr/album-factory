@@ -10,7 +10,7 @@
   const TOKEN=/\{\{([a-z.]+)((?:\|[a-z]+)*)\}\}/g;
   /* Chip settings: a form of the value and a letter case. The first entry of each list is the default. */
   const FORMS={
-    name:[['','Полностью','Анна Петрова'],['first','Имя','Анна'],['last','Фамилия','Петрова'],['initials','Инициалы','А. Петрова']],
+    name:[['','Полностью','Анна Петрова'],['first','Имя','Анна'],['last','Фамилия','Петрова'],['initials','Инициалы','Петрова А.']],
     school:[['','Полное название'],['short','Краткое название']],
     class:[['','Как в заказе'],['quotes','С кавычками','11 «Б»'],['bare','Без кавычек','11 Б'],['letter','Только буква','Б'],['number','Только цифра','11']]
   };
@@ -27,7 +27,7 @@
     let value;
     if(group==='name'&&raw&&typeof raw==='object'){
       const {first='',middle='',last=''}=raw;
-      value=form==='first'?first:form==='last'?last:form==='initials'?[...[first,middle].filter(Boolean).map(p=>p[0]+'.'),...(last?[last]:[])].join(' '):[first,middle,last].filter(Boolean).join(' ');
+      value=form==='first'?first:form==='last'?last:form==='initials'?[...(last?[last]:[]),...[first,middle].filter(Boolean).map(p=>p[0]+'.')].join(' '):[first,middle,last].filter(Boolean).join(' ');
     }else if(group==='school'&&raw&&typeof raw==='object')value=(form==='short'?raw.short:'')||raw.full||'';
     else{
       value=raw==null?'':String(raw);

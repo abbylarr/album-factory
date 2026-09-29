@@ -32,7 +32,7 @@ window.MasterPhotos=(()=>{
   /* The studio list: loaded once, saved in order after every change; a failed save reloads what the server has. */
   function loadStudio(){return fetch('/api/photo-categories').then(r=>r.ok?r.json():null).then(value=>{if(value){studio={items:value.items||[],removed:value.removed||[]};changed();}}).catch(()=>{});}
   function changed(){sent='';if(!lastView||!hooks)return;refresh(hooks.doc(),lastView);keepFocus(()=>hooks.updated());}
-  function saveStudio(mutator){const next=JSON.parse(JSON.stringify(studio));mutator(next);for(const item of next.items)for(const k of FILTERS)if(item[k]==null||(Array.isArray(item[k])&&!item[k].length))delete item[k];studio=next;changed();const body=JSON.stringify(next);
+  function saveStudio(mutator){const next=JSON.parse(JSON.stringify(studio));mutator(next);for(const item of next.items)for(const k of FILTERS)if(item[k]==null||(Array.isArray(item[k])&&!item[k].length))delete item[k];studio=next;afterPress(changed);const body=JSON.stringify(next);
     saving=saving.then(()=>fetch('/api/photo-categories',{method:'PUT',headers:{'Content-Type':'application/json'},body})).then(r=>{if(!r.ok)throw Error();}).catch(()=>loadStudio());}
   /* Slots saved with the first role presets become category + who. */
   function upgrade(pick){if(!pick||'category' in pick)return pick;const [category,who]=LEGACY[pick.role]||LEGACY.any,include=pick.include==='item'?'hero':pick.include==='owner'?'owner':null;return {category,...((include||who)?{who:include||who}:{})};}
@@ -81,6 +81,13 @@ window.MasterPhotos=(()=>{
   };
   const TAG=`<path d="M8 6.5h8l5.5 4.5-5.5 4.5H8z" fill="none" stroke="${PIC}" stroke-width="1.4" stroke-linejoin="round"/><circle cx="11" cy="11" r="1.3" fill="${PIC}"/>`;
   function pictogram(c,cls='cat-pic'){return `<svg class="${cls}" viewBox="0 0 30 22" aria-hidden="true"><rect x=".5" y=".5" width="29" height="21" rx="4" fill="#f5effa"/>${c.builtin?PICTOGRAMS[c.id]||'':TAG}</svg>`;}
+  /* A name field commits on blur, which happens on the press of the next button; re-rendering then would
+     swap that button out from under the pointer and lose its click, so the render waits for the release. */
+  let pressed=false;
+  document.addEventListener('pointerdown',()=>{pressed=true;},true);
+  function afterPress(render){if(!pressed)return render();const done=()=>{removeEventListener('pointerup',done,true);removeEventListener('pointercancel',done,true);pressed=false;setTimeout(render);};addEventListener('pointerup',done,true);addEventListener('pointercancel',done,true);}
+  addEventListener('pointerup',()=>{pressed=false;},false);
+  addEventListener('pointercancel',()=>{pressed=false;},false);
   /* Editor of one category inside the album settings. */
   function categoryEditor(c){const f=c.filters,reset=c.builtin&&c.edited?`<button type="button" data-cat-reset="${esc(c.id)}">Вернуть как было</button>`:'';
     return `<div class="category-editor"><label>Название<input data-cat-name="${esc(c.id)}" maxlength="40" value="${esc(c.name)}"></label>

@@ -173,30 +173,15 @@ async function api(path, method = 'GET', body) {
   if (!r.ok) throw Error(typeof d.detail === 'string' ? d.detail : 'Проверьте значения полей');
   return d;
 }
-/* The header always says whether the work is safe: saved, being saved, or not saved with a retry. */
-const SAVE_TICK =
-  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+/* The header stays quiet while work saves normally and speaks up only when it is not saved. */
 function updateSaveState() {
   const state = $('#server-state'),
     retry = $('#retry-save'),
-    kind = !ready
-      ? ''
-      : !navigator.onLine && (dirty || saving)
-        ? 'offline'
-        : saveError
-          ? 'failed'
-          : dirty || saving
-            ? 'saving'
-            : 'saved';
+    kind = !ready ? '' : !navigator.onLine && (dirty || saving) ? 'offline' : saveError ? 'failed' : '';
   state.dataset.state = kind;
   state.classList.toggle('offline', kind === 'offline');
   state.classList.toggle('failed', kind === 'failed');
-  state.innerHTML = {
-    offline: 'Нет сети · не сохранено',
-    failed: 'Не сохранено',
-    saving: 'Сохраняем…',
-    saved: `Сохранено${SAVE_TICK}`,
-  }[kind] || '';
+  state.textContent = { offline: 'Нет сети · не сохранено', failed: 'Не сохранено' }[kind] || '';
   state.title = kind === 'failed' ? saveError : kind === 'offline' ? 'Сохраним, когда появится сеть' : '';
   retry.hidden = kind !== 'failed';
   state.hidden = !kind;

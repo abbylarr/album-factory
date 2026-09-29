@@ -9,7 +9,7 @@ const cases={
   '{{lead.name}}':'Анна Петровна Иванова',
   '{{lead.name|first}}':'Анна',
   '{{lead.name|last|upper}}':'ИВАНОВА',
-  '{{lead.name|initials}}':'А. П. Иванова',
+  '{{lead.name|initials}}':'Иванова А. П.',
   '{{school}}':'МБОУ «Средняя школа № 5»',
   '{{school|short}}':'Школа № 5',
   '{{class}}':'11 «б»',

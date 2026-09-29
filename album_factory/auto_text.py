@@ -92,7 +92,7 @@ def format_value(field, raw, mods=()):
         elif form == 'last':
             value = last
         elif form == 'initials':
-            value = ' '.join([p[0] + '.' for p in (first, middle) if p] + ([last] if last else []))
+            value = ' '.join(([last] if last else []) + [p[0] + '.' for p in (first, middle) if p])
         else:
             value = ' '.join(p for p in (first, middle, last) if p)
     elif group == 'school' and isinstance(raw, dict):
