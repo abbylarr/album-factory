@@ -671,12 +671,51 @@ function syncSelectionCoords() {
   active.setCoords();
   if (active instanceof fabric.ActiveSelection) active.forEachObject(o => o.setCoords());
 }
+/* Canvas zoom: 2 px per mm reads as 100 %. The buttons walk through round presets, the wheel and pinch zoom by their delta. */
+const ZOOM_MIN = 0.2,
+  ZOOM_MAX = 32,
+  ZOOM_PRESETS = [10, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600];
+let zoomAnimation = 0;
 function updateZoomControls() {
   const zoom = canvas.getZoom();
   $('#zoom-value').textContent = `${Math.round(zoom * 50)}%`;
-  $('#zoom-out').disabled = zoom <= 0.2;
-  $('#zoom-in').disabled = zoom >= 8;
+  $('#zoom-out').disabled = zoom <= ZOOM_MIN + 1e-6;
+  $('#zoom-in').disabled = zoom >= ZOOM_MAX - 1e-6;
   $('#zoom-fit').setAttribute('aria-pressed', zoomMode === 'fit');
+}
+function viewportChanged() {
+  syncSelectionCoords();
+  if (snapMarks.length) renderGuides();
+  placeCollageUi();
+  placePhotoCropUi();
+  updateZoomControls();
+}
+/* Zoom keeping the scene point under `point` (host pixels) in place. */
+function zoomAt(zoom, point) {
+  zoom = clamp(zoom, ZOOM_MIN, ZOOM_MAX);
+  canvas.zoomToPoint(new fabric.Point(point.x, point.y), zoom);
+  zoomMode = zoom / 2;
+  viewportChanged();
+}
+function hostCenter() {
+  const host = $('#canvas-host');
+  return { x: host.clientWidth / 2, y: host.clientHeight / 2 };
+}
+function animateZoom(target, point = hostCenter()) {
+  cancelAnimationFrame(zoomAnimation);
+  const from = canvas.getZoom(),
+    to = clamp(target, ZOOM_MIN, ZOOM_MAX),
+    start = performance.now(),
+    duration = 140;
+  if (Math.abs(to - from) < 1e-6) return;
+  if (document.hidden) return zoomAt(to, point);
+  const frame = now => {
+    const t = Math.min(1, Math.max(0, now - start) / duration),
+      eased = 1 - Math.pow(1 - t, 3);
+    zoomAt(from * Math.pow(to / from, eased), point);
+    if (t < 1) zoomAnimation = requestAnimationFrame(frame);
+  };
+  zoomAnimation = requestAnimationFrame(frame);
 }
 function fit() {
   const host = $('#canvas-host'),
@@ -701,16 +740,12 @@ function fit() {
   updateZoomControls();
 }
 function stepZoom(direction) {
-  const current = canvas.getZoom(),
-    zoom = clamp(current * (direction > 0 ? 1.25 : 0.8), 0.2, 8);
-  if (zoom === current) return;
-  const host = $('#canvas-host');
-  canvas.zoomToPoint(new fabric.Point(host.clientWidth / 2, host.clientHeight / 2), zoom);
-  zoomMode = zoom / 2;
-  syncSelectionCoords();
-  placeCollageUi();
-  placePhotoCropUi();
-  updateZoomControls();
+  const percent = canvas.getZoom() * 50,
+    next =
+      direction > 0
+        ? ZOOM_PRESETS.find(p => p > percent * 1.01)
+        : [...ZOOM_PRESETS].reverse().find(p => p < percent / 1.01);
+  if (next) animateZoom(next / 50);
 }
 new ResizeObserver(() => fit()).observe($('#canvas-host'));
 function syncSelection() {
@@ -784,33 +819,49 @@ function layerOffset(l, side) {
 function layerW(l) {
   return l.box.w + (l.pin === 'wrap' ? spineGap() : 0);
 }
-function placeOnCover(l, left, width) {
+/* A layer may hang past the page edges (a decoration half off the trim is cut in print), but a strip of it stays on the sheet so it can be picked up again. */
+const KEEP_ON_SHEET = 10;
+function keepOnSheet(pos, size, from, to) {
+  const keep = Math.min(size, KEEP_ON_SHEET);
+  return round(clamp(pos, from - size + keep, to - keep));
+}
+function maxLayerSize() {
+  return 2 * Math.max(pageWidth(), pageHeight());
+}
+/* A cover layer lives on the side that holds its centre, so it stacks above that side's layers; a wrap runs under both sides and stays with the back. */
+function placeOnCover(l, left, width, top = l.box.y, height = l.box.h) {
   const W = pageWidth(),
+    H = pageHeight(),
     s = spineGap(),
     pages = section().spreads[0].pages,
-    w = clamp(width, 1, 2 * W + s),
-    L = clamp(left, 0, 2 * W + s - w),
+    max = maxLayerSize(),
+    h = clamp(height, 1, max),
+    w = clamp(width, 1, max + s),
+    L = keepOnSheet(left, w, 0, 2 * W + s),
     R = L + w,
     eps = 0.5;
   let side = 0,
     pin = null,
     x = L,
-    bw = w;
+    bw = Math.min(w, max);
   if (R <= W + eps);
   else if (L >= W + s - eps) {
     side = 1;
     x = L - W - s;
   } else if (L <= W + eps && R >= W + s - eps && wrapKinds.has(l.type) && w - s >= W / 2) {
     pin = 'wrap';
-    bw = Math.max(1, w - s);
+    bw = clamp(w - s, 1, max);
   } else {
     pin = 'spine';
     x = L - W - s / 2;
+    side = L + w / 2 >= W + s / 2 ? 1 : 0;
   }
   if (pin) l.pin = pin;
   else delete l.pin;
   l.box.x = round(x);
   l.box.w = round(bw);
+  l.box.h = round(h);
+  l.box.y = keepOnSheet(top, l.box.h, 0, H);
   const from = pages.findIndex(p => p.layers.includes(l));
   if (from >= 0 && from !== side) {
     pages[from].layers.splice(pages[from].layers.indexOf(l), 1);
@@ -823,14 +874,9 @@ function settle(l) {
     settleSide(l);
     return;
   }
-  const H = pageHeight(),
-    left = layerOffset(l, layerSide(l)) + l.box.x,
-    width = layerW(l);
-  l.box.h = clamp(l.box.h, 1, H);
-  l.box.y = clamp(l.box.y, 0, H - l.box.h);
-  placeOnCover(l, left, width);
+  placeOnCover(l, layerOffset(l, layerSide(l)) + l.box.x, layerW(l));
 }
-/* A layer belongs to a page but may cross the fold: its box stays within the spread and it moves to the page that holds its centre. Vignettes stay on their page. */
+/* A layer belongs to a page but may cross the fold and hang past the edges: it keeps a strip on the spread and moves to the page that holds its centre. Vignettes stay inside their page. */
 function layerSide(l) {
   const i = (section().spreads[view.spread]?.pages || []).findIndex(p => p.layers.includes(l));
   return i < 0 ? 0 : i;
@@ -838,15 +884,20 @@ function layerSide(l) {
 function fitSpread(l) {
   const W = pageWidth(),
     H = pageHeight(),
-    b = l.box,
-    grid = l.type === 'grid',
-    side = layerSide(l),
-    left = grid ? 0 : -side * W,
-    right = grid ? W : (2 - side) * W;
-  b.w = clamp(b.w, 1, right - left);
-  b.h = clamp(b.h, 1, H);
-  b.x = clamp(b.x, left, right - b.w);
-  b.y = clamp(b.y, 0, H - b.h);
+    b = l.box;
+  if (l.type === 'grid') {
+    b.w = clamp(b.w, 1, W);
+    b.h = clamp(b.h, 1, H);
+    b.x = clamp(b.x, 0, W - b.w);
+    b.y = clamp(b.y, 0, H - b.h);
+    return;
+  }
+  const side = layerSide(l),
+    max = maxLayerSize();
+  b.w = clamp(b.w, 1, max);
+  b.h = clamp(b.h, 1, max);
+  b.x = keepOnSheet(b.x, b.w, -side * W, (2 - side) * W);
+  b.y = keepOnSheet(b.y, b.h, 0, H);
 }
 function settleSide(l) {
   const pages = section().spreads[view.spread]?.pages,
@@ -882,11 +933,8 @@ canvas.on('object:modified', event => {
   commit(() =>
     changes.forEach(({ l, w, h, left, side, y, angle }) => {
       if (l.type === 'svg' && l.lockAspect !== false && l.aspect && !l.pin) h = round(w / l.aspect);
-      if (section().cover) {
-        l.box.h = clamp(h, 1, pageHeight());
-        l.box.y = clamp(y, 0, pageHeight() - l.box.h);
-        placeOnCover(l, left, w);
-      } else {
+      if (section().cover) placeOnCover(l, left, w, y, h);
+      else {
         l.box = { x: left - side * pageWidth(), y, w, h };
         settle(l);
       }

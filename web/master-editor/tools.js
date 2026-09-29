@@ -223,26 +223,51 @@ canvas.on('mouse:dblclick', opt => {
     }
   }
 });
+let pinching = false;
+/* Wheel pans; Ctrl/⌘ + wheel and a trackpad pinch (which arrives as Ctrl + wheel) zoom around the cursor in proportion to the delta. */
 canvas.on('mouse:wheel', opt => {
   const e = opt.e;
   e.preventDefault();
   e.stopPropagation();
+  cancelAnimationFrame(zoomAnimation);
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $('#canvas-host').clientHeight : 1;
+  let dx = e.deltaX * unit,
+    dy = e.deltaY * unit;
   if (e.ctrlKey || e.metaKey) {
-    const zoom = clamp(canvas.getZoom() * Math.pow(0.999, e.deltaY), 0.2, 8);
-    canvas.zoomToPoint(new fabric.Point(e.offsetX, e.offsetY), zoom);
-    zoomMode = zoom / 2;
-    updateZoomControls();
-  } else {
-    const v = canvas.viewportTransform;
-    v[4] -= e.deltaX;
-    v[5] -= e.deltaY;
-    canvas.requestRenderAll();
+    if (pinching) return;
+    zoomAt(canvas.getZoom() * Math.exp(-clamp(dy, -30, 30) * 0.01), { x: e.offsetX, y: e.offsetY });
+    return;
   }
-  syncSelectionCoords();
-  if (snapMarks.length) renderGuides();
-  placeCollageUi();
-  placePhotoCropUi();
+  if (e.shiftKey && !dx) {
+    dx = dy;
+    dy = 0;
+  }
+  const v = canvas.viewportTransform;
+  v[4] -= dx;
+  v[5] -= dy;
+  canvas.setViewportTransform(v);
+  viewportChanged();
 });
+/* Safari reports a trackpad pinch as gesture events instead of Ctrl + wheel. */
+{
+  const host = $('#canvas-host');
+  let pinchStart = 0;
+  host.addEventListener('gesturestart', e => {
+    e.preventDefault();
+    cancelAnimationFrame(zoomAnimation);
+    pinching = true;
+    pinchStart = canvas.getZoom();
+  });
+  host.addEventListener('gesturechange', e => {
+    e.preventDefault();
+    const r = host.getBoundingClientRect();
+    zoomAt(pinchStart * e.scale, { x: e.clientX - r.left, y: e.clientY - r.top });
+  });
+  host.addEventListener('gestureend', e => {
+    e.preventDefault();
+    pinching = false;
+  });
+}
 canvas.on('contextmenu', opt => {
   opt.e.preventDefault();
   openObjectMenu(opt.e, opt.target);
@@ -597,27 +622,38 @@ function property(key, value) {
     }
   });
 }
+/* One object aligns to the printed (trimmed) page it sits on — on the cover also the spine; several align to each other. */
 function align(which) {
   commit(() => {
-    const list = chosen();
-    if (!list.length) return;
-    let minX = 0,
-      minY = 0,
-      maxX = pageWidth(),
-      maxY = pageHeight();
-    if (list.length > 1) {
-      minX = Math.min(...list.map(l => l.box.x));
-      minY = Math.min(...list.map(l => l.box.y));
-      maxX = Math.max(...list.map(l => l.box.x + l.box.w));
-      maxY = Math.max(...list.map(l => l.box.y + l.box.h));
-    }
-    for (const l of list) {
-      if (which === 'left') l.box.x = minX;
-      if (which === 'cx') l.box.x = (minX + maxX - l.box.w) / 2;
-      if (which === 'right') l.box.x = maxX - l.box.w;
-      if (which === 'top') l.box.y = minY;
-      if (which === 'cy') l.box.y = (minY + maxY - l.box.h) / 2;
-      if (which === 'bottom') l.box.y = maxY - l.box.h;
+    const boxes = chosen()
+      .filter(l => !l.locked)
+      .map(l => {
+        const x = layerOffset(l, layerSide(l)) + l.box.x,
+          w = layerW(l);
+        return { l, x, y: l.box.y, w, h: l.box.h };
+      });
+    if (!boxes.length) return;
+    const area =
+      boxes.length > 1
+        ? {
+            left: Math.min(...boxes.map(b => b.x)),
+            top: Math.min(...boxes.map(b => b.y)),
+            right: Math.max(...boxes.map(b => b.x + b.w)),
+            bottom: Math.max(...boxes.map(b => b.y + b.h)),
+          }
+        : pageRectAt(boxes[0].x + boxes[0].w / 2, !!section().cover);
+    for (const b of boxes) {
+      let x = b.x,
+        y = b.y;
+      if (which === 'left') x = area.left;
+      if (which === 'cx') x = (area.left + area.right - b.w) / 2;
+      if (which === 'right') x = area.right - b.w;
+      if (which === 'top') y = area.top;
+      if (which === 'cy') y = (area.top + area.bottom - b.h) / 2;
+      if (which === 'bottom') y = area.bottom - b.h;
+      b.l.box.x = round(b.l.box.x + x - b.x);
+      b.l.box.y = round(y);
+      settle(b.l);
     }
   });
 }

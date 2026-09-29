@@ -207,14 +207,20 @@ def validate(document):
                     kind = layer.get('type')
                     check(kind in {'text', 'photo', 'rect', 'ellipse', 'line', 'grid', 'collage', 'svg'}, 'Неизвестный инструмент')
                     b = layer.get('box', {})
-                    # Box is relative to its page; any layer but a vignette may cross the fold within the spread.
-                    # On the cover a layer may be pinned to the spine: «spine» keeps its offset from the spine centre,
-                    # «wrap» runs over the spine and grows with it (its width excludes the spine).
+                    # Box is relative to its page; any layer but a vignette may cross the fold and hang past the
+                    # spread edges (print cuts it), as long as part of it stays on the spread. A vignette stays inside its page.
+                    # On the cover a layer may be pinned to the spine: «spine» keeps its offset from the spine centre and
+                    # sits on the side that holds its centre; «wrap» runs over the spine on the back side and grows with it
+                    # (its width excludes the spine).
                     pin = layer.get('pin')
-                    check(pin is None or section.get('cover') and side == 0 and (pin == 'spine' and kind != 'grid' or pin == 'wrap' and kind in {'photo', 'rect', 'ellipse', 'line', 'svg'}), 'Неверная привязка к корешку')
+                    check(pin is None or section.get('cover') and (pin == 'spine' and kind != 'grid' or pin == 'wrap' and side == 0 and kind in {'photo', 'rect', 'ellipse', 'line', 'svg'}), 'Неверная привязка к корешку')
                     left, right = (0, page_width) if kind == 'grid' else (-2 * page_width, 2 * page_width) if pin == 'spine' else (0, 2 * page_width) if pin == 'wrap' else (-side * page_width, (2 - side) * page_width)
-                    check(isinstance(b, dict) and number(b.get('x'), left - .01, right) and number(b.get('y'), 0, page_height) and all(number(b.get(k), .1, 2 * max(page_width, page_height)) for k in ('w', 'h')), 'Неверные размеры слоя')
-                    check(b['x'] + b['w'] <= right + .01 and b['y'] + b['h'] <= page_height + .01, 'Слой выходит за разворот')
+                    limit = 2 * max(page_width, page_height)
+                    check(isinstance(b, dict) and number(b.get('x'), left - limit, right) and number(b.get('y'), -limit, page_height) and all(number(b.get(k), .1, limit) for k in ('w', 'h')), 'Неверные размеры слоя')
+                    if kind == 'grid':
+                        check(b['x'] >= left - .01 and b['y'] >= -.01 and b['x'] + b['w'] <= right + .01 and b['y'] + b['h'] <= page_height + .01, 'Виньетка выходит за страницу')
+                    else:
+                        check(b['x'] < right and b['x'] + b['w'] > left and b['y'] < page_height and b['y'] + b['h'] > 0, 'Слой целиком за разворотом')
                     check(number(layer.get('opacity', 100), 0, 100), 'Неверная прозрачность')
                     check(number(layer.get('angle', 0), -180, 180), 'Неверный угол поворота')
                     check(number(layer.get('radius', 0), 0, 100), 'Неверный радиус')

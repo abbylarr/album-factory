@@ -11,7 +11,7 @@ function miniSpread(sp, owner = section()) {
           .filter(l => !l.hidden)
           .map(l => {
             const b = l.box,
-              style = `left:${((l.pin === 'spine' ? width + b.x : b.x) / width) * 100}%;top:${(b.y / height) * 100}%;width:${(b.w / width) * 100}%;height:${(b.h / height) * 100}%;background:${l.fill || 'transparent'};opacity:${(l.opacity ?? 100) / 100};border-radius:${l.type === 'ellipse' ? '50%' : '0'}`;
+              style = `left:${((l.pin === 'spine' && p === sp.pages[0] ? width + b.x : b.x) / width) * 100}%;top:${(b.y / height) * 100}%;width:${(b.w / width) * 100}%;height:${(b.h / height) * 100}%;background:${l.fill || 'transparent'};opacity:${(l.opacity ?? 100) / 100};border-radius:${l.type === 'ellipse' ? '50%' : '0'}`;
             return `<div class="mini-layer" style="${style}">${l.type === 'photo' ? `<img src="${esc(l.dataUrl || planner.placeholderSvg({ id: 's0' }))}" alt="">` : l.type === 'grid' || l.type === 'collage' ? '<div class="mini-grid">' + Array.from({ length: l.type === 'collage' ? 4 : 9 }, () => '<i></i>').join('') + '</div>' : l.type === 'svg' && l.svg ? `<img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(l.svg)}" alt="" style="object-fit:contain">` : l.type === 'text' ? `<span style="font-size:4px">${esc(l.text)}</span>` : ''}</div>`;
           })
           .join('')}</div>`,
