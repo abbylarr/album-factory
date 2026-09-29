@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Проверка макета · Album Factory</title>
+<link rel="icon" href="/static/assets/logo.svg">
+<link rel="stylesheet" href="/static/master-editor.css?v=proof-2">
+<link rel="stylesheet" href="/static/proof-editor.css?v=proof-2">
+<script src="/static/proof-editor.js?v=proof-2" defer></script>
+</head>
+<body>
+<div id="app" class="editor-app proof-app">
+  <header class="editor-header">
+    <a id="back" href="/#orders" class="back-button" title="К заказу" aria-label="К заказу">←</a>
+    <div class="document-title proof-title">
+      <span>Проверка макета</span>
+      <div><strong id="order-title">Загружаем…</strong><span id="doc-state" class="doc-state" hidden></span></div>
+    </div>
+    <div class="save-indicator"><span class="save-state" id="save-state" role="status"></span></div>
+    <div class="header-actions">
+      <button id="undo" class="icon-button" title="Отменить · ⌘Z" aria-label="Отменить" disabled>↶</button>
+      <button id="redo" class="icon-button" title="Вернуть · ⌘⇧Z" aria-label="Вернуть" disabled>↷</button>
+      <div id="mode-switch" class="segments mode-switch" role="group" aria-label="Редакция" hidden>
+        <button type="button" data-mode="work" aria-pressed="true">Рабочая</button>
+        <button type="button" data-mode="published" aria-pressed="false">Опубликованная</button>
+      </div>
+      <a id="pdf" class="header-link" target="_blank" rel="noopener" title="Контрольный PDF выбранного варианта">PDF</a>
+      <a id="print" class="header-link" download title="Файлы для печати">JPEG ↓</a>
+      <button id="publish" class="primary">Опубликовать</button>
+      <details class="file-menu">
+        <summary aria-label="Ещё">•••</summary>
+        <div>
+          <button id="refresh">Обновить из данных заказа</button>
+          <button id="toggle-marks">Скрыть подсветку замечаний</button>
+          <a id="order-link" href="/#orders">Открыть заказ</a>
+        </div>
+      </details>
+    </div>
+  </header>
+  <div class="editor-workspace" id="workspace">
+    <aside class="left-panel">
+      <div class="panel-tabs" role="tablist" aria-label="Навигация">
+        <button class="active" data-left="people" role="tab" aria-selected="true">Люди</button>
+        <button data-left="spreads" role="tab" aria-selected="false">Развороты</button>
+      </div>
+      <div class="panel-body" id="people-panel"></div>
+      <div class="panel-body" id="spreads-panel" hidden></div>
+    </aside>
+    <main class="canvas-main">
+      <div class="canvas-topline">
+        <div class="topline-title"><strong id="spread-title"></strong><span id="spread-label"></span><div id="edit-mode" class="edit-mode"></div></div>
+        <div class="canvas-nav">
+          <button id="show-properties" title="Свойства" aria-label="Свойства">⚙</button>
+          <button id="prev-spread" aria-label="Предыдущий разворот">‹</button>
+          <select id="spread-select" aria-label="Разворот"></select>
+          <button id="next-spread" aria-label="Следующий разворот">›</button>
+          <button id="add-spread" title="Добавить разворот после текущего" aria-label="Добавить разворот">＋</button>
+          <button id="delete-spread" title="Удалить разворот" aria-label="Удалить разворот"><img src="/static/assets/editor/trash.svg" alt=""></button>
+        </div>
+      </div>
+      <div id="stage" class="proof-stage" tabindex="-1"><div id="stage-inner" class="proof-stage-inner"></div></div>
+      <div id="empty" class="proof-empty" hidden></div>
+      <input id="upload-input" type="file" accept="image/jpeg,image/png" multiple hidden>
+      <div class="canvas-bottom proof-bottom">
+        <div class="zoom-controls" role="group" aria-label="Масштаб">
+          <button id="zoom-out" type="button" aria-label="Уменьшить">−</button>
+          <output id="zoom-value">100%</output>
+          <button id="zoom-in" type="button" aria-label="Увеличить">+</button>
+          <button id="zoom-fit" type="button">Весь разворот</button>
+        </div>
+        <div id="review-bar" class="review-bar"></div>
+      </div>
+    </main>
+    <aside id="photo-drawer" class="photo-drawer" aria-label="Фотографии" hidden></aside>
+    <aside class="right-panel">
+      <div class="panel-tabs" role="tablist" aria-label="Панель">
+        <button class="active" data-right="element" role="tab" aria-selected="true">Свойства</button>
+        <button data-right="check" role="tab" aria-selected="false">Проверка <b id="check-count" class="tab-count"></b></button>
+        <button id="close-properties" aria-label="Закрыть свойства">×</button>
+      </div>
+      <div id="inspector"></div>
+    </aside>
+  </div>
+</div>
+<dialog id="publish-dialog" aria-labelledby="publish-title">
+  <form method="dialog">
+    <div class="dialog-heading"><h2 id="publish-title">Опубликовать классу</h2><button value="close" aria-label="Закрыть">×</button></div>
+    <div id="publish-body"></div>
+    <p id="publish-error" class="form-error" role="alert"></p>
+    <div class="dialog-actions"><button value="close" type="submit">Отмена</button><button type="button" id="confirm-publish" class="primary">Опубликовать редакцию</button></div>
+  </form>
+</dialog>
+<dialog id="refresh-dialog" aria-labelledby="refresh-title">
+  <form method="dialog">
+    <div class="dialog-heading"><h2 id="refresh-title">Обновить из данных заказа</h2><button value="close" aria-label="Закрыть">×</button></div>
+    <p>Макет соберётся заново по новым фото, подписям и составу класса. Совместимые ручные правки сохранятся, несовместимые появятся во вкладке «Проверка». Историю отмены после обновления очистим.</p>
+    <p id="refresh-error" class="form-error" role="alert"></p>
+    <div class="dialog-actions"><button value="close" type="submit">Отмена</button><button type="button" id="confirm-refresh" class="primary">Обновить</button></div>
+  </form>
+</dialog>
+<dialog id="spread-dialog" aria-labelledby="spread-dialog-title" class="spread-dialog">
+  <form method="dialog">
+    <div class="dialog-heading"><h2 id="spread-dialog-title">Добавить разворот</h2><button value="close" aria-label="Закрыть">×</button></div>
+    <div id="spread-dialog-body"></div>
+    <p id="spread-error" class="form-error" role="alert"></p>
+    <div class="dialog-actions"><button value="close" type="submit">Отмена</button><button type="button" id="confirm-spread" class="primary">Добавить</button></div>
+  </form>
+</dialog>
+<dialog id="ask-dialog" aria-labelledby="ask-title">
+  <form method="dialog">
+    <div class="dialog-heading"><h2 id="ask-title"></h2><button value="" aria-label="Закрыть">×</button></div>
+    <p id="ask-text"></p>
+    <div class="dialog-actions" id="ask-actions"></div>
+  </form>
+</dialog>
+<div id="toast" class="proof-toast" role="status" aria-live="polite"></div>
+</body>
+</html>

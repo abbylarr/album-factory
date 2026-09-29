@@ -135,7 +135,7 @@ class MvpTests(unittest.TestCase):
             "revision": "rev-pub",
             "spread_size_mm": [200, 100],
             "cover_size_mm": [210, 100],
-            "issues": [{"level": "error", "message": "внутреннее"}],
+            "issues": [{"level": "warning", "message": "внутреннее"}],
             "overrides": {"conflicts": [{"key": "secret"}]},
             "variants": [{"owner": "class", "name": "11А", "sequence": ["cover[class]", "shared"]}],
             "covers": {"class": {"key": "cover[class]", "section": "cover", "elements": [

@@ -599,6 +599,8 @@ def install(app, s):
             if layout is None:
                 raise HTTPException(409, "Сначала создайте макет")
             document = json.loads(layout["document"])
+            if any(issue.get("level") == "error" for issue in document.get("issues") or []):
+                raise HTTPException(409, "Исправьте ошибки макета перед публикацией")
             revision = str(document.get("revision") or hashlib.sha256(layout["document"].encode()).hexdigest()[:12])
             con.execute("INSERT INTO publications VALUES (?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET revision=excluded.revision, document=excluded.document, published_at=excluded.published_at",
                         (order_id, revision, layout["document"], s.now()))

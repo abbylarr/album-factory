@@ -53,3 +53,20 @@
 
 .layout-unprinted{position:absolute;top:0;bottom:0;width:50%;display:grid;place-items:center;background:repeating-linear-gradient(135deg,#f5f3f7 0 6px,#ebe7ef 6px 7px);color:#8d8595;font-size:11px;pointer-events:none}
 .layout-unprinted span{padding:4px 8px;border-radius:6px;background:#ffffffd9}
+
+/* Order tab «Макет»: summary card; the editor itself is proof-editor.html. */
+.layout-summary{padding:34px 36px;background:#fff;border:1px solid #e4e5de;border-radius:15px;max-width:980px}
+.layout-summary-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.layout-summary-head h2{font-size:25px;margin:16px 0 6px}
+.layout-summary-head p{margin:0;font-size:13px}
+.layout-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:28px 0 20px}
+.layout-stats>div{background:#f6f7f2;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.layout-stats strong{font-size:18px;font-weight:600;letter-spacing:-.3px;line-height:1.25}
+.layout-stats strong.error{color:#a14331}
+.layout-stats span{font-size:12px;color:#81827d}
+.layout-stats progress{margin-top:6px}
+.layout-summary>p{font-size:13px;line-height:1.6;max-width:640px}
+.layout-summary-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}
+.layout-summary-actions .error{margin:0}
+@media(max-width:900px){.layout-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.layout-summary{padding:24px 20px}}
+@media(max-width:480px){.layout-stats{grid-template-columns:1fr}.layout-summary-head .primary{width:100%;text-align:center}}
