@@ -30,8 +30,8 @@ function layerMetrics(l) {
 /* Auto text: static text with data chips. The layer keeps one string with {{field}} tokens. */
 let chipRange = null,
   autoTextTimer = 0;
-function chipHtml(field) {
-  return `<span class="text-chip" contenteditable="false" data-field="${esc(field)}">${esc(AutoText.FIELDS[field])}</span>`;
+function chipHtml(field, mods = []) {
+  return `<span class="text-chip" contenteditable="false" data-field="${esc(field)}" data-mods="${esc(mods.join('|'))}">${esc(AutoText.label(field, mods))}</span>`;
 }
 function autoTextField(l) {
   const groups = AutoText.GROUPS.map(
@@ -41,7 +41,7 @@ function autoTextField(l) {
   return `<div class="auto-text-field"><div class="auto-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Текст" spellcheck="false" data-auto-text>${AutoText.parts(
     l.text,
   )
-    .map(part => (part.field ? chipHtml(part.field) : esc(part.text)))
+    .map(part => (part.field ? chipHtml(part.field, part.mods) : esc(part.text)))
     .join(
       '',
     )}</div><button type="button" class="auto-text-add" data-chip-menu aria-haspopup="menu" aria-expanded="false" title="Вставить данные заказа">＋ Данные</button><div class="chip-menu" role="menu" aria-label="Данные заказа" hidden>${groups}</div></div><p class="section-note">Чипы заменяются данными каждого альбома; пустое значение не печатается.</p>`;
@@ -51,7 +51,7 @@ function autoTextValue(box) {
   const walk = node => {
     for (const n of node.childNodes) {
       if (n.nodeType === 3) out += n.nodeValue;
-      else if (n.dataset?.field) out += AutoText.token(n.dataset.field);
+      else if (n.dataset?.field) out += AutoText.token(n.dataset.field, (n.dataset.mods || '').split('|'));
       else if (n.nodeName === 'BR') out += '\n';
       else {
         if (/^(DIV|P)$/.test(n.nodeName) && out && !out.endsWith('\n')) out += '\n';
@@ -115,6 +115,19 @@ function bindAutoText() {
     'pointerdown',
     e => {
       if (!e.target.closest?.('.auto-text-field')) closeChips();
+      if (chipPop && !chipPop.element.contains(e.target) && !e.target.closest?.('[data-auto-text] .text-chip'))
+        closeChipPop();
+    },
+    true,
+  );
+  document.addEventListener(
+    'keydown',
+    e => {
+      if (e.key === 'Escape' && chipPop) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeChipPop();
+      }
     },
     true,
   );
@@ -162,15 +175,124 @@ function bindAutoText() {
         e.stopPropagation();
         item.closest('.chip-menu').hidden = true;
         insertChip(item.dataset.insertChip);
+        return;
+      }
+      const chip = e.target.closest('[data-auto-text] .text-chip');
+      if (chip) {
+        e.stopPropagation();
+        const box = chip.closest('[data-auto-text]'),
+          index = [...box.querySelectorAll('.text-chip')].indexOf(chip);
+        if (chipPop?.index === index) closeChipPop();
+        else openChipPop(index);
       }
     },
     true,
   );
 }
+/* Chip settings: click a chip in the text field to pick the form of its value and the letter case. */
+let chipPop = null;
+function closeChipPop() {
+  if (!chipPop) return;
+  chipPop.element.remove();
+  document.querySelectorAll('[data-auto-text] .text-chip.open').forEach(c => c.classList.remove('open'));
+  chipPop = null;
+}
+function chipAt(index) {
+  return $$('#inspector [data-auto-text] .text-chip')[index] || null;
+}
+function chipPopHtml(field, mods) {
+  const forms = AutoText.FORMS[AutoText.kind(field)] || [],
+    form = forms.find(([id]) => id && mods.includes(id))?.[0] || '',
+    mode = AutoText.CASES.find(([id]) => id && mods.includes(id))?.[0] || '',
+    row = (attr, id, name, note, on, icon = '') =>
+      `<button type="button" class="menu-row${on ? ' on' : ''}" ${attr}="${id}" role="menuitemradio" aria-checked="${on}">${icon}<span>${esc(name)}</span>${note ? `<small>${esc(note)}</small>` : ''}</button>`;
+  return (
+    (forms.length
+      ? `<p class="menu-label">${esc(AutoText.FIELDS[field])}</p>${forms.map(([id, name, note]) => row('data-chip-form', id, name, note, id === form)).join('')}`
+      : '') +
+    `<p class="menu-label">Регистр</p>${AutoText.CASES.map(([id, name, icon]) => row('data-chip-case', id, name, '', id === mode, `<b class="case-glyph" aria-hidden="true">${icon}</b>`)).join('')}`
+  );
+}
+function openChipPop(index) {
+  closeChipPop();
+  const l = selectedLayer(),
+    chip = chipAt(index);
+  if (!l || l.type !== 'text' || !chip) return;
+  const element = document.createElement('div');
+  element.className = 'cell-sources chip-pop';
+  element.setAttribute('role', 'menu');
+  element.setAttribute('aria-label', 'Настройка данных');
+  document.body.append(element);
+  element.addEventListener('pointerdown', e => e.preventDefault());
+  element.addEventListener('click', e => {
+    const form = e.target.closest('[data-chip-form]'),
+      mode = e.target.closest('[data-chip-case]');
+    if (form) setChipMods(chipPop.index, 'form', form.dataset.chipForm);
+    else if (mode) setChipMods(chipPop.index, 'case', mode.dataset.chipCase);
+  });
+  chipPop = { element, index, layerId: l.id };
+  drawChipPop();
+}
+function drawChipPop() {
+  const chip = chipPop && chipAt(chipPop.index);
+  if (!chip || selectedLayer()?.id !== chipPop.layerId) return closeChipPop();
+  const mods = (chip.dataset.mods || '').split('|').filter(Boolean),
+    element = chipPop.element;
+  document.querySelectorAll('[data-auto-text] .text-chip.open').forEach(c => c.classList.remove('open'));
+  chip.classList.add('open');
+  element.innerHTML = chipPopHtml(chip.dataset.field, mods);
+  const rect = chip.getBoundingClientRect(),
+    width = element.offsetWidth,
+    height = element.offsetHeight;
+  element.style.left = clamp(rect.left, 8, innerWidth - width - 8) + 'px';
+  element.style.top =
+    (rect.bottom + 6 + height > innerHeight - 8 ? Math.max(8, rect.top - height - 6) : rect.bottom + 6) + 'px';
+}
+/* One chip's form or case changes; the rest of the text stays as typed. */
+function setChipMods(index, kind, value) {
+  const l = selectedLayer();
+  if (!l || l.type !== 'text') return;
+  clearTimeout(autoTextTimer);
+  if (slide) finishSlide();
+  let seen = -1;
+  const text = AutoText.parts(l.text)
+    .map(part => {
+      if (!part.field) return part.text;
+      if (++seen !== index) return AutoText.token(part.field, part.mods);
+      const forms = (AutoText.FORMS[AutoText.kind(part.field)] || []).map(([id]) => id),
+        cases = AutoText.CASES.map(([id]) => id),
+        drop = kind === 'form' ? forms : cases,
+        form = kind === 'form' ? value : part.mods.find(m => forms.includes(m)) || '',
+        mode = kind === 'case' ? value : part.mods.find(m => cases.includes(m)) || '';
+      return AutoText.token(part.field, [...part.mods.filter(m => !drop.includes(m) && m !== form && m !== mode), form, mode]);
+    })
+    .join('');
+  if (text !== l.text) commit(() => (l.text = text));
+  drawChipPop();
+}
 function textPanel(l) {
   const style = textStyle(l),
     styleName = style?.name || 'Без общего стиля';
-  return `<div class="type-style-row"><div class="type-style-select"><span class="type-label">Общий стиль</span><button type="button" class="type-style-trigger" data-open-style-menu aria-haspopup="dialog" aria-expanded="false" aria-label="Выбрать общий стиль: ${esc(styleName)}"><span>${esc(styleName)}</span><i class="type-chevron" aria-hidden="true"></i></button></div><div class="text-style-actions"><button type="button" data-text-style="create" title="Создать стиль" aria-label="Создать стиль">＋</button>${style ? `<button type="button" data-text-style="rename" title="Переименовать стиль" aria-label="Переименовать стиль">✎</button>` : ''}</div></div>${style ? '<p class="section-note">Изменения применяются ко всем текстам этого стиля.</p>' : ''}<div class="type-font">${fontRow(l)}</div><div class="type-main-row"><div class="type-weight"><select data-prop="bold" aria-label="Начертание"><option value="false" ${!l.bold ? 'selected' : ''}>Обычное</option><option value="true" ${l.bold ? 'selected' : ''}>Жирное</option></select><i class="type-chevron" aria-hidden="true"></i></div>${scrubField('Размер текста', 'fontSize', l.fontSize, 4, 120, 1, '<span class="type-size-icon">A</span>')}</div><div class="type-metrics">${scrubField('Интерлиньяж', 'lineHeight', l.lineHeight ?? 1.25, 0.8, 3, 0.05, '<svg class="type-line-height-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h10M8 17h10M4 5v10M2 7l2-2 2 2M2 13l2 2 2-2"/></svg>')}${scrubField('Интервал', 'letterSpacing', l.letterSpacing ?? 0, -20, 80, 1, '<span class="type-metric-icon">A↔</span>', '%')}${scrubField('Наклон', 'skew', l.skew ?? 0, -30, 30, 1, '<span class="type-metric-icon type-skew-icon">A</span>', '°')}</div><div class="type-align"><span class="type-label">Выравнивание</span>${textAlignBar(l.align)}</div><div class="type-extras">${textStyleBar(l)}</div>${colorControl('Цвет', 'color', l.color || '#333333')}`;
+  return `<div class="type-style-row"><div class="type-style-select"><span class="type-label">Общий стиль</span><button type="button" class="type-style-trigger" data-open-style-menu aria-haspopup="dialog" aria-expanded="false" aria-label="Выбрать общий стиль: ${esc(styleName)}"><span>${esc(styleName)}</span><i class="type-chevron" aria-hidden="true"></i></button></div><div class="text-style-actions"><button type="button" data-text-style="create" title="Создать стиль" aria-label="Создать стиль">＋</button>${style ? `<button type="button" data-text-style="rename" title="Переименовать стиль" aria-label="Переименовать стиль">✎</button>` : ''}</div></div>${style ? '<p class="section-note">Изменения применяются ко всем текстам этого стиля.</p>' : ''}<div class="type-font">${fontRow(l)}</div><div class="type-main-row"><div class="type-weight"><select data-prop="bold" aria-label="Начертание"><option value="false" ${!l.bold ? 'selected' : ''}>Обычное</option><option value="true" ${l.bold ? 'selected' : ''}>Жирное</option></select><i class="type-chevron" aria-hidden="true"></i></div>${scrubField('Размер текста', 'fontSize', l.fontSize, 4, 120, 1, '<span class="type-size-icon">A</span>')}</div><div class="type-metrics">${scrubField('Интерлиньяж', 'lineHeight', l.lineHeight ?? 1.25, 0.8, 3, 0.05, '<svg class="type-line-height-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h10M8 17h10M4 5v10M2 7l2-2 2 2M2 13l2 2 2-2"/></svg>')}${scrubField('Интервал', 'letterSpacing', l.letterSpacing ?? 0, -20, 80, 1, '<span class="type-metric-icon">A↔</span>', '%')}${scrubField('Наклон', 'skew', l.skew ?? 0, -30, 30, 1, '<span class="type-metric-icon type-skew-icon">A</span>', '°')}${l.type === 'text' ? textCaseField(l.textCase) : ''}</div><div class="type-align"><span class="type-label">Выравнивание</span>${l.type === 'text' ? `<div class="type-align-pair">${textAlignBar(l.align)}${textValignBar(l.valign)}</div>` : textAlignBar(l.align)}</div>${l.type === 'text' ? textFitRow(l) : ''}<div class="type-extras">${textStyleBar(l)}</div>${colorControl('Цвет', 'color', l.color || '#333333')}`;
+}
+function textCaseField(value) {
+  return `<div class="type-field text-case-field"><span class="type-label">Регистр</span>${segments(
+    'textCase',
+    value || '',
+    AutoText.CASES.map(([id, name, icon]) => [id, name, `<b class="case-glyph">${icon}</b>`]),
+  )}</div>`;
+}
+function textValignBar(value) {
+  const icon = y =>
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M5 ${y === 'top' ? 4 : y === 'bottom' ? 20 : 12}h14"/><path d="M9 ${{ top: 8, middle: 8, bottom: 11 }[y]}h6M9 ${{ top: 12, middle: 16, bottom: 16 }[y]}h6" opacity=".55"/></svg>`;
+  return segments('valign', value || 'top', [
+    ['top', 'По верхнему краю рамки', icon('top')],
+    ['middle', 'По центру рамки', icon('middle')],
+    ['bottom', 'По нижнему краю рамки', icon('bottom')],
+  ]);
+}
+function textFitRow(l) {
+  return `<div class="text-fit-row"><span class="type-label">Уменьшать, чтобы влезло ${infoTip('Текст не переносится, а уменьшается целиком, пока не влезет в рамку. Новая строка — только там, где нажат Enter.')}</span><button type="button" class="switch${l.fit ? ' on' : ''}" data-choice="fit" aria-pressed="${!!l.fit}" aria-label="Уменьшать, чтобы влезло"></button></div>`;
 }
 function gridTextPanel(l, prefix = '') {
   const prefixed = key => (prefix ? prefix + key[0].toUpperCase() + key.slice(1) : key),
@@ -492,6 +614,9 @@ function applyTextSkew(object, degrees) {
 function applyTextPaint(object, l) {
   if (!object || !l) return;
   applyTextSkew(object, l.skew);
+  object.valign = l.valign || 'top';
+  object.fit = !!l.fit;
+  object.fitBase = (l.fontSize || 12) * 0.3528;
   const width = activeStroke(l),
     align = l.strokeAlign || 'center',
     drawn = align === 'outside' ? width * 2 : width;
@@ -520,7 +645,94 @@ function applyTextPaint(object, l) {
     dirty: true,
     objectCaching: false,
   });
+  object.initDimensions?.();
   object.setCoords?.();
+}
+/* A text layer is a frame of fixed size, as in InDesign: the text lays out inside it and aligns to its top,
+   middle or bottom. With «shrink to fit» explicit lines never wrap and the whole text shrinks by one factor. */
+let frameTextClass = null;
+function FrameText() {
+  if (frameTextClass) return frameTextClass;
+  const U = fabric.controlsUtils;
+  const resize = (axisX, axisY) =>
+    U.wrapWithFireEvent(
+      'resizing',
+      U.wrapWithFixedAnchor((e, t, x, y) => {
+        const target = t.target,
+          p = U.getLocalPoint(t, t.originX, t.originY, x, y),
+          stroke = target.strokeWidth / (target.strokeUniform ? target.scaleX : 1);
+        let changed = false;
+        if (axisX) {
+          const w = Math.max(Math.abs(p.x / target.scaleX) - stroke, 1);
+          if (w !== target.width) {
+            target.set('width', w);
+            changed = true;
+          }
+        }
+        if (axisY) {
+          const h = Math.max(Math.abs(p.y / target.scaleY) - stroke, 1);
+          if (h !== target.height) {
+            target.set('height', h);
+            changed = true;
+          }
+        }
+        return changed;
+      }),
+    );
+  frameTextClass = class extends fabric.Textbox {
+    static createControls() {
+      const controls = { ...fabric.Textbox.createControls().controls };
+      for (const [key, x, y] of [
+        ['mt', 0, 1],
+        ['mb', 0, 1],
+        ['tl', 1, 1],
+        ['tr', 1, 1],
+        ['bl', 1, 1],
+        ['br', 1, 1],
+      ])
+        controls[key] = new fabric.Control({
+          ...controls[key],
+          actionHandler: resize(x, y),
+          actionName: 'resizing',
+          getActionName: () => 'resizing',
+          cursorStyleHandler: U.scaleCursorStyleHandler,
+        });
+      return { controls };
+    }
+    initDimensions() {
+      if (!this.initialized) return super.initDimensions();
+      const width = this.width;
+      if (this.fit && this.fitBase) {
+        this.fontSize = this.fitBase;
+        for (let i = 0; i < 12; i++) {
+          super.initDimensions();
+          this.width = width;
+          const wide = Math.max(1e-3, ...this._textLines.map((_, n) => this.getLineWidth(n))),
+            tall = Math.max(1e-3, this.calcTextHeight()),
+            k = Math.min(1, (width * 0.995) / wide, (this.frameHeight || tall) / tall);
+          if (k >= 1) break;
+          this.fontSize = Math.max(0.5, this.fontSize * Math.min(k, 0.995));
+        }
+      } else {
+        super.initDimensions();
+        this.width = width;
+      }
+      this.contentHeight = this.height;
+      if (this.frameHeight) this.height = this.frameHeight;
+    }
+    _wrapText(lines, desiredWidth) {
+      return super._wrapText(lines, this.fit ? 1e6 : desiredWidth);
+    }
+    _getTopOffset() {
+      const free = this.height - (this.contentHeight ?? this.height);
+      return -this.height / 2 + free * ({ middle: 0.5, bottom: 1 }[this.valign] || 0);
+    }
+    _set(key, value) {
+      if (key === 'height') this.frameHeight = value;
+      return super._set(key, value);
+    }
+  };
+  return frameTextClass;
 }
 function alignmentIcon(type) {
   const paths = {

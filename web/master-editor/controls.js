@@ -118,10 +118,6 @@ const glyph = {
     '<svg viewBox="0 0 24 24"><path d="M5 18 12 6l7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   joinBevel:
     '<svg viewBox="0 0 24 24"><path d="M5 18 12 6l7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="bevel"/></svg>',
-  flipH:
-    '<svg viewBox="0 0 24 24"><path d="M12 4v16M8 8 5 12l3 4M16 8l3 4-3 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  flipV:
-    '<svg viewBox="0 0 24 24"><path d="M4 12h16M8 8 12 5l4 3M8 16l4 3 4-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   link: '<svg viewBox="0 0 24 24"><path d="M10 12h4M8.5 8H7a4 4 0 0 0 0 8h1.5M15.5 8H17a4 4 0 0 1 0 8h-1.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
 };
 function segments(key, value, items) {
@@ -226,16 +222,6 @@ function vectorPanel(l) {
       slider('Сдвиг Y', 'shadow.offsetY', shadow.offsetY || 0, -20, 20, 0.5) +
       slider('Размытие', 'shadow.blur', shadow.blur || 0, 0, 20, 0.5) +
       slider('Сила тени', 'shadow.opacity', shadow.opacity ?? 35, 0, 100, 1);
-  if (svg)
-    body += `<p class="visual-label">Отразить</p><div class="segments">${[
-      ['flipX', 'По горизонтали', glyph.flipH, !!l.flipX],
-      ['flipY', 'По вертикали', glyph.flipV, !!l.flipY],
-    ]
-      .map(
-        ([key, name, icon, on]) =>
-          `<button type="button" data-choice="${key}" data-value="toggle" class="${on ? 'active' : ''}" title="${name}" aria-label="${name}" aria-pressed="${on}">${icon}</button>`,
-      )
-      .join('')}</div>`;
   body += ``;
   return block('Оформление', body);
 }

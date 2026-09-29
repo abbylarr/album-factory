@@ -5896,3 +5896,110 @@ button.block-issue:focus-visible {
   transform: skewX(-13deg);
   font-style: normal;
 }
+/* text lane */
+.rotation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+.rotation-row .compact-number svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+.rotation-row .compact-number input {
+  width: 100%;
+}
+.rotation-actions {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: #f4f4f6;
+}
+.rotation-actions .icon-toggle {
+  width: 30px;
+  height: 30px;
+  background: transparent;
+}
+.rotation-actions .icon-toggle:hover {
+  background: #eae9ee;
+  color: var(--accent);
+}
+.rotation-actions .icon-toggle.active {
+  background: #fff;
+  color: var(--accent);
+  box-shadow: 0 1px 3px #22222214;
+}
+.typography-section .text-case-field .segments {
+  margin: 0;
+}
+.typography-section .text-case-field .segments button {
+  height: 28px;
+}
+.case-glyph {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.type-align-pair {
+  display: grid;
+  grid-template-columns: 4fr 3fr;
+  gap: 6px;
+}
+.text-fit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: -2px 0 10px;
+}
+.text-fit-row .type-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: visible;
+}
+.text-fit-row .info-tip::after {
+  left: auto;
+  right: -40px;
+  width: 190px;
+  transform: none;
+  white-space: normal;
+}
+.text-chip[data-field] {
+  cursor: pointer;
+}
+.text-chip[data-field]:hover,
+.text-chip.open {
+  box-shadow: 0 0 0 1.5px var(--accent) inset;
+}
+.cell-sources.chip-pop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  width: 230px;
+}
+.chip-pop .menu-row {
+  min-height: 30px;
+}
+.chip-pop .menu-row > span {
+  flex: 1;
+}
+.chip-pop .menu-row small {
+  color: #a09aa4;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.chip-pop .menu-row.on small {
+  color: inherit;
+}
+.chip-pop .case-glyph {
+  min-width: 22px;
+  color: #85818b;
+}
+.chip-pop .menu-row.on .case-glyph {
+  color: inherit;
+}

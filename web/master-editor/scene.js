@@ -398,6 +398,8 @@ async function renderScene() {
           originX: 'center',
           originY: 'center',
           angle: l.angle || 0,
+          flipX: !!l.flipX && l.type !== 'grid' && l.type !== 'collage',
+          flipY: !!l.flipY && l.type !== 'grid' && l.type !== 'collage',
           opacity: (l.opacity ?? 100) / 100,
           stroke: l.stroke || '#333333',
           strokeWidth: 0,
@@ -416,9 +418,13 @@ async function renderScene() {
           cornerSize: 7,
         };
       if (l.type === 'text') {
-        object = new fabric.Textbox(planner.resolvedText(l, g), {
+        object = new (FrameText())(AutoText.applyCase(planner.resolvedText(l, g), l.textCase), {
           ...base,
           width: b.w,
+          frameHeight: b.h,
+          valign: l.valign || 'top',
+          fit: !!l.fit,
+          fitBase: l.fontSize * 0.3528,
           fontSize: l.fontSize * 0.3528,
           fontFamily: l.font,
           fill: l.color,
@@ -429,7 +435,7 @@ async function renderScene() {
           fontStyle: l.italic ? 'italic' : 'normal',
           underline: !!l.underline,
           linethrough: !!l.strike,
-          editable: !AutoText.fields(l.text).size && !preview && !l.locked,
+          editable: !AutoText.fields(l.text).size && !l.textCase && !preview && !l.locked,
           splitByGrapheme: false,
         });
         applyTextPaint(object, l);

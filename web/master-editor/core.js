@@ -130,6 +130,7 @@ const textStyleKeys = [
   'lineHeight',
   'letterSpacing',
   'skew',
+  'textCase',
 ];
 function textStyle(layer) {
   return (doc.textStyles || []).find(style => style.id === layer?.styleId);
