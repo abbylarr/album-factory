@@ -671,12 +671,50 @@ function syncSelectionCoords() {
   active.setCoords();
   if (active instanceof fabric.ActiveSelection) active.forEachObject(o => o.setCoords());
 }
+/* Canvas zoom: 2 px per mm reads as 100 %. The buttons walk through round presets, the wheel and pinch zoom by their delta. */
+const ZOOM_MIN = 0.2,
+  ZOOM_MAX = 32,
+  ZOOM_PRESETS = [10, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600];
+let zoomAnimation = 0;
 function updateZoomControls() {
   const zoom = canvas.getZoom();
   $('#zoom-value').textContent = `${Math.round(zoom * 50)}%`;
-  $('#zoom-out').disabled = zoom <= 0.2;
-  $('#zoom-in').disabled = zoom >= 8;
+  $('#zoom-out').disabled = zoom <= ZOOM_MIN + 1e-6;
+  $('#zoom-in').disabled = zoom >= ZOOM_MAX - 1e-6;
   $('#zoom-fit').setAttribute('aria-pressed', zoomMode === 'fit');
+}
+function viewportChanged() {
+  syncSelectionCoords();
+  if (snapMarks.length) renderGuides();
+  placeCollageUi();
+  placePhotoCropUi();
+  updateZoomControls();
+}
+/* Zoom keeping the scene point under `point` (host pixels) in place. */
+function zoomAt(zoom, point) {
+  zoom = clamp(zoom, ZOOM_MIN, ZOOM_MAX);
+  canvas.zoomToPoint(new fabric.Point(point.x, point.y), zoom);
+  zoomMode = zoom / 2;
+  viewportChanged();
+}
+function hostCenter() {
+  const host = $('#canvas-host');
+  return { x: host.clientWidth / 2, y: host.clientHeight / 2 };
+}
+function animateZoom(target, point = hostCenter()) {
+  cancelAnimationFrame(zoomAnimation);
+  const from = canvas.getZoom(),
+    to = clamp(target, ZOOM_MIN, ZOOM_MAX),
+    start = performance.now(),
+    duration = 140;
+  if (Math.abs(to - from) < 1e-6) return;
+  const frame = now => {
+    const t = Math.min(1, (now - start) / duration),
+      eased = 1 - Math.pow(1 - t, 3);
+    zoomAt(from * Math.pow(to / from, eased), point);
+    if (t < 1) zoomAnimation = requestAnimationFrame(frame);
+  };
+  zoomAnimation = requestAnimationFrame(frame);
 }
 function fit() {
   const host = $('#canvas-host'),
@@ -701,16 +739,12 @@ function fit() {
   updateZoomControls();
 }
 function stepZoom(direction) {
-  const current = canvas.getZoom(),
-    zoom = clamp(current * (direction > 0 ? 1.25 : 0.8), 0.2, 8);
-  if (zoom === current) return;
-  const host = $('#canvas-host');
-  canvas.zoomToPoint(new fabric.Point(host.clientWidth / 2, host.clientHeight / 2), zoom);
-  zoomMode = zoom / 2;
-  syncSelectionCoords();
-  placeCollageUi();
-  placePhotoCropUi();
-  updateZoomControls();
+  const percent = canvas.getZoom() * 50,
+    next =
+      direction > 0
+        ? ZOOM_PRESETS.find(p => p > percent * 1.01)
+        : [...ZOOM_PRESETS].reverse().find(p => p < percent / 1.01);
+  if (next) animateZoom(next / 50);
 }
 new ResizeObserver(() => fit()).observe($('#canvas-host'));
 function syncSelection() {

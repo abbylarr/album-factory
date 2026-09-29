@@ -223,26 +223,51 @@ canvas.on('mouse:dblclick', opt => {
     }
   }
 });
+let pinching = false;
+/* Wheel pans; Ctrl/⌘ + wheel and a trackpad pinch (which arrives as Ctrl + wheel) zoom around the cursor in proportion to the delta. */
 canvas.on('mouse:wheel', opt => {
   const e = opt.e;
   e.preventDefault();
   e.stopPropagation();
+  cancelAnimationFrame(zoomAnimation);
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $('#canvas-host').clientHeight : 1;
+  let dx = e.deltaX * unit,
+    dy = e.deltaY * unit;
   if (e.ctrlKey || e.metaKey) {
-    const zoom = clamp(canvas.getZoom() * Math.pow(0.999, e.deltaY), 0.2, 8);
-    canvas.zoomToPoint(new fabric.Point(e.offsetX, e.offsetY), zoom);
-    zoomMode = zoom / 2;
-    updateZoomControls();
-  } else {
-    const v = canvas.viewportTransform;
-    v[4] -= e.deltaX;
-    v[5] -= e.deltaY;
-    canvas.requestRenderAll();
+    if (pinching) return;
+    zoomAt(canvas.getZoom() * Math.exp(-clamp(dy, -30, 30) * 0.01), { x: e.offsetX, y: e.offsetY });
+    return;
   }
-  syncSelectionCoords();
-  if (snapMarks.length) renderGuides();
-  placeCollageUi();
-  placePhotoCropUi();
+  if (e.shiftKey && !dx) {
+    dx = dy;
+    dy = 0;
+  }
+  const v = canvas.viewportTransform;
+  v[4] -= dx;
+  v[5] -= dy;
+  canvas.setViewportTransform(v);
+  viewportChanged();
 });
+/* Safari reports a trackpad pinch as gesture events instead of Ctrl + wheel. */
+{
+  const host = $('#canvas-host');
+  let pinchStart = 0;
+  host.addEventListener('gesturestart', e => {
+    e.preventDefault();
+    cancelAnimationFrame(zoomAnimation);
+    pinching = true;
+    pinchStart = canvas.getZoom();
+  });
+  host.addEventListener('gesturechange', e => {
+    e.preventDefault();
+    const r = host.getBoundingClientRect();
+    zoomAt(pinchStart * e.scale, { x: e.clientX - r.left, y: e.clientY - r.top });
+  });
+  host.addEventListener('gestureend', e => {
+    e.preventDefault();
+    pinching = false;
+  });
+}
 canvas.on('contextmenu', opt => {
   opt.e.preventDefault();
   openObjectMenu(opt.e, opt.target);

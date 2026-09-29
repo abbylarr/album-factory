@@ -637,6 +637,7 @@ $('#close-properties').onclick = () => $('.right-panel').classList.remove('mobil
 $('#zoom-out').onclick = () => stepZoom(-1);
 $('#zoom-in').onclick = () => stepZoom(1);
 $('#zoom-fit').onclick = () => {
+  cancelAnimationFrame(zoomAnimation);
   zoomMode = 'fit';
   fit();
 };
@@ -866,6 +867,12 @@ document.addEventListener('keydown', e => {
     e.shiftKey ? redo() : undo();
     return;
   }
+  if (mod && ['=', '+', '-', '_', '0'].includes(e.key)) {
+    e.preventDefault();
+    if (e.key === '0') $('#zoom-fit').click();
+    else stepZoom(e.key === '-' || e.key === '_' ? -1 : 1);
+    return;
+  }
   if (mod && e.key.toLowerCase() === 'd') {
     e.preventDefault();
     action('duplicate');
@@ -944,8 +951,8 @@ document.addEventListener('keydown', e => {
         .forEach(l => {
           if (e.key === 'ArrowLeft') l.box.x -= step;
           if (e.key === 'ArrowRight') l.box.x += step;
-          if (e.key === 'ArrowUp') l.box.y = clamp(l.box.y - step, 0, pageHeight() - l.box.h);
-          if (e.key === 'ArrowDown') l.box.y = clamp(l.box.y + step, 0, pageHeight() - l.box.h);
+          if (e.key === 'ArrowUp') l.box.y -= step;
+          if (e.key === 'ArrowDown') l.box.y += step;
           settle(l);
         }),
     );
