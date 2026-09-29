@@ -284,6 +284,19 @@ canvas.on('object:resizing', opt => {
   hideVignetteUi();
   onSnap(opt, 'resize');
 });
+/* Shift while rotating steps by 15°, so 45°, 90° and 180° are easy to hit. */
+canvas.on('object:rotating', opt => {
+  hideVignetteUi();
+  hideDragUi();
+  clearGuides();
+  const target = opt.target;
+  if (!opt.e?.shiftKey || !target) return;
+  const angle = Math.round((target.angle || 0) / 15) * 15;
+  if (angle !== target.angle) {
+    target.rotate(angle);
+    target.setCoords();
+  }
+});
 function crossMid(a0, a1, b0, b1, fallback) {
   const from = Math.max(a0, b0),
     to = Math.min(a1, b1);
