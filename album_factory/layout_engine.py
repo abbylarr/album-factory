@@ -107,6 +107,12 @@ class ReportLabMeasurer:
         _, used = self.paragraph(text, font, size, leading, letter=letter).wrap(width * mm, 100000)
         return used / mm
 
+    def width(self, text, font, size, letter=0):
+        """Widest explicit line in mm, letter spacing included; lines are not wrapped."""
+        from reportlab.lib.units import mm
+        name, space = self._font(font), size * float(letter or 0) / 100
+        return max(self._pdfmetrics.stringWidth(line, name, size) + space * len(line) for line in (text or '').split('\n')) / mm
+
     def missing_glyphs(self, text, font):
         face = self._pdfmetrics.getFont(self._font(font)).face
         return {c for c in text if not c.isspace() and ord(c) not in face.charToGlyph}

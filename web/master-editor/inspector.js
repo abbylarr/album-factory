@@ -21,7 +21,7 @@ function renderInspector() {
         )
         .join(
           '',
-        )}</div><div class="field-grid">${number('X', 'box.x', l.box.x, l.type === 'grid' ? 0 : -pageWidth(), l.type === 'grid' ? pageWidth() : 2 * pageWidth())}${number('Y', 'box.y', l.box.y)}</div><div class="field-grid" style="margin-top:8px">${number('Угол °', 'angle', l.angle || 0, -180, 180)}<button data-action="rotate">↻ 90°</button></div>`,
+        )}</div><div class="field-grid">${number('X', 'box.x', l.box.x, l.type === 'grid' ? 0 : -pageWidth(), l.type === 'grid' ? pageWidth() : 2 * pageWidth())}${number('Y', 'box.y', l.box.y)}</div>${rotationRow(l)}`,
     );
     html += block(
       'Размер',
@@ -105,6 +105,15 @@ function renderInspector() {
   inspector.dataset.photoLayer = contentKey;
   inspector.inert = preview;
   $$('[data-inspector]').forEach(b => b.classList.toggle('active', b.dataset.inspector === inspectorTab));
+}
+/* Rotation as in Figma: the angle, then rotate by 90° and mirror. Vignettes and collages are not mirrored. */
+function rotationRow(l) {
+  const icon = d =>
+      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`,
+    flip = !['grid', 'collage'].includes(l.type),
+    button = (attrs, name, d, on) =>
+      `<button type="button" class="icon-toggle${on ? ' active' : ''}" ${attrs} title="${name}" aria-label="${name}"${on == null ? '' : ` aria-pressed="${on}"`}>${icon(d)}</button>`;
+  return `<div class="rotation-row"><label class="compact-number" title="Угол поворота"><span>${icon('M4 19h15M4 19 15 6M11 19a8 8 0 0 0-2.3-5.7')}</span><input aria-label="Угол поворота" data-prop="angle" type="number" value="${round(l.angle || 0)}" min="-180" max="180" step="0.1"><span>°</span></label><div class="rotation-actions">${button('data-action="rotate"', 'Повернуть на 90°', 'M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4')}${flip ? button('data-choice="flipX" data-value="toggle"', 'Отразить по горизонтали', 'M12 3v18M9 7 4 17h5zM15 7l5 10h-5z', !!l.flipX) + button('data-choice="flipY" data-value="toggle"', 'Отразить по вертикали', 'M3 12h18M7 9 17 4v5zM7 15l10 5v-5z', !!l.flipY) : ''}</div></div>`;
 }
 function render() {
   planner = MasterPlanner(doc, view);

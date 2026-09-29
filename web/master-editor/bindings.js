@@ -483,6 +483,7 @@ $('#inspector').onclick = e => {
     if (
       key === 'flipX' ||
       key === 'flipY' ||
+      key === 'fit' ||
       key === 'bold' ||
       key === 'italic' ||
       key === 'underline' ||
