@@ -67,11 +67,15 @@ window.MasterPhotos=(()=>{
     ['allow','Разрешить повторы','Сильный кадр можно поставить несколько раз.',svg(102,23,spread(0,PAIR(0))+spread(35,PAIR(1))+spread(70,PAIR(0)))]];
   function figure(x,base,size,fill='#b9a2cb'){const r=size*.26;return `<circle cx="${x}" cy="${base-size+r}" r="${r}" fill="${fill}"/><rect x="${x-size*.34}" y="${base-size+r*2.15}" width="${size*.68}" height="${size-r*2.15}" rx="${size*.2}" fill="${fill}"/>`;}
   const row=(n,x0,x1,base,size,jitter=0)=>Array.from({length:n},(_,i)=>figure(x0+(n===1?(x1-x0)/2:i*(x1-x0)/(n-1)),base+(jitter&&i%2?jitter:0),size)).join('');
-  const SHOOTS='<g font-size="5" fill="#8f7aa0"><circle cx="46" cy="6" r="2.2" fill="#e6dbef"/><text x="50.5" y="7.7">осень</text><circle cx="46" cy="12" r="2.2" fill="#cfe4ec"/><text x="50.5" y="13.7">спорт</text><circle cx="46" cy="18" r="2.2" fill="#f1e2c6"/><text x="50.5" y="19.7">выпуск</text></g>';
-  const TOGGLES=[['posedFirst','Сначала постановочные','Класс и подгруппы в начале, живые кадры — после.',svg(74,23,spread(0,[[3,4,24,13,'photo']])+`<g transform="translate(0 1)">${row(5,7,24,15.5,6)}</g>`+'<path d="M35 11.5h5m-2-2 2 2-2 2" fill="none" stroke="#b27fd2" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>'+spread(43,[[3,4,24,13,'photo']])+`<g transform="translate(43 1)">${figure(8,14,7)+figure(15,17,5)+figure(22,15,7)}</g>`)],
-    ['mixShoots','Личные развороты вперемешку','На развороте ученика — кадры с разных съёмок.',svg(74,23,spread(0,[[3,3,10,15,'a'],[18,3,9,7,'b'],[18,11,9,7,'c']])+`<g transform="translate(0 1)">${figure(8.5,17,10)}</g>`+SHOOTS)],
-    ['rhythm','Чередовать крупность','Крупный кадр рядом с общими, а не все одинаковые.',svg(74,23,spread(0,[[3,3,11,15,'photo'],[17,3,5,5,'photo'],[23,3,5,5,'photo'],[17,9,11,9,'photo']])+`<g transform="translate(0 1)">${figure(8.5,19,12)}${figure(19.5,8,3)}${figure(25.5,8,3)}${row(3,19.5,26.5,18,3.5)}</g>`)],
-    ['chronology','Общие развороты по съёмкам','Съёмки идут друг за другом, кадры разворота — из одной.',svg(74,23,['a','b','c'].map((f,i)=>spread(i*25,[[2,3,7,14,f],[12,3,6,6,f],[12,11,6,6,f]],20,20)).join(''))]];
+  /* Each arrangement is drawn the same way: two spreads in album order, the rule seen in how they differ. */
+  const NEXT='<path d="M35 11.5h5m-2-2 2 2-2 2" fill="none" stroke="#b27fd2" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>';
+  const pair=(a,b,people='')=>svg(74,23,spread(0,a)+NEXT+spread(43,b)+(people?`<g transform="translate(0 1)">${people}</g>`:''));
+  const shift=(x,body)=>`<g transform="translate(${x} 0)">${body}</g>`;
+  const MOSAIC=f=>[[3,3,10,15,f[0]],[18,3,9,7,f[1]],[18,11,9,7,f[2]]];
+  const TOGGLES=[['posedFirst','Сначала постановочные','Класс и подгруппы в начале, живые кадры — после.',pair([[3,4,24,13,'photo']],[[3,4,24,13,'photo']],row(5,7,24,15.5,6)+shift(43,figure(8,14,7)+figure(15,17,5)+figure(22,15,7)))],
+    ['mixShoots','Личные развороты вперемешку','На развороте ученика — кадры с разных съёмок.',pair(MOSAIC(['a','b','c']),[[3,3,10,7,'c'],[3,11,10,7,'a'],[18,3,9,15,'b']],figure(8.5,17,10)+shift(43,figure(23,17,8)))],
+    ['rhythm','Чередовать крупность','Крупный кадр рядом с общими, а не все одинаковые.',pair([[3,3,10,15,'photo'],[18,3,4,7,'photo'],[23,3,4,7,'photo'],[18,11,4,7,'photo'],[23,11,4,7,'photo']],[[3,3,4,7,'photo'],[8,3,4,7,'photo'],[3,11,9,7,'photo'],[18,3,9,15,'photo']],figure(8.5,17,10)+figure(20.5,9.5,4)+figure(25.5,9.5,4)+row(2,20.5,25.5,17.5,3.5)+shift(43,figure(5.5,9.5,4)+figure(10.5,9.5,4)+row(3,5,11,17.5,3.5)+figure(23,17,10)))],
+    ['chronology','Общие развороты по съёмкам','Съёмки идут друг за другом, кадры разворота — из одной.',pair(MOSAIC(['a','a','a']),MOSAIC(['b','b','b']))]];
   /* A category pictured: how many people, how large and whether they stand in a row or freely. */
   function categoryIcon(f){const people=f.people?.[0],scale=f.scale?.[0],candid=f.style==='candid',j=candid?1.6:0;let body;
     if(people==='none'||scale==='detail')body='<path d="M3 19l7-7 5 4 4-3 8 6z" fill="#cbb4dc"/><circle cx="22" cy="7" r="2.6" fill="#e2cdb0"/>';
