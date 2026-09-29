@@ -61,11 +61,7 @@ function renderInspector() {
         'Страница',
         `<div class="field-grid"><button data-side="0" class="${view.side === 0 ? 'active' : ''}">${cover ? 'Оборотная' : 'Левая'}</button><button data-side="1" class="${view.side === 1 ? 'active' : ''}">${cover ? 'Лицевая' : 'Правая'}</button></div>${colorControl('Фон', 'page.background', page()?.background || '#ffffff')}`,
       ) +
-      (cover ? spinePanel() : '') +
-      block(
-        'Где что настраивается',
-        `<p class="section-note">${cover ? 'Размер обложки, корешок и линии безопасности — в настройках макета.' : 'Как строится блок, для кого он и роли разворотов — в карточке блока слева. Формат, вёрстка книги, линии безопасности и общие фото — в настройках макета.'}</p><button type="button" class="wide" data-open-album="format" style="margin-top:10px">Настройки макета</button>`,
-      );
+      (cover ? spinePanel() : '');
   }
   const inspector = $('#inspector'),
     scrollTop = inspector.scrollTop,

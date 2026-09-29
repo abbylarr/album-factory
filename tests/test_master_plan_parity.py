@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from album_factory.master_layout import flex_frames
-from album_factory.master_plan import list_plan, people
+from album_factory.master_plan import list_plan, people, personal_take
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,6 +34,10 @@ SECTIONS = [
     {'id': 'f', 'target': 1, 'list': {'min': 4, 'max': 12}, 'spreads': [spread('x', 'repeat')]},
     # Only a last spread holds the vignette.
     {'id': 'g', 'target': 1, 'list': {'min': 1, 'max': 12}, 'spreads': [spread('i', 'intro'), spread('z', 'last', True, True)]},
+    # The first part of a split list: stops after two spreads, the rest goes to its continuation.
+    {'id': 'h', 'target': 1, 'limit': 2, 'list': {'min': 4, 'max': 12}, 'spreads': [spread('i', 'intro', False, True), spread('r', 'repeat', True, True), spread('z', 'last', True)]},
+    # A limit shorter than the opening spreads keeps them and one vignette page.
+    {'id': 'k', 'target': 3, 'limit': 1, 'list': {'min': 2, 'max': 8}, 'spreads': [spread('i', 'intro'), spread('r', 'repeat', True), spread('o', 'outro')]},
 ]
 CASES = [(section, n, cap) for section in SECTIONS for n in (0, 1, 5, 12, 22, 37, 80) for cap in (0, 6, 12)]
 ASPECTS = [[1.5], [0.75], [1.5, 1.5], [1.5, 0.66], [0.66, 0.66, 1.5], [1.5, 1.5, 1.5, 1.5], [0.75, 1.33, 1.5, 0.8], [1.5] * 5, [1.2] * 6]
@@ -66,6 +70,21 @@ class PlanParityTest(unittest.TestCase):
                 parts = [p['part'] for s in plan['spreads'] for p in s['pages'] if p['part'] is not None]
                 self.assertEqual(sum(plan['counts'][i] for i in parts), n, section['id'])
                 self.assertNotIn('overflow', plan['issues'])
+
+    def test_split_list_takes_the_first_pages_of_an_even_split(self):
+        part = SECTIONS[7]
+        plan = list_plan(part, 54, 12)  # the whole list: five pages of 11/11/11/11/10; this part has three
+        self.assertEqual(plan['counts'], [11, 11, 11])
+        self.assertEqual(plan['taken'], 33)
+        self.assertEqual(len(plan['spreads']), 2)
+        self.assertEqual(list_plan(part, 30, 12)['taken'], 30, 'a list that fits is not cut')
+        rest = list_plan({key: value for key, value in part.items() if key != 'limit'}, 54 - 33, 12)
+        self.assertEqual(sum(rest['counts']), 21)
+
+    def test_split_personal_parts_take_whole_people(self):
+        cases = [[{'spreads': [{}] * per, **({'limit': limit} if limit else {})}, n] for per in (1, 2, 3) for limit in (0, 1, 4, 10) for n in (0, 1, 7, 30)]
+        js = self.run_js("process.stdout.write(JSON.stringify(input.map(([s,n])=>c.window.MasterPlan.personalTake(s,n))));", cases)
+        self.assertEqual([personal_take(s, n) for s, n in cases], js)
 
     def test_last_spread_replaces_a_half_filled_one(self):
         plan = list_plan({**SECTIONS[0], 'target': 1}, 30, 12)  # three pages of ten: one full spread, then the last spread

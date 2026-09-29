@@ -4,7 +4,7 @@ import math
 import re
 from itertools import permutations
 from .layout_engine import canonical_hash
-from .master_plan import ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people
+from .master_plan import ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people, personal_take
 from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, categories_of, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
 from . import auto_text
@@ -228,21 +228,41 @@ def list_capacity(section):
     return min(max((n for n in range(1, int(settings.get('max', 12)) + 1) if geometry(n, l)), default=0) for l in grids)
 
 
-def blocks_pages(section, snapshot, owner, issue):
-    """Pages of one block for the album of ``owner`` (rulesVersion 2): (page, person, records, layout_count)."""
+def blocks_pages(section, snapshot, owner, issue, lists=None):
+    """Pages of one block for the album of ``owner`` (rulesVersion 2): (page, person, records, layout_count).
+
+    ``lists`` carries split lists from block to block: list block id → (its people, how many are placed by its end).
+    A block that continues another takes the people from where that one stopped."""
+    lists = {} if lists is None else lists
     pages = {p['id']: p for s in section['spreads'] for p in s['pages']}
     if section.get('cover') or section['kind'] == 'fixed':
         return [(p, None, None, 0) for s in section['spreads'] for p in s['pages']]
+    start, source = 0, section.get('continues')
+    if source:
+        if source not in lists:
+            issue(PLAN_ISSUES['parts-order'][0], section['id'], PLAN_ISSUES['parts-order'][1])
+            return []
+        records, start = lists[source]
     if section['kind'] == 'repeat':
         by_id = {s['id']: s for s in snapshot['students']}
-        ids = block_people(section, [s['id'] for s in snapshot['students']], owner['id'] if owner else None)
+        if not source:
+            records = block_people(section, [s['id'] for s in snapshot['students']], owner['id'] if owner else None)
+        ids = records[start:start + personal_take(section, len(records) - start)]
+        lists[section['id']] = (records, start + len(ids))
         return [(p, by_id[i], None, 0) for i in ids for s in section['spreads'] for p in s['pages']]
     settings = section['list']
-    records = snapshot[settings['source']][:]
-    if settings['source'] == 'teachers' and settings.get('excludeLead') and any(
-            l['type'] == 'photo' and not l.get('hidden') and l['source'] == 'lead' for p in pages.values() for l in p['layers']):
-        records = records[1:]
-    plan = list_plan(section, len(records), list_capacity(section))
+    if not source:
+        records = snapshot[settings['source']][:]
+        if settings['source'] == 'teachers' and settings.get('excludeLead') and any(
+                l['type'] == 'photo' and not l.get('hidden') and l['source'] == 'lead' for p in pages.values() for l in p['layers']):
+            records = records[1:]
+    rest = records[start:]
+    if source and not rest:
+        lists[section['id']] = (records, start)
+        return []
+    plan = list_plan(section, len(rest), list_capacity(section))
+    lists[section['id']] = (records, start + plan['taken'])
+    records = rest
     for code in plan['issues']:
         level, message = PLAN_ISSUES[code]
         if code == 'below-min' and settings.get('strictMin'):
@@ -634,9 +654,9 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                     place(sequence, key, value.get('after'), owner_key)
     for owner in owners:
         owner_key = 'student:'+owner['id']; group = {}; sequence=[]; counter=[0]
-        planned = []
+        planned, lists = [], {}
         for section in master['sections']:
-            pages = blocks_pages(section,snapshot,owner,issue) if v2 else pages_for(section,master,snapshot,owner,issue)
+            pages = blocks_pages(section,snapshot,owner,issue,lists) if v2 else pages_for(section,master,snapshot,owner,issue)
             if len(pages)%2:
                 pages.append((None,None,None,0))
             if len(pages)>2000:

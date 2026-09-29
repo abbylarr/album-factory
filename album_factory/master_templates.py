@@ -193,6 +193,18 @@ def validate(document):
                 check(sum(s.get('role') == 'last' for s in spreads if isinstance(s, dict)) <= 1, 'В блоке может быть один последний неполный разворот')
             if section['kind'] == 'repeat':
                 check(section.get('people', 'all') in {'all', 'others', 'owner', 'off'}, 'Неверный выбор, для кого личные развороты')
+            # A split block: the continuation names another block of the same kind and people; only a continued block has a limit.
+            # Order is not checked here: a continuation dragged above its start is reported when the album is built.
+            if 'continues' in section:
+                start = next((s for s in sections if s is not section and isinstance(s, dict) and s.get('id') == section['continues']), None)
+                same = start is not None and start.get('kind') == section['kind'] and (
+                    section['kind'] == 'flow' and (start.get('list') or {}).get('source') == (block_list or {}).get('source')
+                    or section['kind'] == 'repeat' and start.get('people', 'all') == section.get('people', 'all') in {'all', 'others'})
+                check(same, 'Продолжение ссылается на неверный блок')
+                check(sum(isinstance(s, dict) and s.get('continues') == section['continues'] for s in sections) == 1, 'У блока может быть одно продолжение')
+            if 'limit' in section:
+                check(isinstance(section['limit'], int) and not isinstance(section['limit'], bool) and 1 <= section['limit'] <= 100, 'Неверное число разворотов части')
+                check(any(isinstance(s, dict) and s.get('continues') == section.get('id') for s in sections), 'Ограничение разворотов нужно только блоку с продолжением')
         grid_sources = set()
         for spread in spreads:
             check(isinstance(spread, dict), 'Неверный разворот'); identity(spread)

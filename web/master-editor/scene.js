@@ -782,13 +782,10 @@ canvas.on('selection:cleared', () => {
     placeCollageUi();
   }
 });
-/* The cover unfolds as back · spine · front; the spine width follows the book's volume and sheet thickness (or is fixed without a thickness). The canvas shows the test class book, or the volume picked in the cover panel. */
+/* The cover unfolds as back · spine · front; the spine width follows the book's volume and sheet thickness (or is fixed without a thickness). The canvas shows a book of the design's own spreads, or the volume picked in the cover panel. */
 function editorVolume() {
   const spreads =
-    view.coverSpreads ||
-    plans
-      .filter(p => !doc.sections.find(s => s.id === p.sectionId)?.cover)
-      .reduce((n, p) => n + p.spreads, 0);
+    view.coverSpreads || doc.sections.filter(s => !s.cover).reduce((n, s) => n + s.spreads.length, 0);
   return { spreads, pages: 2 * spreads - (doc.layout === 'book' && spreads ? 2 : 0) };
 }
 const SPINE_BOARD = 3.5,

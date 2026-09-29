@@ -15,33 +15,60 @@ let planning=[];
   function nameLines(name,width,fontSize,font,style){measure.font=`${style?.italic?'italic ':''}${style?.bold?'700 ':''}${fontSize*96/72}px "${font||'Arial'}"`;const widthPx=width*96/25.4,lines=[];let current='';for(const word of name.split(' ')){if(measure.measureText(word).width>widthPx)return null;const next=current?current+' '+word:word;if(measure.measureText(next).width>widthPx){lines.push(current);current=word}else current=next;}if(current)lines.push(current);return lines;}
   /* Cards that fit on the tightest vignette of a list block. */
   function listCapacity(section){const list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},grids=templatePages(section).flatMap(p=>p.layers.filter(l=>l.type==='grid'));return grids.length?Math.min(...grids.map(l=>capacity({...l,max:list.max}))):0;}
-  const PLAN_TEXT={'no-grid':['warning','В блоке «по списку» нет виньетки — развороты выводятся по одному разу.'],'no-fit':['error','Карточки не помещаются при заданной ширине фото и отступах.'],'no-repeat':['error','Список не помещается: добавьте разворот с ролью «Повторяемый».'],'half':['warning','Список закончился на середине разворота — добавьте шаблон «Последний неполный».'],'below-min':['warning','На странице меньше карточек, чем минимум блока.'],'overflow':['error','Карточки не помещаются на страницу.']};
-  function planSection(section){const original=templatePages(section),issues=[];let generated=[];
+  const PLAN_TEXT={'no-grid':['warning','В блоке «по списку» нет виньетки — развороты выводятся по одному разу.'],'no-fit':['error','Карточки не помещаются при заданной ширине фото и отступах.'],'no-repeat':['error','Список не помещается: добавьте разворот с ролью «Повторяемый».'],'half':['warning','Список закончился на середине разворота — добавьте шаблон «Последний неполный».'],'below-min':['warning','На странице меньше карточек, чем минимум блока.'],'overflow':['error','Карточки не помещаются на страницу.'],'parts-order':['error','Продолжение списка стоит выше его начала — перетащите его ниже.']};
+  /* Pages of a list block on the sample class. lists carries split blocks from part to part: block id → {everyone, end}. */
+  function listPages(section,lists,issues){
+    const original=templatePages(section),list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},source=list.source,grids=original.flatMap(p=>p.layers.filter(l=>l.type==='grid')),settings={...(grids[0]||{}),...list},generated=[];
+    let everyone,start=0;
+    if(section.continues){
+      if(!lists[section.continues]){issues.push({severity:'error',text:PLAN_TEXT['parts-order'][1]});return generated;}
+      ({everyone,end:start}=lists[section.continues]);
+    }else everyone=people(source).filter(person=>!(source==='teachers'&&list.excludeLead&&original.some(p=>p.layers.some(item=>item.type==='photo'&&!item.hidden&&item.source==='lead'))&&person.id==='t0'));
+    const rest=everyone.slice(start);
+    if(section.continues&&!rest.length){lists[section.id]={everyone,end:start};return generated;}
+    if(list.min>list.max)issues.push({severity:'error',text:'Минимум карточек больше максимума.'});
+    if(grids[0]&&settings.minFontSize>settings.fontSize)issues.push({severity:'error',text:'Минимальный кегль больше основного.'});
+    const cap=listCapacity(section),result=MasterPlan.listPlan(section,rest.length,cap),counts=result.counts,layoutCount=Math.max(0,...counts);
+    lists[section.id]={everyone,end:start+result.taken};
+    if(cap&&cap<list.max)issues.push({severity:'warning',text:`По размерам фото на страницу помещается ${cap} вместо максимума ${list.max}.`});
+    for(const code of result.issues){const [level,text]=PLAN_TEXT[code];issues.push({severity:code==='below-min'&&list.strictMin?'error':level,text});}
+    if(rest.some(person=>person.missing))issues.push({severity:'error',text:'У участника отсутствует обязательный портрет.'});
+    const chunks=[];let offset=0;for(const count of counts){chunks.push(rest.slice(offset,offset+count));offset+=count;}
+    const layout=layoutCount&&grids[0]?gridGeometry(layoutCount,settings):null;let actualFont=settings.fontSize;
+    if(layout){const fits=size=>rest.every(person=>{const lines=nameLines(person.name,layout.cellW*.97,size,settings.font,settings);return lines&&lines.length<=2;});while(actualFont>settings.minFontSize&&!fits(actualFont))actualFont=Math.max(settings.minFontSize,actualFont-.5);if(!fits(actualFont))issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
+    for(const spread of result.spreads)for(const item of spread.pages){const template=getTemplatePage(item.page),grid=template.layers.some(l=>l.type==='grid');generated.push(item.part==null?{templateId:item.page,records:grid?[]:null,source:grid?source:'fixed',role:spread.role,actualFont,layoutCount}:{templateId:item.page,records:chunks[item.part],source,actualFont,layoutCount,part:item.part+1,parts:counts.length,role:spread.role});}
+    return generated;
+  }
+  function planSection(section,lists={}){const original=templatePages(section),issues=[];let generated=[];
     if(section.cover||section.kind==='fixed')generated=original.map(template=>({templateId:template.id,records:null,source:'fixed'}));
     else if(section.kind==='repeat'){
-      const ids=MasterPlan.people(section,people('students').map(person=>person.id),view.owner);
+      const from=section.continues?lists[section.continues]:null;
+      if(section.continues&&!from)issues.push({severity:'error',text:PLAN_TEXT['parts-order'][1]});
+      const everyone=from?from.everyone:section.continues?[]:MasterPlan.people(section,people('students').map(person=>person.id),view.owner),start=from?from.end:0;
+      const ids=everyone.slice(start,start+MasterPlan.personalTake(section,everyone.length-start));
+      lists[section.id]={everyone,end:start+ids.length};
       ids.forEach(personId=>original.forEach(template=>generated.push({templateId:template.id,personId,records:null,source:'repeat'})));
-    }else{
-      const list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},source=list.source,grids=original.flatMap(p=>p.layers.filter(l=>l.type==='grid')),settings={...(grids[0]||{}),...list};
-      const everyone=people(source).filter(person=>!(source==='teachers'&&list.excludeLead&&original.some(p=>p.layers.some(item=>item.type==='photo'&&!item.hidden&&item.source==='lead'))&&person.id==='t0'));
-      if(list.min>list.max)issues.push({severity:'error',text:'Минимум карточек больше максимума.'});
-      if(grids[0]&&settings.minFontSize>settings.fontSize)issues.push({severity:'error',text:'Минимальный кегль больше основного.'});
-      const cap=listCapacity(section),result=MasterPlan.listPlan(section,everyone.length,cap),counts=result.counts,layoutCount=Math.max(0,...counts);
-      if(cap&&cap<list.max)issues.push({severity:'warning',text:`По размерам фото на страницу помещается ${cap} вместо максимума ${list.max}.`});
-      for(const code of result.issues){const [level,text]=PLAN_TEXT[code];issues.push({severity:code==='below-min'&&list.strictMin?'error':level,text});}
-      if(everyone.some(person=>person.missing))issues.push({severity:'error',text:'У участника отсутствует обязательный портрет.'});
-      const chunks=[];let offset=0;for(const count of counts){chunks.push(everyone.slice(offset,offset+count));offset+=count;}
-      const layout=layoutCount&&grids[0]?gridGeometry(layoutCount,settings):null;let actualFont=settings.fontSize;
-      if(layout){const fits=size=>everyone.every(person=>{const lines=nameLines(person.name,layout.cellW*.97,size,settings.font,settings);return lines&&lines.length<=2;});while(actualFont>settings.minFontSize&&!fits(actualFont))actualFont=Math.max(settings.minFontSize,actualFont-.5);if(!fits(actualFont))issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
-      for(const spread of result.spreads)for(const item of spread.pages){const template=getTemplatePage(item.page),grid=template.layers.some(l=>l.type==='grid');generated.push(item.part==null?{templateId:item.page,records:grid?[]:null,source:grid?source:'fixed',role:spread.role,actualFont,layoutCount}:{templateId:item.page,records:chunks[item.part],source,actualFont,layoutCount,part:item.part+1,parts:counts.length,role:spread.role});}
-    }
+    }else generated=listPages(section,lists,issues);
     const checked=new Set();for(const generatedPage of generated){const template=getTemplatePage(generatedPage.templateId);for(const item of template?.layers||[]){const checkKey=item.id+(item.source==='item'?':'+generatedPage.personId:'');if(item.type!=='photo'||item.hidden||checked.has(checkKey))continue;checked.add(checkKey);if(item.source==='custom'&&!item.dataUrl)issues.push({severity:'error',text:`«${item.name}»: загруженная фотография не выбрана.`});if(['lead','owner','item'].includes(item.source)&&(!photoPerson(item.source,generatedPage.personId)||photoPerson(item.source,generatedPage.personId).missing))issues.push({severity:'error',text:`«${item.name}»: источник фотографии пуст.`});}}
     if(generated.length%2)generated.push({templateId:null,records:null,source:'padding'});
     return {sectionId:section.id,pages:generated,spreads:generated.length/2,issues};
   }
+  /* What needs fixing in the block itself, whatever class it is built for: only this shows in the block list and settings. */
+  function designIssues(section){
+    const issues=[],add=(severity,text)=>issues.push({severity,text}),pages=templatePages(section);
+    if(!section.cover&&section.kind==='flow'){
+      const list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},grids=pages.flatMap(p=>p.layers.filter(l=>l.type==='grid'));
+      if(list.min>list.max)add('error','Минимум карточек больше максимума.');
+      if(!grids.length)add(...PLAN_TEXT['no-grid']);
+      else{const cap=listCapacity(section);if(!cap)add(...PLAN_TEXT['no-fit']);else if(cap<list.max)add('warning',`На страницу помещается ${cap}, а не ${list.max}. Уменьшите фото или отступы.`);if(grids.some(g=>g.minFontSize>g.fontSize))add('error','Минимальный кегль больше основного.');}
+    }
+    if(section.continues&&documentModel.sections.findIndex(s=>s.id===section.continues)>documentModel.sections.indexOf(section))add(...PLAN_TEXT['parts-order']);
+    for(const item of pages.flatMap(p=>p.layers))if(item.type==='photo'&&!item.hidden&&item.source==='custom'&&!item.dataUrl)add('error',`«${item.name}»: загруженная фотография не выбрана.`);
+    return issues;
+  }
   /* In a book the first inner page stands alone on the right and the last one on the left: those pages are not printed. */
   function markBook(planning){if(documentModel.layout!=='book')return;const inner=planning.filter(p=>!getSection(p.sectionId)?.cover&&p.pages.length);if(!inner.length)return;inner[0].pages[0].blank=true;inner.at(-1).pages.at(-1).blank=true;}
-  function plan(){planning=documentModel.sections.map(planSection);markBook(planning);return planning;}
+  function plan(){const lists={};planning=documentModel.sections.map(section=>planSection(section,lists));markBook(planning);return planning;}
   function sectionPlan(key){return planning.find(p=>p.sectionId===key);}
   function currentPagePlan(){return sectionPlan(view.section)?.pages[view.spread*2+view.side];}
   function currentTemplatePage(){return getTemplatePage(currentPagePlan()?.templateId);}
@@ -54,5 +81,5 @@ let planning=[];
   const TEXT_SAMPLES={'owner.quote':'Цитата владельца альбома','item.quote':'Цитата героя разворота','lead.subject':'Русский язык','class':'11 «А»','year':'2026','school':{full:'МБОУ «Средняя общеобразовательная школа № 5»',short:'Школа № 5'},'city':'Казань','shoot.title':'Никольская сопка','shoot.date':'27.09.2020'};
   function resolvedText(item,generated){return AutoText.resolve(item.text,field=>{if(field.endsWith('.name')){const person=photoPerson(field.split('.')[0],generated.personId);if(!person)return 'Нет данных';const words=person.name.split(' ');return words.length>2?{first:words[0],middle:words[1],last:words.slice(2).join(' ')}:{first:words[0],middle:'',last:words.slice(1).join(' ')};}return TEXT_SAMPLES[field];});}
 
-return {plan,people,gridGeometry,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
+return {plan,designIssues,people,gridGeometry,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
 };

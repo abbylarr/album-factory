@@ -22,32 +22,23 @@ function renderNavigation() {
   hideIssues();
   const sec = section();
   let order = 0;
-  const focus = document.activeElement?.closest?.('#sections') ? document.activeElement : null,
-    focusKey = focus
-      ? focus.dataset.blockNum
-        ? `[data-block-num="${focus.dataset.blockNum}"]`
-        : focus.dataset.testCount
-          ? `[data-test-count="${focus.dataset.testCount}"]`
-          : focus.dataset.roleSpread
-            ? `[data-role-spread="${focus.dataset.roleSpread}"]`
-            : null
-      : null,
-    cards = [];
+  const cards = [];
   for (const s of doc.sections) {
-    const p = plans.find(p => p.sectionId === s.id),
-      n = s.cover ? 0 : ++order,
-      issues = p?.issues || [],
+    const n = s.cover ? 0 : ++order,
+      issues = s.cover ? [] : planner.designIssues(s),
       errors = issues.filter(i => i.severity === 'error').length,
       mark = issues.length
         ? `<button type="button" class="block-issue ${errors ? 'error' : 'warning'}" data-block-issues aria-label="${esc((errors ? 'Есть ошибки: ' : 'Есть предупреждения: ') + issues.map(i => i.text).join(' '))}">${errors ? '!' : '•'}</button>`
-        : '';
+        : '',
+      actions =
+        s.cover || preview
+          ? ''
+          : '<button type="button" class="section-more section-gear" data-block-settings title="Настройки блока" aria-label="Настройки блока"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 6h9M15 6h2M3 14h2M8 14h9"/><circle cx="13.5" cy="6" r="1.8"/><circle cx="6.5" cy="14" r="1.8"/></svg></button><button type="button" class="section-more" data-block-menu-open title="Действия с блоком" aria-label="Действия с блоком" aria-haspopup="menu"><svg viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="9" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="14" cy="9" r="1.3"/></svg></button>';
     cards.push(
-      `<li class="section-card ${s.id === sec.id ? 'active' : ''}${s.id === sec.id && !s.cover && !preview ? ' open' : ''}" data-section="${s.id}" role="button" tabindex="0" aria-label="${esc(s.name)}"${s.cover ? '' : ` aria-expanded="${s.id === sec.id}"`}${s.cover || preview ? '' : ' draggable="true" title="Перетащите, чтобы изменить порядок"'}>${miniSpread(s.spreads[0], s)}<div class="section-caption"><span class="section-name">${s.cover ? '' : `<b class="section-index" aria-hidden="true">${n}</b>`}<span class="section-title">${esc(s.name)}</span></span><small>${p?.spreads ?? 0} разв.</small>${s.cover || preview ? '' : '<button type="button" class="section-more" data-block-menu-open title="Действия с блоком" aria-label="Действия с блоком" aria-haspopup="menu"><svg viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="9" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="14" cy="9" r="1.3"/></svg></button>'}</div><div class="section-rule"><span>${esc(blockSummary(s))}</span>${mark}</div></li>`,
+      `<li class="section-card ${s.id === sec.id ? 'active' : ''}" data-section="${s.id}" role="button" tabindex="0" aria-label="${esc(s.name)}"${s.cover || preview ? '' : ' draggable="true" title="Перетащите, чтобы изменить порядок"'}>${miniSpread(s.spreads[0], s)}<div class="section-caption"><span class="section-name">${s.cover ? '' : `<b class="section-index" aria-hidden="true">${n}</b>`}<span class="section-title">${esc(s.name)}</span></span><small>${s.spreads.length} разв.</small>${actions}</div><div class="section-rule"><span>${esc(blockSummary(s))}</span>${mark}</div></li>`,
     );
-    if (s.id === sec.id && !s.cover && !preview) cards.push(blockSettings(s, p));
   }
   $('#sections').innerHTML = cards.join('');
-  if (focusKey) $('#sections').querySelector(focusKey)?.focus();
   $('#album-settings').title = `Настройки макета · ${albumSummary()}`;
   $('#section-title').textContent = sec.name;
   $('#add-spread').disabled = !!sec.cover;
@@ -67,6 +58,7 @@ function renderNavigation() {
   $('#prev-spread').disabled = view.spread === 0;
   $('#next-spread').disabled = view.spread >= count - 1;
   $('#delete-spread').disabled = !!sec.cover || sec.spreads.length <= 1;
+  renderBlockSettings();
 }
 function field(label, key, value, type = 'number', attrs = '') {
   return `<label>${label}<input data-prop="${key}" type="${type}" value="${esc(type === 'number' ? round(value || 0) : value || '')}" ${attrs}></label>`;
@@ -77,14 +69,13 @@ function number(label, key, value, min = 0, max = pageHeight()) {
 function select(label, key, value, options) {
   return `<label>${label}<select data-prop="${key}">${options.map(([k, n]) => `<option value="${k}" ${value === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`;
 }
-/* Cover spine: its width for the shown volume; the volume can be changed to see a thin and a thick book. */
+/* Cover spine: with a sheet thickness it grows with the book; the canvas shows the design's own volume until another is picked. */
 function spinePanel() {
-  const v = editorVolume(),
-    auto = !view.coverSpreads,
-    t = doc.sheetThickness;
+  if (!doc.sheetThickness) return '';
+  const v = editorVolume();
   return block(
     'Корешок',
-    `<div class="safety-summary spine-rows"><div>Ширина${t ? ` <span class="spine-hint">· лист ${mmText(t)} мм</span>` : ''}<strong>${round(coverSpine())} мм</strong></div>${t ? `<div>Книга на<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${v.spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.</div>` : ''}</div><p class="section-note">${t ? (auto ? 'Как у тестового класса.' : '<button type="button" class="link-button" data-cover-volume="auto">Вернуть как у тестового класса</button>') : 'Фиксированный, задаётся в линиях безопасности. <button type="button" class="link-button" data-open-album="format">Считать по толщине листа</button>'}</p>`,
+    `<div class="safety-summary spine-rows"><div>Книга на<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${v.spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.${infoTip('Только чтобы посмотреть обложку на тонкой и толстой книге. В заказе корешок посчитается по числу разворотов.')}</div></div>`,
   );
 }
 function block(title, body) {
