@@ -7,6 +7,16 @@ from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, entries_from, fit, resolve
 from .svg_draw import present_svg
 
 
+ORDER = ('photo', 'crop', 'text', 'hide')
+_OWNER = re.compile(r'\[student:[^\]]*\]')
+
+
+def owner_wildcard(key):
+    """Key of the same element in every album variant: only the owner of the spread is replaced."""
+    spread, sep, rest = key.partition('/')
+    return _OWNER.sub('[*]', spread) + sep + rest
+
+
 def collage_frames(layer):
     """Leaf rectangles inside a collage. Coordinates are local to the collage box."""
     box = layer['box']
@@ -162,8 +172,37 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         if italic: return base+'-italic'
         return base
     applied, conflicts = [], []
-    overrides_by_key = {o['key']:o for o in overrides}
+    overrides_by_key = {}
+    for override in overrides:
+        overrides_by_key.setdefault(override['key'], []).append(override)
     found = set()
+    shared_bases = {}
+    def apply_override(e, override, shared):
+        """One manual edit on a compiled element. Returns a conflict reason or None."""
+        base = e.get('shared_base') if shared else e['base']
+        kind, value = override['type'], override.get('value')
+        if override.get('base') != base:
+            return 'Исходный элемент изменился'
+        if kind == 'text' and e['type'] == 'text' and isinstance(value, str):
+            e['text'] = value
+        elif kind == 'photo' and e['type'] == 'photo' and value in snapshot['photos']:
+            e['photo'] = value; e['crop'] = crop(value, e['box'])
+        elif kind == 'crop' and e['type'] == 'photo' and e.get('photo') and isinstance(value, dict):
+            if value.get('photo') != e['photo']:
+                return 'Фото в рамке изменилось, кадр не применён'
+            e['crop'] = manual_crop(e['photo'], e['box'], value['rect'])
+        elif kind == 'hide' and e['type'] in ('text', 'photo'):
+            e['hidden'] = True
+        else:
+            return 'Правка не подходит элементу'
+        return None
+    def manual_crop(photo, box, rect):
+        meta = snapshot['photos'][photo]; w, h = meta['width'], meta['height']
+        x, y, cw = (float(v) for v in rect[:3])
+        aspect = box[2] / box[3]
+        crop_w = min(cw * w, h * aspect); crop_h = crop_w / aspect
+        left = min(max(x * w, 0), w - crop_w); top = min(max(y * h, 0), h - crop_h)
+        return [round(left, 2), round(top, 2), round(crop_w, 2), round(crop_h, 2)]
     def slot_for(key, spread_key, bounds, pick, section, owner, item):
         c = resolve(pick)
         target = owner['id'] if c['include'] == 'owner' else item['id'] if c['include'] == 'item' and item else None
@@ -199,18 +238,32 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                         finish(e)
                 def finish(e):
                     e['base']=canonical_hash(e)
-                    override=overrides_by_key.get(e['key'])
-                    if override:
-                        found.add(e['key'])
-                        if override.get('base')==e['base'] and override['type']==e['type']:
-                            if e['type']=='text': e['text']=override['value']
-                            elif override['value'] in snapshot['photos']:
-                                e['photo']=override['value']; e['crop']=crop(e['photo'],e['box'])
-                            applied.append(e['key'])
+                    wild=owner_wildcard(e['key'])
+                    if wild!=e['key']:
+                        # Common spreads compile to the same element for every owner; a shared
+                        # fingerprint lets one edit apply to all variants at once.
+                        e['shared_base']=canonical_hash({**e,'base':None,'key':wild})
+                        shared_bases.setdefault(wild,[]).append(e)
+                    exact=overrides_by_key.get(e['key'],[])
+                    kinds={o['type'] for o in exact}
+                    chosen=[(o,False) for o in exact]+[(o,True) for o in overrides_by_key.get(wild,[]) if wild!=e['key'] and o['type'] not in kinds]
+                    chosen.sort(key=lambda item: ORDER.index(item[0]['type']) if item[0]['type'] in ORDER else len(ORDER))
+                    for override,shared in chosen:
+                        found.add(override['key'])
+                        reason=apply_override(e,override,shared)
+                        if reason:
+                            conflicts.append({'key':override['key'],'type':override['type'],'reason':reason,'target':e['key']})
                         else:
-                            conflicts.append({'key':e['key'],'reason':'Исходный элемент изменился'})
+                            applied.append(e['key'])
+                            e.setdefault('overridden',[]).append({'type':override['type'],'scope':'all' if shared else 'variant'})
+                    if e.get('hidden'):
+                        return
                     if e['type']=='photo' and not e['photo']:
                         issue('error',e['key'],'Не выбрано обязательное фото')
+                    if e['type']=='photo' and e['photo'] and e.get('overridden') and e.get('crop'):
+                        dpi=e['crop'][2]/(e['box'][2]/25.4)
+                        if dpi<GOOD_DPI:
+                            issue('warning',e['key'],f'После правки разрешение около {math.floor(dpi)} dpi — ниже {GOOD_DPI}')
                     if e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
                         issue('error',e['key'],'Текст выходит за границы рамки')
                 for side,(page, item, records, layout_count) in enumerate(pages[index:index+2]):
@@ -344,7 +397,13 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     for photo in report['unplaced']:
         issue('warning', 'must:' + photo, 'Обязательное фото не поместилось ни в один слот')
     for key in overrides_by_key.keys()-found:
-        conflicts.append({'key':key,'reason':'Элемент отсутствует в новой генерации'})
+        for override in overrides_by_key[key]:
+            conflicts.append({'key':key,'type':override['type'],'reason':'Элемент отсутствует в новой генерации'})
+    if len(variants) > 1:
+        for wild, elements in shared_bases.items():
+            if len(elements) == len(variants) and len({e['shared_base'] for e in elements}) == 1:
+                for e in elements:
+                    e['shared'] = len(variants)
     count=len(variants[0]['sequence'])
     inner_width, inner_height = master.get('pageSize', [210, 280])
     cover_section = next((s for s in master['sections'] if s.get('cover')), None)

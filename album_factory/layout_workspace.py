@@ -6,14 +6,16 @@ from datetime import datetime
 import base64
 import json
 from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from .layout_engine import LayoutEngine, LayoutError, ReportLabMeasurer, load_edition
+from .layout_engine import LayoutEngine, LayoutError, ReportLabMeasurer, canonical_hash, load_edition
 from .layout_render import render_variant, variant_filename
+from .master_layout import owner_wildcard
 from .layout_custom import PAGE_TEMPLATES, add_spread, edit_element, merge_custom, remove_spread, set_page_template
 
 FONT_DIR = Path('/System/Library/Fonts/Supplemental')
@@ -68,11 +70,155 @@ class Revision(BaseModel):
     revision: str
 
 
+class Operation(BaseModel):
+    key: str = Field(min_length=1, max_length=300)
+    type: Literal['photo', 'text', 'crop', 'hide', 'reset']
+    value: Any = None
+    scope: Literal['variant', 'all'] = 'variant'
+
+
+class Operations(BaseModel):
+    revision: str
+    ops: list[Operation] = Field(min_length=1, max_length=50)
+
+
+class OverrideList(BaseModel):
+    revision: str
+    overrides: list[dict] = Field(max_length=5000)
+
+
+class Review(BaseModel):
+    owner: str = Field(min_length=1, max_length=200)
+    reviewed: bool
+
+
+OVERRIDE_TYPES = ('photo', 'crop', 'text', 'hide')
+TEXT_LIMIT = 300
+# Bookkeeping fields do not change what is printed, so they stay out of review fingerprints.
+META_FIELDS = {'base', 'shared_base', 'shared', 'overridden', 'slot'}
+wildcard = owner_wildcard
+
+
+def element_index(document):
+    spreads = [*document.get('shared_spreads', {}).values(), *document.get('covers', {}).values(),
+               *(spread for group in document.get('variant_spreads', {}).values() for spread in group.values())]
+    return {e['key']: e for spread in spreads for e in spread['elements']}
+
+
+def variant_spreads(document, owner):
+    variant = next((v for v in document.get('variants') or [] if v.get('owner') == owner), None)
+    if not variant:
+        return []
+    result = []
+    for key in variant.get('sequence') or []:
+        if str(key).startswith('cover['):
+            result.append((document.get('covers') or {}).get(owner))
+        else:
+            result.append((document.get('shared_spreads') or {}).get(key) or
+                          ((document.get('variant_spreads') or {}).get(owner) or {}).get(key))
+    return [s for s in result if s]
+
+
+def fingerprints(document):
+    """What each variant prints. A review stays valid while its fingerprint is unchanged."""
+    return {v['owner']: canonical_hash([[{k: value for k, value in e.items() if k not in META_FIELDS}
+                                         for e in spread['elements']] for spread in variant_spreads(document, v['owner'])])
+            for v in document.get('variants') or [] if v.get('owner')}
+
+
+def _rect(value):
+    rect = value.get('rect') if isinstance(value, dict) else None
+    if not isinstance(rect, list) or len(rect) != 4 or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in rect):
+        raise HTTPException(422, 'Кадр задаётся четырьмя числами')
+    x, y, w, h = (float(v) for v in rect)
+    if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 and 0 < h <= 1):
+        raise HTTPException(422, 'Кадр выходит за пределы снимка')
+    return [round(v, 6) for v in (x, y, w, h)]
+
+
+def apply_operations(document, snapshot, overrides, ops):
+    """Turn editor operations into the stored override list. Pure: the caller regenerates."""
+    overrides = [dict(o) for o in overrides]
+    index = element_index(document)
+    for op in ops:
+        element = index.get(op.key)
+        if element is None:
+            raise HTTPException(422, 'Элемент не найден. Обновите макет.')
+        shared = op.scope == 'all'
+        if shared and not element.get('shared'):
+            raise HTTPException(422, 'Этот элемент отличается в вариантах: правка возможна только в одном варианте')
+        target = wildcard(op.key) if shared else op.key
+        base = element.get('shared_base') if shared else element.get('base')
+
+        def drop(types):
+            overrides[:] = [o for o in overrides if not (o['type'] in types and (
+                o['key'] == target or (shared and wildcard(o['key']) == target)))]
+
+        if op.type == 'reset':
+            # Resetting a shared edit leaves other people's own edits of this element alone.
+            types = OVERRIDE_TYPES if op.value is None else {op.value} | ({'crop'} if op.value == 'photo' else set())
+            overrides[:] = [o for o in overrides if not (o['type'] in types and o['key'] == target)]
+            continue
+        if op.type in ('photo', 'crop') and element['type'] != 'photo':
+            raise HTTPException(422, 'Это не фоторамка')
+        if op.type == 'text' and element['type'] != 'text':
+            raise HTTPException(422, 'Это не текст')
+        if op.type == 'photo':
+            if op.value not in snapshot['photos']:
+                raise HTTPException(422, 'Выберите фотографию этого заказа')
+            drop({'photo', 'crop'})
+            value = op.value
+        elif op.type == 'crop':
+            if not element.get('photo'):
+                raise HTTPException(422, 'Сначала поставьте фото в рамку')
+            drop({'crop'})
+            value = {'photo': element['photo'], 'rect': _rect(op.value)}
+        elif op.type == 'text':
+            if not isinstance(op.value, str) or len(op.value) > TEXT_LIMIT:
+                raise HTTPException(422, f'Текст должен быть не длиннее {TEXT_LIMIT} символов')
+            drop({'text'})
+            value = op.value
+        else:
+            if element['type'] not in ('text', 'photo') or not isinstance(op.value, bool):
+                raise HTTPException(422, 'Скрыть можно только текст или фото')
+            drop({'hide'})
+            if not op.value:
+                continue
+            value = True
+        overrides.append({'key': target, 'type': op.type, 'value': value, 'base': base})
+    return overrides
+
+
+def clean_overrides(items, snapshot):
+    """Validate a complete override list sent back by undo/redo."""
+    result = []
+    for item in items:
+        key, kind, value, base = item.get('key'), item.get('type'), item.get('value'), item.get('base')
+        if not isinstance(key, str) or not 0 < len(key) <= 300 or kind not in OVERRIDE_TYPES or not (base is None or isinstance(base, str)):
+            raise HTTPException(422, 'Список правок повреждён')
+        if kind == 'photo' and value not in snapshot['photos']:
+            raise HTTPException(422, 'Фотография из правки больше недоступна')
+        if kind == 'crop':
+            if not isinstance(value, dict) or not isinstance(value.get('photo'), str):
+                raise HTTPException(422, 'Список правок повреждён')
+            value = {'photo': value['photo'], 'rect': _rect(value)}
+        if kind == 'text' and (not isinstance(value, str) or len(value) > TEXT_LIMIT):
+            raise HTTPException(422, f'Текст должен быть не длиннее {TEXT_LIMIT} символов')
+        if kind == 'hide':
+            value = True
+        result.append({'key': key, 'type': kind, 'value': value, 'base': base})
+    return result
+
+
 def init(con):
     con.execute('''CREATE TABLE IF NOT EXISTS order_layouts (
         order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
         snapshot TEXT NOT NULL, document TEXT NOT NULL, overrides TEXT NOT NULL,
         generated_at TEXT NOT NULL)''')
+    con.execute('''CREATE TABLE IF NOT EXISTS layout_reviews (
+        order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        owner TEXT NOT NULL, fingerprint TEXT NOT NULL, reviewed_at TEXT NOT NULL,
+        PRIMARY KEY (order_id, owner))''')
 
 
 def edition(root):
@@ -131,11 +277,30 @@ def read_layout(con, order_id):
             'overrides': json.loads(row['overrides']), 'generated_at': row['generated_at']}
 
 
+def layout_status(con, order_id, document):
+    current = fingerprints(document)
+    publication = approval = None
+    row = con.execute('SELECT revision,document,published_at FROM publications WHERE order_id=?', (order_id,)).fetchone()
+    approved = con.execute('SELECT snapshot,approved_at FROM approvals WHERE order_id=? ORDER BY approved_at DESC LIMIT 1', (order_id,)).fetchone()
+    if row:
+        published = fingerprints(json.loads(row['document']))
+        publication = {'revision': row['revision'], 'published_at': row['published_at'],
+                       'current': row['revision'] == document.get('revision'),
+                       'changed': sorted(owner for owner, value in current.items() if published.get(owner) != value)}
+    if approved:
+        approval = {'revision': json.loads(approved['snapshot']).get('revision'), 'approved_at': approved['approved_at']}
+    reviews = {r['owner']: {'reviewed_at': r['reviewed_at'], 'current': current.get(r['owner']) == r['fingerprint']}
+               for r in con.execute('SELECT owner,fingerprint,reviewed_at FROM layout_reviews WHERE order_id=?', (order_id,))}
+    return {'publication': publication, 'approval': approval, 'reviews': reviews}
+
+
 def install(app, s):
     def response(layout):
         document = layout['document']
         general = {e['id']: e for e in layout['snapshot'].get('general') or [] if not e.get('legacy')}
         return {'document': document, 'generated_at': layout['generated_at'],
+                'overrides': layout.get('overrides') or [], 'status': layout.get('status'),
+                'fonts': layout.get('fonts') or [], 'sections': layout.get('sections') or {},
                 'photos': [{'id': id, 'filename': p['filename'], 'shoot_type': p['shoot_type'],
                             'person_id': p['person_id'],
                             **({k: general[id].get(k) for k in ('bucket', 'scale', 'style', 'quality', 'alt')} if id in general else {}),
@@ -156,7 +321,87 @@ def install(app, s):
                     with Image.open(path) as image:
                         width, height = image.size
                     layout['snapshot']['photos'][photo_id] = {'path': str(path), 'width': width, 'height': height}
+        master = order_edition(con, order_id, s.ROOT).get('master') or {}
+        layout['sections'] = {section['id']: section.get('name') or section['id'] for section in master.get('sections') or []}
+        layout['fonts'] = [{'id': f.get('id'), 'name': f.get('name'), 'dataUrl': f.get('dataUrl')}
+                           for f in master.get('fonts') or [] if f.get('id') and f.get('dataUrl')]
+        layout['status'] = layout_status(con, order_id, layout['document'])
         return layout
+
+    def save(con, order_id, layout, document, overrides):
+        con.execute('UPDATE order_layouts SET snapshot=?,document=?,overrides=? WHERE order_id=?',
+                    (json.dumps(layout['snapshot']), json.dumps(document), json.dumps(overrides), order_id))
+        return response(enrich(con, order_id, {'snapshot': layout['snapshot'], 'document': document,
+                                               'overrides': overrides, 'generated_at': layout['generated_at']}))
+
+    def regenerate(con, order_id, layout, overrides):
+        try:
+            document = generate_document(order_edition(con, order_id, s.ROOT), layout['snapshot'], overrides)
+            return merge_custom(document, layout['document'])
+        except LayoutError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    def current(con, order_id, revision):
+        s.require_order(con, order_id)
+        layout = enrich(con, order_id, read_layout(con, order_id))
+        if revision != layout['document']['revision']:
+            raise HTTPException(409, 'Макет изменился в другой вкладке. Обновите страницу.')
+        return layout
+
+    @app.post('/api/orders/{order_id}/layout/edits')
+    def edit_operations(order_id: str, payload: Operations):
+        with s.db() as con:
+            layout = current(con, order_id, payload.revision)
+            document = layout['document']
+            custom = document.get('custom_positions', {})
+            if any(op.key.split('/', 1)[0] in custom for op in payload.ops):
+                # Legacy spreads added by hand keep their own storage and cannot be undone.
+                if len(payload.ops) != 1 or payload.ops[0].type not in ('photo', 'text'):
+                    raise HTTPException(422, 'В добавленном вручную развороте можно менять только фото и текст')
+                op = payload.ops[0]
+                if op.type == 'photo' and op.value not in layout['snapshot']['photos']:
+                    raise HTTPException(422, 'Выберите фотографию этого заказа')
+                if op.type == 'text' and (not isinstance(op.value, str) or len(op.value) > TEXT_LIMIT):
+                    raise HTTPException(422, f'Текст должен быть не длиннее {TEXT_LIMIT} символов')
+                try:
+                    document = edit_element(document, op.key, op.type, op.value, layout['snapshot'], measurer())
+                except (KeyError, StopIteration, ValueError) as exc:
+                    raise HTTPException(422, str(exc) if isinstance(exc, ValueError) else 'Элемент не найден') from exc
+                return save(con, order_id, layout, document, layout['overrides'])
+            overrides = apply_operations(document, layout['snapshot'], layout['overrides'], payload.ops)
+            return save(con, order_id, layout, regenerate(con, order_id, layout, overrides), overrides)
+
+    @app.put('/api/orders/{order_id}/layout/overrides')
+    def replace_overrides(order_id: str, payload: OverrideList):
+        with s.db() as con:
+            layout = current(con, order_id, payload.revision)
+            overrides = clean_overrides(payload.overrides, layout['snapshot'])
+            return save(con, order_id, layout, regenerate(con, order_id, layout, overrides), overrides)
+
+    @app.put('/api/orders/{order_id}/layout/reviews')
+    def review_variant(order_id: str, payload: Review):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            document = read_layout(con, order_id)['document']
+            prints = fingerprints(document)
+            if payload.owner not in prints:
+                raise HTTPException(404, 'Вариант не найден')
+            if payload.reviewed:
+                con.execute('''INSERT INTO layout_reviews VALUES (?,?,?,?) ON CONFLICT(order_id,owner) DO UPDATE SET
+                    fingerprint=excluded.fingerprint,reviewed_at=excluded.reviewed_at''',
+                            (order_id, payload.owner, prints[payload.owner], s.now()))
+            else:
+                con.execute('DELETE FROM layout_reviews WHERE order_id=? AND owner=?', (order_id, payload.owner))
+            return {'status': layout_status(con, order_id, document)}
+
+    @app.get('/api/orders/{order_id}/layout/publication')
+    def published_layout(order_id: str):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            row = con.execute('SELECT revision,document,published_at FROM publications WHERE order_id=?', (order_id,)).fetchone()
+            if row is None:
+                raise HTTPException(404, 'Макет ещё не опубликован')
+            return {'revision': row['revision'], 'published_at': row['published_at'], 'document': json.loads(row['document'])}
 
     @app.get('/api/orders/{order_id}/layout')
     def get_layout(order_id: str):
@@ -196,44 +441,16 @@ def install(app, s):
                 snapshot=excluded.snapshot,document=excluded.document,overrides=excluded.overrides,generated_at=excluded.generated_at''',
                 (order_id, json.dumps(snapshot), json.dumps(document), json.dumps(overrides), s.now()))
             con.execute("UPDATE orders SET stage='layout' WHERE id=?", (order_id,))
-            return response(enrich(con, order_id, {'snapshot': snapshot, 'document': document, 'generated_at': s.now()}))
+            return response(enrich(con, order_id, {'snapshot': snapshot, 'document': document, 'overrides': overrides,
+                                                   'generated_at': s.now()}))
 
     @app.put('/api/orders/{order_id}/layout/element')
     def edit_layout(order_id: str, payload: Edit):
-        with s.db() as con:
-            s.require_order(con, order_id)
-            layout = enrich(con, order_id, read_layout(con, order_id))
-            if payload.revision != layout['document']['revision']:
-                raise HTTPException(409, 'Макет изменился. Обновите страницу.')
-            elements = {e['key']: e for spread in [*layout['document']['shared_spreads'].values(),
-                *layout['document']['covers'].values(), *(v for group in layout['document']['variant_spreads'].values() for v in group.values())]
-                for e in spread['elements']}
-            element = elements.get(payload.key)
-            if not element or payload.type not in {'photo', 'text'} or element['type'] != payload.type:
-                raise HTTPException(422, 'Элемент не найден или тип правки неверен')
-            if payload.type == 'photo' and payload.value not in layout['snapshot']['photos']:
-                raise HTTPException(422, 'Выберите фотографию этого заказа')
-            if payload.type == 'text' and (payload.value is None or len(payload.value) > 300):
-                raise HTTPException(422, 'Текст должен быть не длиннее 300 символов')
-            if payload.key.split('/', 1)[0] in layout['document'].get('custom_positions', {}):
-                try:
-                    document = edit_element(layout['document'], payload.key, payload.type,
-                                            payload.value, layout['snapshot'], measurer())
-                except (KeyError, StopIteration, ValueError) as exc:
-                    raise HTTPException(422, str(exc) if isinstance(exc, ValueError) else 'Элемент не найден') from exc
-                con.execute('UPDATE order_layouts SET document=? WHERE order_id=?', (json.dumps(document), order_id))
-                return response(enrich(con, order_id, {'snapshot': layout['snapshot'], 'document': document,
-                                                       'generated_at': layout['generated_at']}))
-            overrides = [o for o in layout['overrides'] if o['key'] != payload.key]
-            overrides.append({'key': payload.key, 'type': payload.type, 'value': payload.value, 'base': element['base']})
-            try:
-                document = generate_document(order_edition(con, order_id, s.ROOT), layout['snapshot'], overrides)
-                document = merge_custom(document, layout['document'])
-            except LayoutError as exc:
-                raise HTTPException(409, str(exc)) from exc
-            con.execute('UPDATE order_layouts SET snapshot=?,document=?,overrides=? WHERE order_id=?',
-                        (json.dumps(layout['snapshot']), json.dumps(document), json.dumps(overrides), order_id))
-            return response(enrich(con, order_id, {'snapshot': layout['snapshot'], 'document': document, 'generated_at': layout['generated_at']}))
+        """Single-element edit kept for older pages; the editor uses /layout/edits."""
+        if payload.type not in {'photo', 'text'}:
+            raise HTTPException(422, 'Элемент не найден или тип правки неверен')
+        return edit_operations(order_id, Operations(revision=payload.revision, ops=[
+            Operation(key=payload.key, type=payload.type, value=payload.value)]))
 
     @app.post('/api/orders/{order_id}/layout/spreads')
     def create_spread(order_id: str, payload: AddSpread):
