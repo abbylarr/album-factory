@@ -3,7 +3,7 @@ import unittest
 
 from album_factory import photo_pick as pp
 from album_factory.master_layout import generate
-from album_factory.master_templates import preview_photos, _FlatMeasurer
+from album_factory.master_templates import preview_photos, validate, _FlatMeasurer
 from album_factory.test_shoot import synthetic
 
 STUDENTS = [{'id': f's{i}', 'first_name': 'Ученик', 'last_name': str(i)} for i in range(12)]
@@ -62,6 +62,19 @@ class FitTests(unittest.TestCase):
         self.assertEqual(pp.resolve({'role': 'unknown'})['category'], 'any')
 
 
+    def test_built_in_categories_can_be_removed_except_any(self):
+        doc = master([[layer('a', pick={'category': 'few'})], []])
+        doc['removedCategories'] = ['wide', 'empty']
+        validate(doc)
+        self.assertNotIn('wide', pp.categories_of(doc))
+        self.assertEqual(pp.resolve({'category': 'wide'}, pp.categories_of(doc))['category'], 'any')
+        for removed, pick in ((['any'], 'few'), (['nope'], 'few'), (['few', 'few'], 'any'), (['few'], 'few')):
+            broken = master([[layer('a', pick={'category': pick})], []])
+            broken['removedCategories'] = removed
+            with self.assertRaises(Exception, msg=removed):
+                validate(broken)
+
+
 class PickerTests(unittest.TestCase):
     def setUp(self):
         self.entries, self.photos = synthetic(STUDENTS)
@@ -101,11 +114,28 @@ class PickerTests(unittest.TestCase):
         self.assertEqual(lone[0]['result']['relaxed'], ['dup'])
         self.assertTrue(next(e for e in only if e['id'] == lone[0]['result']['photo'])['alt'])
 
-    def test_one_spread_mixes_shoots_and_posed_photos_come_first(self):
-        spread = [slot(f'm{i}', {'category': 'few'}, (90, 90), spread='mix', order=i) for i in range(4)]
-        self.picker({'chronology': False}).assign(spread)
-        shoots = [next(e for e in self.entries if e['id'] == s['result']['photo'])['shoot'] for s in spread]
-        self.assertEqual(len(set(shoots)), 2)
+    def shoots(self, slots):
+        return {next(e for e in self.entries if e['id'] == s['result']['photo'])['shoot'] for s in slots}
+
+    def test_student_spreads_mix_shoots_and_shared_ones_keep_to_one(self):
+        # Both rules on, as by default: the student's spread takes several shoots, the shared one stays in one.
+        mine = [slot(f'me{i}', {'category': 'any', 'who': 'hero'}, (90, 90), target='s5', spread='me', order=i) for i in range(4)]
+        self.picker().assign(mine)
+        self.assertEqual(len(self.shoots(mine)), 2)
+        # One spread of a forty-frame album: its slots sit close together in the album's order.
+        shared = [dict(slot(f'sh{i}', {'category': 'any'}, (90, 90), spread='shared', order=18 + i), total=40) for i in range(4)]
+        self.picker().assign(shared)
+        self.assertEqual(len(self.shoots(shared)), 1)
+
+    def test_shared_spreads_prefer_students_shown_less_so_far(self):
+        for category, behind in (('solo', 's3'), ('few', 's7')):
+            picker = self.picker()
+            picker.coverage = {s: 0 if s == behind else 4 for s in picker.coverage}
+            slots = [slot('x', {'category': category}, (90, 90))]
+            picker.assign(slots)
+            self.assertIn(behind, next(e for e in self.entries if e['id'] == slots[0]['result']['photo'])['subjects'])
+
+    def test_posed_photos_come_first(self):
         early, late = slot('first', None, (90, 70), order=0, spread='a'), slot('last', None, (90, 70), order=9, spread='b')
         self.picker({'chronology': False}).assign([early, late])
         style = {e['id']: e['style'] for e in self.entries}
@@ -189,7 +219,7 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(cell['type'], 'rect')
 
     def test_editor_preview_runs_the_same_picker(self):
-        doc = master([[layer('hero', pick={'role': 'hero'})], [layer('air', pick={'role': 'atmosphere'})]], rules={'coverageMin': 1})
+        doc = master([[layer('hero', pick={'role': 'hero'})], [layer('air', pick={'role': 'atmosphere'})]], rules={'rhythm': False})
         result = preview_photos(doc, 12, 0, 's3')
         self.assertEqual(set(result['slots']), {'shared:0/hero', 'shared:1/air'})
         self.assertEqual(result['slots']['shared:1/air']['bucket'], 'none')

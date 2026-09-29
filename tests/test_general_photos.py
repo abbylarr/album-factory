@@ -49,7 +49,7 @@ class GeneralPhotoTests(unittest.TestCase):
         worker = patch.object(s.executor, 'submit'); worker.start(); self.addCleanup(worker.stop)
         self.client = TestClient(s.app); self.client.__enter__(); self.addCleanup(self.client.__exit__, None, None, None)
         self.client.get('/v2'); self.client.headers['origin'] = 'http://testserver'
-        self.order = self.client.post('/api/orders', json={'school': 'Школа', 'class_name': '9 А', 'copies': 1}).json()['id']
+        self.order = self.client.post('/api/orders', json={'school_city':'Казань', 'school': 'Школа', 'class_name': '9 А', 'copies': 1}).json()['id']
         with s.db() as con:
             portraits = self.client.post(f'/api/orders/{self.order}/shoots', json={'kind': 'portrait', 'title': 'Портреты'}).json()['id']
             for key in IDENTITY:
@@ -127,7 +127,7 @@ class GeneralPhotoTests(unittest.TestCase):
         self.assertEqual(self.client.put(f'/api/orders/{self.order}/general/best', json={'photo_id': keep}).status_code, 409)
         twice = self.client.put(f'/api/orders/{self.order}/general/faces', json={'face_ids': [f'{keep}-0', f'{keep}-0'], 'action': 'stranger'})
         self.assertEqual(twice.status_code, 200)
-        other = self.client.post('/api/orders', json={'school': 'Другая', 'class_name': 'Б', 'copies': 1}).json()['id']
+        other = self.client.post('/api/orders', json={'school_city':'Казань', 'school': 'Другая', 'class_name': 'Б', 'copies': 1}).json()['id']
         self.assertEqual(self.client.get(f'/api/orders/{other}/shoots/{self.shoot}/general').status_code, 404)
         self.assertEqual(self.client.post(f'/api/orders/{self.order}/delete-photos', json={'photo_ids': [keep]}).status_code, 200)
         with s.db() as con:

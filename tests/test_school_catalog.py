@@ -52,7 +52,7 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(again['id'], school['id'])
         other_city = self.school(city='Уфа')
         self.assertNotEqual(other_city['id'], school['id'])
-        self.assertEqual(len(self.client.get('/api/schools').json()), 2)
+        self.assertEqual(len(self.client.get('/api/schools').json()), 3)
         clash = self.client.patch(f'/api/schools/{other_city["id"]}', json={'name': school['name'], 'city': 'Казань'})
         self.assertEqual(clash.status_code, 409)
         order = self.order_for(school['id'])
@@ -159,6 +159,8 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(self.client.post(f'/api/teacher-photos/{spare["id"]}/assign', json={'teacher_id': stranger['id']}).status_code, 422)
         self.assertEqual(self.client.post(f'/api/teacher-photos/{spare["id"]}/assign', json={}).status_code, 422)
 
+        with s.db() as con:
+            con.execute("UPDATE teacher_photos SET status='ready' WHERE school_id=?", (school['id'],))
         assigned = self.client.post(f'/api/teacher-photos/{from_order.json()["id"]}/assign', json={'teacher_id': known['id']})
         self.assertEqual(assigned.status_code, 200, assigned.text)
         self.assertTrue(assigned.json()['has_portrait'])
@@ -167,10 +169,10 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(created.status_code, 200, created.text)
         self.assertEqual((created.json()['name'], created.json()['subject']), ('Новикова Ольга', 'История'))
         self.assertTrue(created.json()['has_portrait'])
-        # A newer photo replaces the portrait and the old files go away.
+        # A newer photo replaces the portrait; earlier files remain available for undo.
         replaced = self.client.post(f'/api/teacher-photos/{spare["id"]}/assign', json={'teacher_id': known['id']}).json()
         self.assertNotEqual(replaced['portrait_version'], first_version)
-        self.assertFalse((s.DATA / 'photos' / (first_version + '.jpg')).exists())
+        self.assertTrue((s.DATA / 'photos' / (first_version + '.jpg')).exists())
         self.assertEqual(self.client.get(f'/api/teachers/{known["id"]}/portrait/full').status_code, 200)
         self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['groups'], [])
         self.assertEqual(self.client.get(f'/api/teacher-photos/{spare["id"]}/thumb').status_code, 404)
@@ -184,7 +186,7 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(other.delete(f'/api/teacher-photos/{leftover["id"]}').status_code, 404)
         self.assertEqual(self.client.delete(f'/api/teacher-photos/{leftover["id"]}').status_code, 200)
 
-    def test_class_signs_teacher_photo_and_other_frames_are_removed(self):
+    def test_class_signs_teacher_photo_and_other_frames_are_hidden(self):
         from album_factory.school_catalog import group_pending
 
         class ColourFaces:
@@ -218,7 +220,7 @@ class SchoolCatalogTests(unittest.TestCase):
         signed = guest.post(base + f'/teacher-photos/{red[1]}/sign', json={'teacher_id': waiting['id']})
         self.assertEqual(signed.status_code, 200, signed.text)
         for photo_id in red:
-            self.assertFalse((s.DATA / 'photos' / f'tphoto-{photo_id}.jpg').exists())
+            self.assertTrue((s.DATA / 'photos' / f'tphoto-{photo_id}.jpg').exists())
         catalog = {t['id']: t for t in self.client.get(f'/api/schools/{school["id"]}').json()['teachers']}
         self.assertEqual((catalog[waiting['id']]['has_portrait'], catalog[waiting['id']]['portrait_by']), (True, 'client'))
         self.assertEqual(guest.post(base + f'/teacher-photos/{red[0]}/sign', json={'teacher_id': waiting['id']}).status_code, 404)
@@ -228,7 +230,7 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(me.status_code, 200, me.text)
         self.assertEqual(me.json()['name'], 'Орлов Игорь')
         self.assertEqual(guest.get(base + '/teacher-photos').json()['groups'], [])
-        self.assertFalse((s.DATA / 'photos' / f'tphoto-{blue[1]}.jpg').exists())
+        self.assertTrue((s.DATA / 'photos' / f'tphoto-{blue[1]}.jpg').exists())
 
         # The photographer can still replace a portrait the class chose.
         again = upload('new.jpg', '#ffff00')
@@ -248,6 +250,9 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(self.client.post(f'/api/teacher-photos/{second}/move', json={'group_id': 'missing'}).status_code, 404)
 
     def test_order_without_catalog_school_cannot_choose(self):
+        # Simulate an order created before the catalogue existed.
+        with s.db() as con:
+            con.execute("UPDATE order_terms SET school_id=NULL WHERE order_id=?", (self.order,))
         guest, base = self.portal(self.order, manage=True)
         view = guest.get(base + '/teachers').json()
         self.assertIsNone(view['school'])
@@ -289,6 +294,203 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertFalse(self.client.get(f'/api/orders/{order}/teachers').json()['layout_outdated'])
         self.client.put(f'/api/orders/{order}/teachers', json={'teacher_ids': [lead['id']], 'class_teacher_id': lead['id']})
         self.assertTrue(self.client.get(f'/api/orders/{order}/teachers').json()['layout_outdated'])
+
+    def test_city_required_and_long_school_name_reaches_cover(self):
+        missing = self.client.post('/api/orders', json={'school': 'Новая', 'class_name': '11А', 'copies': 1})
+        self.assertEqual(missing.status_code, 422)
+        self.assertEqual(self.client.post('/api/schools', json={'name': 'Новая', 'city': '   '}).status_code, 422)
+        name = 'Средняя общеобразовательная школа ' + 'А' * 100
+        doc = master()
+        layers = doc['sections'][1]['spreads'][0]['pages'][0]['layers']
+        for index, binding in enumerate(('school', 'city')):
+            layers.append({'id': binding, 'type': 'text', 'box': {'x': 10, 'y': 10 + index * 80, 'w': 180, 'h': 70},
+                           'text': '', 'binding': binding, 'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'})
+        design = self.client.post('/api/master-templates', json={'document': doc})
+        self.assertEqual(design.status_code, 201, design.text)
+        response = self.client.post('/api/orders', json={'school': name, 'school_city': '  Нижний   Новгород ', 'class_name': '11А', 'copies': 1, 'master_template_id': design.json()['id']})
+        self.assertEqual(response.status_code, 201, response.text)
+        order_id = response.json()['id']
+        order = self.client.get(f'/api/orders/{order_id}').json()
+        school = self.client.get(f'/api/schools/{order["school_id"]}').json()
+        self.assertEqual((school['name'], school['city'], order['school_city']), (name, 'Нижний Новгород', 'Нижний Новгород'))
+        again = self.client.post('/api/orders', json={'school': name.lower(), 'school_city': 'нижний новгород', 'class_name': '11Б', 'copies': 1}).json()['id']
+        self.assertEqual(self.client.get(f'/api/orders/{again}').json()['school_id'], school['id'])
+        layout = self.client.post(f'/api/orders/{order_id}/layout')
+        self.assertEqual(layout.status_code, 200, layout.text)
+        document = layout.json()['document']
+        spreads = list(document['shared_spreads'].values()) + [sp for variant in document['variant_spreads'].values() for sp in variant.values()]
+        texts = [e.get('text') for spread in spreads for e in spread['elements']]
+        self.assertIn(name, texts)
+        self.assertIn('Нижний Новгород', texts)
+
+    def test_school_change_is_confirmed_atomic_and_blocked_after_print(self):
+        from album_factory.school_catalog import snapshot_teachers
+        a, b = self.school('Школа А'), self.school('Школа Б', 'Уфа')
+        teacher = self.teacher(a['id'], 'Первая')
+        order = self.order_for(a['id'])
+        self.client.put(f'/api/orders/{order}/teachers', json={'teacher_ids': [teacher['id']], 'class_teacher_id': teacher['id']})
+        change = {'school_id': b['id'], 'class_name': '11Б', 'graduation_year': 2027}
+        self.assertEqual(self.client.patch(f'/api/orders/{order}', json=change).status_code, 409)
+        self.assertEqual(self.client.get(f'/api/orders/{order}').json()['school_id'], a['id'])
+        change['confirm_school_change'] = True
+        self.assertEqual(self.client.patch(f'/api/orders/{order}', json=change).status_code, 200)
+        with s.db() as con:
+            self.assertEqual(snapshot_teachers(con, order), [])
+        view = self.client.get(f'/api/orders/{order}/teachers').json()
+        self.assertFalse(view['chosen'])
+        self.assertEqual(self.client.get(f'/api/orders/{order}').json()['school_city'], 'Уфа')
+        for stage in ('print', 'delivery', 'archive'):
+            with s.db() as con:
+                con.execute('UPDATE orders SET stage=? WHERE id=?', (stage, order))
+            change['school_id'] = a['id']
+            self.assertEqual(self.client.patch(f'/api/orders/{order}', json=change).status_code, 409)
+
+    def test_archived_selection_survives_saving_and_can_be_restored(self):
+        school = self.school()
+        teacher = self.teacher(school['id'], 'Архивная')
+        order = self.order_for(school['id'])
+        self.client.put(f'/api/teachers/{teacher["id"]}/portrait', content=jpeg())
+        choice = {'teacher_ids': [teacher['id']], 'class_teacher_id': teacher['id']}
+        self.client.put(f'/api/orders/{order}/teachers', json=choice)
+        self.client.delete(f'/api/teachers/{teacher["id"]}')
+        guest, base = self.portal(order, manage=True)
+        view = guest.get(base+'/teachers').json()
+        self.assertTrue(view['teachers'][0]['archived'])
+        self.assertTrue(view['teachers'][0]['selected'])
+        self.assertEqual(guest.get(base+f'/teachers/{teacher["id"]}/portrait').status_code, 200)
+        self.assertEqual(guest.put(base+'/teachers', json=choice).status_code, 200)
+        fresh_order = self.order_for(school['id'])
+        self.assertEqual(self.client.put(f'/api/orders/{fresh_order}/teachers', json=choice).status_code, 422)
+        self.assertEqual(self.client.post(f'/api/teachers/{teacher["id"]}/restore').status_code, 200)
+
+    def test_teacher_changes_mark_layout_outdated_but_noop_save_does_not(self):
+        school = self.school()
+        teacher = self.teacher(school['id'], 'Иванова')
+        design = self.client.post('/api/master-templates', json={'document': master()}).json()['id']
+        order = self.order_for(school['id'], master_template_id=design)
+        choice = {'teacher_ids': [teacher['id']]}
+        self.client.put(f'/api/orders/{order}/teachers', json=choice)
+        def generate():
+            response = self.client.post(f'/api/orders/{order}/layout')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertFalse(self.client.get(f'/api/orders/{order}/teachers').json()['layout_outdated'])
+        generate()
+        self.client.put(f'/api/orders/{order}/teachers', json=choice)
+        self.assertFalse(self.client.get(f'/api/orders/{order}/teachers').json()['layout_outdated'])
+        self.client.patch(f'/api/teachers/{teacher["id"]}', json={'last_name': 'Исправленная', 'subject': 'Физика'})
+        self.assertTrue(self.client.get(f'/api/orders/{order}/teachers').json()['layout_outdated'])
+        generate()
+        self.client.put(f'/api/teachers/{teacher["id"]}/portrait', content=jpeg())
+        self.assertTrue(self.client.get(f'/api/orders/{order}/teachers').json()['layout_outdated'])
+        generate()
+        self.client.patch(f'/api/schools/{school["id"]}', json={'name': 'Новое название', 'city': 'Москва'})
+        self.assertTrue(self.client.get(f'/api/orders/{order}/teachers').json()['layout_outdated'])
+        generate()
+        with s.db() as con:
+            con.execute("UPDATE orders SET stage='print' WHERE id=?", (order,))
+        self.client.patch(f'/api/schools/{school["id"]}', json={'name': 'Ещё название', 'city': 'Казань'})
+        saved = self.client.get(f'/api/orders/{order}').json()
+        self.assertEqual((saved['school'], saved['school_city']), ('Новое название', 'Москва'))
+
+    def test_subject_is_local_to_class_and_duplicate_teacher_rejected(self):
+        from album_factory.school_catalog import snapshot_teachers
+        school = self.school()
+        teacher = self.teacher(school['id'], 'Семёнова')
+        duplicate = self.client.post(f'/api/schools/{school["id"]}/teachers', json={'last_name': ' семенова ', 'first_name': 'Мария', 'patronymic': 'Ивановна'})
+        self.assertEqual(duplicate.status_code, 409)
+        orders = [self.order_for(school['id']) for _ in range(2)]
+        for order, subject in zip(orders, ['Алгебра', 'Геометрия']):
+            response = self.client.put(f'/api/orders/{order}/teachers', json={'teacher_ids': [teacher['id']], 'subjects': {teacher['id']: subject}})
+            self.assertEqual(response.status_code, 200, response.text)
+            with s.db() as con:
+                self.assertEqual(snapshot_teachers(con, order)[0]['school_subject'], subject)
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}').json()['teachers'][0]['subject'], 'Математика')
+
+    def test_assignment_undo_restores_frames_and_dedup_survives_signing(self):
+        school = self.school()
+        teacher = self.teacher(school['id'], 'Отмена')
+        self.client.put(f'/api/teachers/{teacher["id"]}/portrait', content=jpeg('#123456'))
+        old = self.client.get(f'/api/teachers/{teacher["id"]}/portrait/full').content
+        photos = [self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename={i}.jpg', content=jpeg(color)).json()['id'] for i, color in enumerate(('#ff0000', '#fa0101'))]
+        with s.db() as con:
+            con.execute("UPDATE teacher_photos SET status='ready',group_id=? WHERE school_id=?", (photos[0], school['id']))
+        response = self.client.post(f'/api/teacher-photos/{photos[0]}/assign', json={'teacher_id': teacher['id']})
+        self.assertEqual(response.status_code, 200, response.text)
+        event = response.json()['assignment_id']
+        repeated = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=copy.jpg', content=jpeg('#ff0000'))
+        self.assertTrue(repeated.json()['duplicate'])
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['groups'], [])
+        self.assertEqual(self.client.post(f'/api/teacher-assignments/{event}/undo').status_code, 200)
+        self.assertEqual(self.client.get(f'/api/teachers/{teacher["id"]}/portrait/full').content, old)
+        groups = self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['groups']
+        self.assertEqual({p['id'] for p in groups[0]['photos']}, set(photos))
+        self.assertEqual(self.client.post(f'/api/teacher-assignments/{event}/undo').status_code, 409)
+
+    def test_merge_preserves_order_subject_and_lead(self):
+        school = self.school()
+        source, target = self.teacher(school['id'], 'Дубль'), self.teacher(school['id'], 'Основная')
+        order = self.order_for(school['id'])
+        self.client.put(f'/api/orders/{order}/teachers', json={'teacher_ids': [source['id']], 'class_teacher_id': source['id'], 'subjects': {source['id']: 'Алгебра'}})
+        response = self.client.post(f'/api/teachers/{source["id"]}/merge', json={'target_id': target['id']})
+        self.assertEqual(response.status_code, 200, response.text)
+        view = self.client.get(f'/api/orders/{order}/teachers').json()
+        selected = [t for t in view['teachers'] if t['selected']]
+        self.assertEqual([(t['id'], t['subject'], t['is_class_teacher']) for t in selected], [(target['id'], 'Алгебра', True)])
+
+
+    def test_migration_keeps_city_and_fingerprints_existing_portraits(self):
+        school = self.school()
+        teacher = self.teacher(school['id'], 'Старая')
+        order = self.order_for(school['id'])
+        self.client.put(f'/api/teachers/{teacher["id"]}/portrait', content=jpeg('#334455'))
+        with s.db() as con:
+            con.execute('DELETE FROM teacher_uploads')
+            con.execute('ALTER TABLE orders DROP COLUMN school_city')
+        s.init_db()
+        s.init_db()
+        self.assertEqual(self.client.get(f'/api/orders/{order}').json()['school_city'], 'Казань')
+        duplicate = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=old.jpg', content=jpeg('#334455'))
+        self.assertTrue(duplicate.json()['duplicate'])
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['groups'], [])
+
+    def test_undo_and_merge_are_scoped_to_studio_and_latest_portrait(self):
+        school = self.school()
+        teacher = self.teacher(school['id'], 'Первая')
+        target = self.teacher(school['id'], 'Вторая')
+        photo = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=a.jpg', content=jpeg()).json()['id']
+        self.assertEqual(self.client.post(f'/api/teacher-photos/{photo}/assign', json={'teacher_id': teacher['id']}).status_code, 409)
+        with s.db() as con:
+            con.execute("UPDATE teacher_photos SET status='ready' WHERE id=?", (photo,))
+        event = self.client.post(f'/api/teacher-photos/{photo}/assign', json={'teacher_id': teacher['id']}).json()['assignment_id']
+        other = TestClient(self.client.app)
+        other.headers['origin'] = 'http://testserver'
+        other.post('/api/register', json={'email': 'isolated@studio.test', 'password': 'secret-pass', 'studio_name': 'Другая'})
+        self.assertEqual(other.post(f'/api/teacher-assignments/{event}/undo').status_code, 404)
+        self.assertEqual(other.post(f'/api/teachers/{teacher["id"]}/merge', json={'target_id': target['id']}).status_code, 404)
+        self.assertEqual(other.post(f'/api/teachers/{teacher["id"]}/restore').status_code, 404)
+        self.client.put(f'/api/teachers/{teacher["id"]}/portrait', content=jpeg('#abcdef'))
+        self.assertEqual(self.client.post(f'/api/teacher-assignments/{event}/undo').status_code, 409)
+        order = self.order_for(school['id'])
+        self.client.put(f'/api/orders/{order}/teachers', json={'teacher_ids': [teacher['id']]})
+        with s.db() as con:
+            con.execute("UPDATE orders SET stage='print' WHERE id=?", (order,))
+        self.assertEqual(self.client.post(f'/api/teachers/{teacher["id"]}/merge', json={'target_id': target['id']}).status_code, 409)
+
+    def test_edit_duplicate_teacher_and_wrong_city_are_rejected(self):
+        school = self.school()
+        first, second = self.teacher(school['id'], 'Первая'), self.teacher(school['id'], 'Вторая')
+        response = self.client.patch(f'/api/teachers/{second["id"]}', json={key: first[key] for key in ('last_name','first_name','patronymic','subject')})
+        self.assertEqual(response.status_code, 409)
+        bad = self.client.post('/api/orders', json={'school_id': school['id'], 'school_city': 'Уфа', 'class_name': '11А', 'copies': 1})
+        self.assertEqual(bad.status_code, 409)
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}').json()['city'], 'Казань')
+        with s.db() as con:
+            con.execute("UPDATE schools SET city='' WHERE id=?", (school['id'],))
+        missing = self.client.post('/api/orders', json={'school_id': school['id'], 'class_name': '11А', 'copies': 1})
+        self.assertEqual(missing.status_code, 422)
+        fixed = self.client.post('/api/orders', json={'school_id': school['id'], 'school_city': 'Казань', 'class_name': '11А', 'copies': 1})
+        self.assertEqual(fixed.status_code, 201)
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}').json()['city'], 'Казань')
 
 
 if __name__ == '__main__':

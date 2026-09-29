@@ -18,7 +18,7 @@ class OrderStageTests(unittest.TestCase):
         self.client = TestClient(s.app)
         self.client.__enter__(); self.addCleanup(self.client.__exit__, None, None, None)
         self.client.get('/v2'); self.client.headers['origin'] = 'http://testserver'
-        self.order = self.client.post('/api/orders', json={'school': 'Тест', 'class_name': 'А', 'copies': 1}).json()['id']
+        self.order = self.client.post('/api/orders', json={'school_city':'Казань', 'school': 'Тест', 'class_name': 'А', 'copies': 1}).json()['id']
 
     def stage(self):
         return self.client.get(f'/api/orders/{self.order}').json()['stage']

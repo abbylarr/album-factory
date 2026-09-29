@@ -26,7 +26,7 @@ class MasterTests(unittest.TestCase):
         draft = self.client.post('/api/master-templates', json={'document':master()})
         self.assertEqual(draft.status_code,201,draft.text)
         key = draft.json()['id']
-        created = self.client.post('/api/orders', json={'school':'Тест','class_name':'9 Б','copies':10,'master_template_id':key})
+        created = self.client.post('/api/orders', json={'school_city':'Казань', 'school':'Тест','class_name':'9 Б','copies':10,'master_template_id':key})
         self.assertEqual(created.status_code,201,created.text)
         order_id = created.json()['id']
         self.assertEqual(self.client.get('/api/orders/'+order_id).json()['master_template_id'],key)
@@ -34,7 +34,7 @@ class MasterTests(unittest.TestCase):
             saved = json.loads(con.execute('SELECT edition_json FROM order_terms WHERE order_id=?',(order_id,)).fetchone()[0])
             self.assertEqual(saved['master']['name'],'Тестовый дизайн')
             self.assertEqual(con.execute('SELECT COUNT(*) FROM offers').fetchone()[0],0)
-        self.assertEqual(self.client.post('/api/orders',json={'school':'Тест','class_name':'9','copies':10,'master_template_id':'missing'}).status_code,404)
+        self.assertEqual(self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9','copies':10,'master_template_id':'missing'}).status_code,404)
         generated = self.client.post(f'/api/orders/{self.order}/layout',json={'master_template_id':key})
         self.assertEqual(generated.status_code,200,generated.text)
         self.assertEqual(self.client.get('/api/orders/'+self.order).json()['master_template_id'],key)
@@ -45,8 +45,8 @@ class MasterTests(unittest.TestCase):
         design = self.client.post('/api/designs', json={'name':'Сентябрь','package_name':'Стандарт','price':2500,'document':master()}).json()
         package = design['packages'][0]
         self.assertEqual(package['summary']['spreads'],6)
-        school = self.client.post('/api/schools', json={'name':'Лицей № 1'}).json()
-        self.assertEqual(self.client.post('/api/schools', json={'name':' лицей  № 1 '}).json()['id'],school['id'])
+        school = self.client.post('/api/schools', json={'city':'Казань', 'name':'Лицей № 1'}).json()
+        self.assertEqual(self.client.post('/api/schools', json={'city':'Казань', 'name':' лицей  № 1 '}).json()['id'],school['id'])
         created = self.client.post('/api/orders', json={'school_id':school['id'],'class_name':'9 Б','copies':10,'price':99,'master_template_id':package['template_id']})
         self.assertEqual(created.status_code,201,created.text)
         order = self.client.get('/api/orders/'+created.json()['id']).json()
@@ -76,7 +76,7 @@ class MasterTests(unittest.TestCase):
         doc = master()
         slot = {'id':'moment','type':'photo','box':{'x':20,'y':40,'w':100,'h':70},'source':'class','pick':{'role':'hero','scale':['full','wide']}}
         doc['sections'][1]['spreads'][0]['pages'][0]['layers'].append(slot)
-        doc['photoRules'] = {'reuse':'section','coverageMin':2,'coverageMax':4,'rhythm':True,'chronology':False}
+        doc['photoRules'] = {'reuse':'section','rhythm':True,'chronology':False}
         self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
         preview = self.client.post('/api/master-templates/photo-preview',json={'document':doc,'students':6,'teachers':0,'owner':'s2'})
         self.assertEqual(preview.status_code,200,preview.text)
@@ -86,7 +86,7 @@ class MasterTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,bad)
         personal = deepcopy(doc); personal['sections'][2]['spreads'][0]['pages'][0]['layers'].append({**slot,'id':'with','pick':{'role':'with_item'}})
         self.assertEqual(self.client.post('/api/master-templates',json={'document':personal}).status_code,201)
-        for rules in ({'reuse':'never'},{'coverageMin':3,'coverageMax':2},{'coverageMin':1.5},{'rhythm':'yes'},{'other':1}):
+        for rules in ({'reuse':'never'},{'rhythm':'yes'},{'other':1}):
             broken = deepcopy(doc); broken['photoRules'] = rules
             self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,rules)
 
@@ -175,7 +175,7 @@ class MasterTests(unittest.TestCase):
         draft=self.client.post('/api/master-templates',json={'document':doc})
         self.assertEqual(draft.status_code,201,draft.text)
         pub=self.client.post(f'/api/master-templates/{draft.json()["id"]}/publish',json={'revision':1}).json()
-        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
         response=self.client.post(f'/api/orders/{order}/layout')
         self.assertEqual(response.status_code,200,response.text)
         generated=response.json()['document']
@@ -194,6 +194,12 @@ class MasterTests(unittest.TestCase):
         bad=deepcopy(doc)
         bad['sections'][0]['safety']['safe']=-1
         self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+        bad=deepcopy(doc)
+        bad['safety']['book']={'safe':3,'bleed':7.5,'outer':3,'spine':250}
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+        book=deepcopy(doc)
+        book['safety']['book']={'safe':3,'bleed':7.5,'outer':3,'spine':10}
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':book}).status_code,201)
 
     def test_grid_effects_go_to_each_portrait(self):
         doc=master()
@@ -222,7 +228,7 @@ class MasterTests(unittest.TestCase):
     def test_versions_and_conflict_and_isolation(self):
         draft=self.create();key=draft['id']
         published=self.client.post(f'/api/master-templates/{key}/publish',json={'revision':1,'price':1700}).json()
-        order=self.client.post('/api/orders',json={'school':'Лицей','class_name':'11А','copies':22,'student_count':22,'offer_id':published['offer_id']}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Лицей','class_name':'11А','copies':22,'student_count':22,'offer_id':published['offer_id']}).json()['id']
         changed=master();changed['name']='Новый дизайн'
         self.assertEqual(self.client.put(f'/api/master-templates/{key}',json={'revision':1,'document':changed}).status_code,200)
         self.assertEqual(self.client.put(f'/api/master-templates/{key}',json={'revision':1,'document':changed}).status_code,409)
@@ -256,7 +262,7 @@ class MasterTests(unittest.TestCase):
 
     def test_order_uses_master_and_preserves_manual_edit(self):
         draft=self.create();pub=self.client.post(f'/api/master-templates/{draft["id"]}/publish',json={'revision':1}).json()
-        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
         with s.db() as con: con.execute('INSERT INTO persons VALUES (?,?,?,?)',('missing',order,'Без портрета',s.now()))
         result=self.client.post(f'/api/orders/{order}/layout')
         self.assertEqual(result.status_code,200,result.text)
@@ -272,7 +278,7 @@ class MasterTests(unittest.TestCase):
 
     def test_class_preview_uses_draft_and_lists_ready_classes(self):
         draft=self.create()
-        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9Б','copies':1}).json()['id']
         classes={c['id']:c for c in self.client.get('/api/preview-classes').json()}
         self.assertFalse(classes[order]['ready']);self.assertIn('нет учеников',classes[order]['missing'])
         with s.db() as con: con.execute('INSERT INTO persons VALUES (?,?,?,?)',('missing',order,'Без портрета',s.now()))
@@ -299,7 +305,7 @@ class MasterTests(unittest.TestCase):
             {'id':'caption','type':'text','box':{'x':10,'y':140,'w':180,'h':30},'text':'Проверка PDF','binding':'static','font':'Times New Roman','fontSize':24,'align':'center','color':'#333333'}]
         draft=self.client.post('/api/master-templates',json={'document':doc}).json()
         pub=self.client.post(f'/api/master-templates/{draft["id"]}/publish',json={'revision':1}).json()
-        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
         generated=self.client.post(f'/api/orders/{order}/layout')
         self.assertEqual(generated.status_code,200,generated.text)
         self.assertEqual(generated.json()['document']['issues'],[])
@@ -423,7 +429,7 @@ class MasterTests(unittest.TestCase):
         source=design['packages'][0]['template_id']
         self.client.post(f'/api/designs/{design["id"]}/packages',json={'name':'Эконом','price':1500,'source_id':source})
         self.client.post(f'/api/designs/{design["id"]}/blocks',json={'name':'Ученики','section':master()['sections'][0]})
-        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9 Б','copies':10,'master_template_id':source}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9 Б','copies':10,'master_template_id':source}).json()['id']
         copy=self.client.post(f'/api/designs/{design["id"]}/duplicate')
         self.assertEqual(copy.status_code,201,copy.text)
         copy=copy.json()
@@ -469,6 +475,31 @@ class MasterTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             validate(broken)
 
+    def test_layer_may_cross_the_fold_above_both_backgrounds(self):
+        doc=master()
+        pages=doc['sections'][1]['spreads'][0]['pages']
+        pages[1]['background']='#eeeeee'
+        pages[0]['layers']=[{'id':'wide','type':'rect','box':{'x':20,'y':20,'w':300,'h':100},'fill':'#223344'}]
+        response=self.client.post('/api/master-templates',json={'document':doc})
+        self.assertEqual(response.status_code,201,response.text)
+        snapshot={'students':[{'id':'1','first_name':'Ученик','last_name':'Один'}],
+                  'teachers':[],'photos':{},'selections':[],
+                  'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        spread=next(sp for sp in compiled['variant_spreads']['student:1'].values() if any(e['key'].endswith('/wide') for e in sp['elements']))
+        keys=[e['key'] for e in spread['elements']]
+        wide=next(i for i,k in enumerate(keys) if k.endswith('/wide'))
+        self.assertTrue(all(i<wide for i,k in enumerate(keys) if k.endswith('/background')))
+        self.assertEqual(spread['elements'][wide]['box'],[20,20,300,100])
+        for box in ({'x':20,'y':20,'w':420,'h':100},{'x':-5,'y':20,'w':100,'h':100}):
+            bad=deepcopy(doc);bad['sections'][1]['spreads'][0]['pages'][0]['layers'][0]['box']=box
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
+        right=deepcopy(doc);right['sections'][1]['spreads'][0]['pages'][0]['layers']=[]
+        right['sections'][1]['spreads'][0]['pages'][1]['layers']=[{'id':'wide','type':'rect','box':{'x':-150,'y':20,'w':300,'h':100},'fill':'#223344'}]
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':right}).status_code,201)
+        grid=deepcopy(doc);grid['sections'][0]['spreads'][0]['pages'][0]['layers'][0]['box']['w']=250
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':grid}).status_code,422)
+
     def test_svg_shape_is_saved_and_drawn(self):
         from pypdf import PdfReader
         from io import BytesIO
@@ -480,7 +511,7 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(draft.status_code,201,draft.text)
         pub=self.client.post(f'/api/master-templates/{draft.json()["id"]}/publish',json={'revision':1})
         self.assertLess(pub.status_code,300,pub.text)
-        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub.json()['offer_id']}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub.json()['offer_id']}).json()['id']
         generated=self.client.post(f'/api/orders/{order}/layout')
         self.assertEqual(generated.status_code,200,generated.text)
         element=next(e for spread in generated.json()['document']['variant_spreads']['student:class'].values() for e in spread['elements'] if e['type']=='svg')
@@ -513,7 +544,7 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422)
         pub=self.client.post(f'/api/master-templates/{saved.json()["id"]}/publish',json={'revision':1})
         self.assertLess(pub.status_code,300,pub.text)
-        order=self.client.post('/api/orders',json={'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub.json()['offer_id']}).json()['id']
+        order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub.json()['offer_id']}).json()['id']
         generated=self.client.post(f'/api/orders/{order}/layout')
         self.assertEqual(generated.status_code,200,generated.text)
         text=next(e for spread in generated.json()['document']['variant_spreads']['student:class'].values() for e in spread['elements'] if e['type']=='text' and e.get('text')=='Свой шрифт')

@@ -96,3 +96,7 @@
 .tgroup-body .error:empty{display:none}
 .tgroup-body>small{font-size:11px}
 .teacher-by{color:#6f8a4a!important}
+
+.school-heading-actions{flex-wrap:wrap}.school-tabs{margin-bottom:24px}.school-tabs button{background:none;padding:12px 16px;border-bottom:2px solid transparent}.school-tabs button[aria-selected=true]{border-color:#35382d;font-weight:600}.teacher-toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:20px}.teacher-toolbar label:first-child{flex:1;min-width:180px}.teacher-toolbar label{margin:0}.teacher-toolbar input,.teacher-toolbar select{margin-bottom:0!important}.teacher-preview{display:block;width:100%;max-height:75vh;object-fit:contain}.teacher-history{margin-top:20px}.teacher-history>div{display:flex;gap:14px;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e4e5de}.teacher-choice{flex-wrap:wrap}.teacher-subject{font-size:11px;width:180px}.teacher-subject input{width:100%;margin:4px 0 0!important}.school-picker>label{display:block}.school-picker .school-options{position:relative;top:auto;max-height:220px;overflow:auto}.school-picker .school-options[hidden]{display:none}.school-tabs{display:flex;gap:8px}.schools-page [data-school-panel][hidden]{display:none}
+
+[data-assign-save][hidden]{display:none}.teacher-subject input:disabled{opacity:.7}

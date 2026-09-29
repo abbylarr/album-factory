@@ -53,7 +53,7 @@ RELAX_TEXT = {
     'cut': 'Нет снимка подходящей ориентации — кадрирование обрезает людей',
     'reuse': 'Общих фото не хватает — снимок повторяется',
 }
-DEFAULT_RULES = {'reuse': 'album', 'coverageMin': 1, 'coverageMax': 0, 'rhythm': True, 'chronology': True, 'mixShoots': True, 'posedFirst': True}
+DEFAULT_RULES = {'reuse': 'album', 'rhythm': True, 'chronology': True, 'mixShoots': True, 'posedFirst': True}
 MIN_DPI, GOOD_DPI, VISIBLE_FACE_MM, HERO_FACE_MM = 120, 200, 4.0, 6.0
 
 
@@ -68,8 +68,9 @@ def people_of(entry):
 
 
 def categories_of(master):
-    """Built-in categories with the master's edits applied, then its own categories."""
-    result = {key: {**value, 'filters': dict(value['filters'])} for key, value in CATEGORIES.items()}
+    """Built-in categories with the master's edits applied and its removed ones left out, then its own categories."""
+    removed = set((master or {}).get('removedCategories') or ())
+    result = {key: {**value, 'filters': dict(value['filters'])} for key, value in CATEGORIES.items() if key not in removed}
     for item in (master or {}).get('photoCategories') or []:
         base = result.get(item['id'], {})
         result[item['id']] = {**base, 'name': item.get('name') or base.get('name', ''),
@@ -227,26 +228,28 @@ class Picker:
             score += .35 if 'hero' in c['prefer'] else .05
         if 'smile' in c['prefer'] and entry.get('smile') is not None:
             score += .2 * entry['smile']
-        low, high = self.rules['coverageMin'], self.rules['coverageMax']
-        for subject, mm in seen['faces'].items():
-            if mm < VISIBLE_FACE_MM or subject not in coverage:
-                continue
-            if coverage[subject] < low:
-                score += .25
-            elif high and coverage[subject] >= high:
-                score -= .3
+        if not slot['about_one']:
+            # Shared spreads spread the class evenly: a photo of those shown less than average so far wins.
+            shown = [coverage[s] for s, mm in seen['faces'].items() if mm >= VISIBLE_FACE_MM and s in coverage]
+            if shown and coverage:
+                average = sum(coverage.values()) / len(coverage)
+                score += max(-.3, min(.25, .1 * (average - sum(shown) / len(shown))))
         for other in placed.get(slot['spread'], []):
             if self.rules['rhythm']:
                 if other['series'] and other['series'] == entry.get('series'):
                     score -= .6
                 if other['scale'] == seen['scale']:
                     score -= .15
-            if self.rules['mixShoots'] and self.shoots > 1 and other.get('shoot') and other['shoot'] == entry.get('shoot'):
-                score -= .3
+            if self.shoots > 1 and other.get('shoot') and other['shoot'] == entry.get('shoot'):
+                # A student's spread mixes shoots; a shared one keeps to one shoot.
+                if slot['about_one'] and self.rules['mixShoots']:
+                    score -= .3
+                elif not slot['about_one'] and self.rules['chronology']:
+                    score += .2
         if self.rules['posedFirst'] and not c['style'] and entry.get('style') in ('posed', 'candid'):
             late = slot.get('section_rank', .5)
             score += .6 * (1 - late if entry['style'] == 'posed' else late)
-        if self.rules['chronology']:
+        if self.rules['chronology'] and not (slot['about_one'] and self.rules['mixShoots']):
             score -= .25 * abs(self.rank[entry['id']] - slot['rank'])
         if seen['dpi'] < GOOD_DPI:
             score -= .2
@@ -278,6 +281,10 @@ class Picker:
         count = max(1, len(slots) - 1)
         for index, slot in enumerate(slots):
             slot['rank'] = min(1.0, slot.get('order', index) / max(1, slot.get('total', count)))
+        # A spread is about one student when any of its slots shows its hero or the album owner.
+        about_one = {s['spread'] for s in slots if s['personal'] or resolve(s['pick'], self.categories)['include']}
+        for slot in slots:
+            slot['about_one'] = slot['spread'] in about_one
         by_section = {}
         for slot in slots:
             by_section.setdefault(slot['section'], set()).add(slot.get('order', 0))

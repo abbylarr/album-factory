@@ -119,8 +119,9 @@ def snapshot_for(con, order, data, master=False):
         selections.append({'owner': 'student:' + person['id'], 'role': 'alt_portrait', 'photo': alternate})
     if not master and len(students) < 3:
         raise HTTPException(409, 'Для макета нужны портреты минимум трёх персон. Проверьте группы фотографий.')
-    return {'schema_version': 2,
-            'order': {'id': order['id'], 'school': order['school'], 'class_name': order['class_name'],
+    from .school_catalog import catalog_state
+    return {'schema_version': 2, 'school_catalog_state': catalog_state(con, order['id']),
+            'order': {'id': order['id'], 'school': order['school'], 'city': order['school_city'], 'class_name': order['class_name'],
                       'year': str(order['graduation_year']), 'studio': ''},
             'students': students, 'teachers': [], 'photos': photos, 'selections': selections,
             'general_photos': [p['id'] for p in data['photos'] if p['id'] in photos and p['shoot_type'] == 'general'],

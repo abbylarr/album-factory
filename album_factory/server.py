@@ -84,6 +84,13 @@ def init_db():
         init_mvp(con)
         from .school_catalog import init as init_school_catalog
         init_school_catalog(con)
+        # Backfill fingerprints for portraits selected before upload history existed.
+        for teacher in con.execute("""SELECT id,school_id,portrait_path FROM teachers WHERE portrait_path!=''
+                AND id NOT IN (SELECT id FROM teacher_uploads)""").fetchall():
+            original = (DATA / teacher["portrait_path"]).with_suffix('.original')
+            if original.is_file():
+                con.execute("INSERT OR IGNORE INTO teacher_uploads VALUES (?,?,?)",
+                            (teacher["school_id"], hashlib.sha256(original.read_bytes()).hexdigest(), teacher["id"]))
         from .master_templates import init as init_masters
         init_masters(con)
         from .general_photos import init as init_general
@@ -258,16 +265,19 @@ def graduation_year_for(date):
 
 
 class OrderEditInput(BaseModel):
-    school: str = Field(default="", max_length=100)
+    school: str = Field(default="", max_length=300)
+    school_city: str = Field(default="", max_length=100)
     school_id: str | None = None
     class_name: str = Field(min_length=1, max_length=30)
     graduation_year: int = Field(ge=2000, le=2100)
+    confirm_school_change: bool = False
 
 
 class OrderInput(BaseModel):
     master_template_id: str | None = None
     graduation_year: int | None = Field(default=None, ge=2000, le=2100)
-    school: str = Field(default="", max_length=100)
+    school: str = Field(default="", max_length=300)
+    school_city: str = Field(default="", max_length=100)
     class_name: str = Field(min_length=1, max_length=30)
     copies: int = Field(ge=1, le=1000)
     price: int = Field(default=0, ge=0, le=1_000_000)
@@ -330,11 +340,8 @@ def school_name(con, school_id):
 def create_order(payload: OrderInput):
     values = payload.model_dump()
     values["school"], values["class_name"] = values["school"].strip(), values["class_name"].strip()
-    if values["school_id"]:
-        with db() as con:
-            values["school"] = school_name(con, values["school_id"])
-    if not values["school"] or not values["class_name"]:
-        raise HTTPException(422, "Укажите школу и класс")
+    if not values["class_name"]:
+        raise HTTPException(422, "Укажите класс")
     if values["shoot_date"]:
         try:
             datetime.strptime(values["shoot_date"], "%Y-%m-%d")
@@ -342,9 +349,13 @@ def create_order(payload: OrderInput):
             raise HTTPException(422, "Некорректная дата съёмки")
     order_id = uid()
     with db() as con:
+        con.execute("BEGIN IMMEDIATE")
+        from .school_catalog import resolve_order_school
+        values["school_id"], values["school"], values["school_city"] = resolve_order_school(
+            con, values["school_id"], values["school"], values["school_city"], uid)
         created = now()
-        con.execute("INSERT INTO orders (id,school,class_name,copies,price,shoot_date,stage,created_at,stage_at,graduation_year) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (order_id, values["school"], values["class_name"], values["copies"], values["price"], values["shoot_date"], "new", created, created, values["graduation_year"] or graduation_year_for(datetime.fromisoformat(created))))
+        con.execute("INSERT INTO orders (id,school,school_city,class_name,copies,price,shoot_date,stage,created_at,stage_at,graduation_year) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (order_id, values["school"], values["school_city"], values["class_name"], values["copies"], values["price"], values["shoot_date"], "new", created, created, values["graduation_year"] or graduation_year_for(datetime.fromisoformat(created))))
         from . import mvp
         mvp.attach_order(con, order_id, mvp.studio_ctx.get(), values)
         if values["master_template_id"]:
@@ -355,16 +366,25 @@ def create_order(payload: OrderInput):
 
 @app.patch("/api/orders/{order_id}")
 def edit_order(order_id: str, payload: OrderEditInput):
-    school, class_name = payload.school.strip(), payload.class_name.strip()
+    from .school_catalog import resolve_order_school, order_school_id, LOCKED_STAGES
     with db() as con:
-        require_order(con, order_id)
-        if payload.school_id:
-            school = school_name(con, payload.school_id)
-            con.execute("UPDATE order_terms SET school_id=? WHERE order_id=?", (payload.school_id, order_id))
-        if not school or not class_name:
-            raise HTTPException(422, "Укажите школу и класс")
-        con.execute("UPDATE orders SET school=?, class_name=?, graduation_year=? WHERE id=?",
-                    (school, class_name, payload.graduation_year, order_id))
+        con.execute("BEGIN IMMEDIATE")
+        order = require_order(con, order_id)
+        if order["stage"] in LOCKED_STAGES:
+            raise HTTPException(409, "Заказ уже в печати или архиве. Данные школы и класса зафиксированы")
+        old_school = order_school_id(con, order_id)
+        school_id, name, city = resolve_order_school(con, payload.school_id if payload.school_id else (old_school if payload.school == order["school"] and (not payload.school_city or payload.school_city == order["school_city"]) else None), payload.school, payload.school_city, uid)
+        if old_school and old_school != school_id:
+            if not payload.confirm_school_change:
+                raise HTTPException(409, "Смена школы сбросит состав учителей. Подтвердите смену школы")
+            con.execute("DELETE FROM order_teachers WHERE order_id=?", (order_id,))
+            con.execute("DELETE FROM order_teacher_state WHERE order_id=?", (order_id,))
+            con.execute("UPDATE teacher_photos SET order_id=NULL WHERE order_id=?", (order_id,))
+        if not payload.class_name.strip():
+            raise HTTPException(422, "Укажите класс")
+        con.execute("UPDATE order_terms SET school_id=? WHERE order_id=?", (school_id, order_id))
+        con.execute("UPDATE orders SET school=?,school_city=?,class_name=?,graduation_year=? WHERE id=?",
+                    (name, city, payload.class_name.strip(), payload.graduation_year, order_id))
     return {"id": order_id}
 
 
@@ -375,7 +395,6 @@ def get_order(order_id: str):
         terms = con.execute("""SELECT t.customer_name, t.customer_contact, t.school_id, s.city AS school_city
             FROM order_terms t LEFT JOIN schools s ON s.id=t.school_id WHERE t.order_id=?""", (order_id,)).fetchone()
         order["school_id"] = terms["school_id"] if terms else None
-        order["school_city"] = (terms["school_city"] or "") if terms else ""
         order["customer_name"] = terms["customer_name"] if terms else ""
         order["customer_contact"] = terms["customer_contact"] if terms else ""
         order["approved"] = bool(con.execute(f"SELECT {APPROVED} FROM orders o WHERE o.id=?", (order_id,)).fetchone()[0])

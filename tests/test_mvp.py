@@ -56,10 +56,12 @@ class MvpTests(unittest.TestCase):
         offer = self.publish()
         self.client.put("/api/profile", json={"teacher_gift": False, "delivery_modes": "personal"})
         created = self.client.post("/api/orders", json={
+            'school_city': 'Казань',
             "school": "Лицей", "class_name": "11А", "copies": 20, "customer_name": "Ирина Петрова",
             "customer_contact": "+79990000000", "offer_id": offer, "student_count": 2})
         self.assertEqual(created.status_code, 422)
         created = self.client.post("/api/orders", json={
+            'school_city': 'Казань',
             "school": "Лицей", "class_name": "11А", "copies": 20, "customer_name": "Ирина Петрова",
             "customer_contact": "+79990000000", "offer_id": offer, "student_count": 3}).json()
         self.client.put("/api/profile", json={"teacher_gift": True, "delivery_modes": "shipping"})

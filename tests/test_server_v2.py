@@ -23,7 +23,7 @@ class V2Tests(unittest.TestCase):
         self.addCleanup(self.client.__exit__, None, None, None)
         self.client.get('/v2')
         self.client.headers['origin'] = 'http://testserver'
-        self.order = self.client.post('/api/orders', json={'school':'Тест', 'class_name':'9Б', 'copies':20}).json()['id']
+        self.order = self.client.post('/api/orders', json={'school_city':'Казань', 'school':'Тест', 'class_name':'9Б', 'copies':20}).json()['id']
 
     def photo(self, order=None, status='ready', uncertain=0, person='person'):
         pid = s.uid()
@@ -49,7 +49,7 @@ class V2Tests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/orders').status_code,200)
 
     def test_order_keeps_customer_and_phone(self):
-        created=self.client.post('/api/orders',json={'school':'Лицей','class_name':'11 А','copies':5,'customer_name':'  Ирина Петрова  ','customer_contact':' +7 999 000-00-00 '})
+        created=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Лицей','class_name':'11 А','copies':5,'customer_name':'  Ирина Петрова  ','customer_contact':' +7 999 000-00-00 '})
         self.assertEqual(created.status_code,201,created.text)
         order_id=created.json()['id']
         order=self.client.get(f'/api/orders/{order_id}').json()
@@ -80,7 +80,7 @@ class V2Tests(unittest.TestCase):
 
     def test_cross_order_deletion_is_atomic(self):
         a=self.photo()
-        other=self.client.post('/api/orders',json={'school':'Другая','class_name':'1А','copies':1}).json()['id']
+        other=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Другая','class_name':'1А','copies':1}).json()['id']
         b=self.photo(order=other,person='other')
         result=self.client.post(f'/api/orders/{self.order}/delete-photos',json={'photo_ids':[a,b]})
         self.assertEqual(result.status_code,404)

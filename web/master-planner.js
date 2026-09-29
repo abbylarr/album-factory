@@ -51,7 +51,7 @@ let planning=[];
     return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="133" viewBox="0 0 100 133"><rect width="100" height="133" fill="#e7e5e0"/>${circles}</svg>`);
   }
   function resolvedPhoto(item,generated){if(item.source==='custom')return item.dataUrl||null;if(item.source==='class')return placeholderSvg(null,true);const person=photoPerson(item.source,generated.personId);return person&&!person.missing?placeholderSvg(person):null;}
-  function resolvedText(item,generated){if(item.binding==='static')return item.text;const person=photoPerson(item.binding.startsWith('item')?'item':item.binding.startsWith('lead')?'lead':'owner',generated.personId);if(item.binding.endsWith('.name'))return person?.name||'Нет данных';if(item.binding==='class')return '11 «А»';if(item.binding==='year')return '2026';return item.text;}
+  function resolvedText(item,generated){if(item.binding==='static')return item.text;const person=photoPerson(item.binding.startsWith('item')?'item':item.binding.startsWith('lead')?'lead':'owner',generated.personId);if(item.binding.endsWith('.name'))return person?.name||'Нет данных';if(item.binding==='class')return '11 «А»';if(item.binding==='year')return '2026';if(item.binding==='school')return 'Школа № 5';if(item.binding==='city')return 'Казань';return item.text;}
 
 return {plan,people,gridGeometry,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
 };

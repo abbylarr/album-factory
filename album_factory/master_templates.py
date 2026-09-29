@@ -71,15 +71,21 @@ def validate(document):
         for key in ('safe', 'bleed', 'spine', 'gap'):
             check(number(value.get(key, 0), 0, limit if key != 'bleed' else 30), 'Неверные линии безопасности')
         check(value.get('safe', 0) + value.get('bleed', 0) < limit, 'Зона безопасности не помещается')
+    # A book is printed page by page: bleed on the top, bottom and outer edge, a spine strip on the inner edge.
+    def book_safety(value, width, height):
+        check(isinstance(value, dict) and set(value) <= {'safe', 'bleed', 'outer', 'spine'}, 'Неверные линии безопасности книги')
+        for key, high in (('safe', 60), ('bleed', 30), ('outer', 30), ('spine', 40)):
+            check(number(value.get(key, 0), 0, high), 'Неверные линии безопасности книги')
+        safe = value.get('safe', 0)
+        check(value.get('outer', 0) + value.get('spine', 0) + 2 * safe < width and 2 * (value.get('bleed', 0) + safe) < height, 'Зона безопасности книги не помещается')
     if 'safety' in document:
         safety(document['safety'], page_width, page_height)
+        if 'book' in document['safety']:
+            book_safety(document['safety']['book'], page_width, page_height)
     if 'photoRules' in document:
         rules = document['photoRules']
-        check(isinstance(rules, dict) and set(rules) <= {'reuse', 'coverageMin', 'coverageMax', 'rhythm', 'chronology', 'mixShoots', 'posedFirst'}, 'Неверные правила общих фото')
+        check(isinstance(rules, dict) and set(rules) <= {'reuse', 'rhythm', 'chronology', 'mixShoots', 'posedFirst'}, 'Неверные правила общих фото')
         check(rules.get('reuse', 'album') in {'album', 'section', 'allow'}, 'Неверное правило повторов')
-        check(isinstance(rules.get('coverageMin', 1), int) and 0 <= rules.get('coverageMin', 1) <= 10, 'Неверный минимум появлений')
-        check(isinstance(rules.get('coverageMax', 0), int) and 0 <= rules.get('coverageMax', 0) <= 50, 'Неверный максимум появлений')
-        check(not rules.get('coverageMax') or rules['coverageMax'] >= rules.get('coverageMin', 1), 'Максимум появлений меньше минимума')
         check(all(isinstance(rules.get(k, True), bool) for k in ('rhythm', 'chronology', 'mixShoots', 'posedFirst')), 'Неверные правила общих фото')
     def filters(value, message):
         def subset(key, allowed, limit):
@@ -102,12 +108,19 @@ def validate(document):
         check(value.get('include') != 'item' or section.get('kind') == 'repeat', 'Герой разворота есть только в личных разворотах')
     from .photo_pick import CATEGORIES, PEOPLE
     category_ids, seen = set(CATEGORIES), set()
+    if 'removedCategories' in document:
+        removed = document['removedCategories']
+        # «Любое» stays: slots of removed categories fall back to it.
+        check(isinstance(removed, list) and len(set(removed)) == len(removed)
+              and all(isinstance(k, str) and k in CATEGORIES and k != 'any' for k in removed), 'Неверные удалённые категории')
+        category_ids -= set(removed)
     if 'photoCategories' in document:
         items = document['photoCategories']
         check(isinstance(items, list) and len(items) <= 40, 'Неверные категории общих фото')
         for item in items:
             check(isinstance(item, dict) and set(item) <= {'id', 'name', 'people', 'scale', 'tags', 'style', 'quality'}, 'Неверная категория общих фото')
-            check(isinstance(item.get('id'), str) and re.fullmatch(r'[\w-]{1,40}', item['id']) and item['id'] not in seen, 'Неверная категория общих фото')
+            check(isinstance(item.get('id'), str) and re.fullmatch(r'[\w-]{1,40}', item['id']) and item['id'] not in seen
+                  and item['id'] not in document.get('removedCategories', ()), 'Неверная категория общих фото')
             check(isinstance(item.get('name'), str) and 1 <= len(item['name'].strip()) <= 40, 'Название категории — от 1 до 40 символов')
             filters(item, 'Неверный фильтр категории')
             seen.add(item['id']); category_ids.add(item['id'])
@@ -192,7 +205,7 @@ def validate(document):
             check(isinstance(spread, dict), 'Неверный разворот'); identity(spread)
             check(spread.get('role', 'repeat') in {'intro', 'repeat', 'last', 'outro'}, 'Неверная роль разворота')
             check(isinstance(spread.get('pages'), list) and len(spread['pages']) == 2, 'В развороте две страницы')
-            for page in spread['pages']:
+            for side, page in enumerate(spread['pages']):
                 check(isinstance(page, dict), 'Неверная страница'); identity(page)
                 check(color(page.get('background')), 'Неверный цвет страницы')
                 check(isinstance(page.get('layers'), list) and len(page['layers']) <= 100, 'Слишком много слоёв')
@@ -202,8 +215,10 @@ def validate(document):
                     kind = layer.get('type')
                     check(kind in {'text', 'photo', 'rect', 'ellipse', 'line', 'grid', 'collage', 'svg'}, 'Неизвестный инструмент')
                     b = layer.get('box', {})
-                    check(isinstance(b, dict) and all(number(b.get(k), 0 if k in 'xy' else .1, max(page_width, page_height)) for k in ('x','y','w','h')), 'Неверные размеры слоя')
-                    check(b['x'] + b['w'] <= page_width + .01 and b['y'] + b['h'] <= page_height + .01, 'Слой выходит за страницу')
+                    # Box is relative to its page; any layer but a vignette may cross the fold within the spread.
+                    left, right = (0, page_width) if kind == 'grid' else (-side * page_width, (2 - side) * page_width)
+                    check(isinstance(b, dict) and number(b.get('x'), left - .01, right) and number(b.get('y'), 0, page_height) and all(number(b.get(k), .1, 2 * max(page_width, page_height)) for k in ('w', 'h')), 'Неверные размеры слоя')
+                    check(b['x'] + b['w'] <= right + .01 and b['y'] + b['h'] <= page_height + .01, 'Слой выходит за разворот')
                     check(number(layer.get('opacity', 100), 0, 100), 'Неверная прозрачность')
                     check(number(layer.get('angle', 0), -180, 180), 'Неверный угол поворота')
                     check(number(layer.get('radius', 0), 0, 100), 'Неверный радиус')
@@ -240,7 +255,7 @@ def validate(document):
                         if layer.get('styleId'):
                             check(layer['styleId'] in known_styles, 'Неизвестный стиль текста')
                         check(isinstance(layer.get('text'), str) and len(layer['text']) <= 2000, 'Текст длиннее 2000 символов')
-                        check(layer.get('binding') in {'static','owner.name','item.name','lead.name','class','year'}, 'Неверное поле текста')
+                        check(layer.get('binding') in {'static','owner.name','item.name','lead.name','class','year','school','city'}, 'Неверное поле текста')
                         check(layer.get('align') in {'left','center','right','justify'}, 'Неверное выравнивание')
                     if kind == 'photo':
                         check(layer.get('source') in {'lead','owner','item','class','custom'}, 'Неверный источник фото')
@@ -374,7 +389,7 @@ def preview_photos(document, students, teachers, owner):
     for person in people + staff:
         photos['portrait-' + person['id']] = {'width': 3000, 'height': 4000, 'path': ''}
     selections = [{'owner': ('student:' if p in people else 'teacher:') + p['id'], 'role': 'main_portrait', 'photo': 'portrait-' + p['id']} for p in people + staff]
-    snapshot = {'schema_version': 2, 'order': {'id': 'preview', 'school': 'Школа', 'class_name': '11 А', 'year': '2026', 'studio': ''},
+    snapshot = {'schema_version': 2, 'order': {'id': 'preview', 'school': 'Школа № 5', 'city': 'Казань', 'class_name': '11 А', 'year': '2026', 'studio': ''},
                 'students': people, 'teachers': staff, 'photos': photos, 'selections': selections, 'general': entries,
                 'general_photos': [e['id'] for e in entries], 'master_assets': {}}
     if owner not in {p['id'] for p in people}:
@@ -404,8 +419,7 @@ def preview_photos(document, students, teachers, owner):
                 item.update({'photo': entry['id'], 'size': [w, h], 'crop': [x / w, y / h, cw / w, ch / h], 'bucket': entry['bucket'],
                              'scale': entry['scale'], 'persons': [{'box': p['box'], 'face': p['face'], 'owner': p['subject'] == owner} for p in entry['persons']]})
             slots[f'{section}:{page}/{match.group(4)}'] = item
-    coverage = result['photo_report']['coverage']
-    return {'slots': slots, 'coverage': {k: v for k, v in coverage.items() if k.startswith('s')}, 'photos': len(entries),
+    return {'slots': slots, 'photos': len(entries),
             'issues': [i for i in result['issues'] if i['key'].startswith(('coverage', 'must')) or '[*]' in i['key'] or '[student:' in i['key'] and i['message'] in RELAX_MESSAGES]}
 
 

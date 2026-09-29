@@ -16,7 +16,7 @@ class GraduationYearTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.object(s,'DATA',Path(tmp)), patch.object(s.executor,'submit'), TestClient(s.app) as client:
             client.get('/v2');client.headers['origin']='http://testserver'
             with patch.object(s,'now',return_value='2026-09-28T10:00:00+00:00'):
-                response=client.post('/api/orders',json={'school':'Школа 1','class_name':'9 Б','copies':20})
+                response=client.post('/api/orders',json={'school_city':'Казань', 'school':'Школа 1','class_name':'9 Б','copies':20})
             self.assertEqual(response.status_code,201,response.text)
             id=response.json()['id']
             self.assertEqual(client.get('/api/orders/'+id).json()['graduation_year'],2027)
@@ -25,7 +25,7 @@ class GraduationYearTests(unittest.TestCase):
             self.assertEqual(client.get('/api/orders/'+id).json()['graduation_year'],2028)
             self.assertEqual(client.get('/api/orders').json()[0]['graduation_year'],2028)
             self.assertEqual(client.patch('/api/orders/'+id,json={'school':' ','class_name':'9 Б','graduation_year':2028}).status_code,422)
-            self.assertEqual(client.post('/api/orders',json={'school':'Тест','class_name':'9','copies':1,'graduation_year':1900}).status_code,422)
+            self.assertEqual(client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9','copies':1,'graduation_year':1900}).status_code,422)
             with s.db() as con:
                 con.execute('UPDATE orders SET graduation_year=NULL WHERE id=?',(id,))
             s.init_db()

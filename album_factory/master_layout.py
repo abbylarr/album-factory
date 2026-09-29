@@ -321,13 +321,16 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                     if e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
                         issue('error',e['key'],'Текст выходит за границы рамки')
                 blank_sides = []
+                # Both page backgrounds go first: an object may cross the fold and must not be covered by the next page.
+                for side,(page, *_) in enumerate(pages[index:index+2]):
+                    if page is not None and (section['id'], index + side) not in blanks:
+                        add({'key':f'{spread_key}/{side}/background','type':'rect','box':[side*page_width,0,page_width,page_height],'fill':page['background']})
                 for side,(page, item, records, layout_count) in enumerate(pages[index:index+2]):
                     if (section['id'], index + side) in blanks:
                         blank_sides.append(side); continue
                     if page is None: continue
                     appearance={}
                     prefix=f'{spread_key}/{side}'
-                    add({'key':prefix+'/background','type':'rect','box':[side*page_width,0,page_width,page_height],'fill':page['background']})
                     lead = snapshot['teachers'][0] if snapshot['teachers'] else None
                     styles = {style['id']: style for style in master.get('textStyles', [])}
                     for layer in page['layers']:
@@ -358,7 +361,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                             return {'key':key,'type':'photo','box':bounds,'photo':photo,'crop':crop(photo,bounds,layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1)) if photo else None,'mask':'rect','required':True,'opacity':layer.get('opacity',100)}
                         if layer['type']=='text':
                             binding=layer.get('binding','static')
-                            value={'owner.name':name(owner),'item.name':name(item),'lead.name':name(lead),'class':snapshot['order']['class_name'],'year':snapshot['order']['year']}.get(binding,layer['text'])
+                            value={'owner.name':name(owner),'item.name':name(item),'lead.name':name(lead),'class':snapshot['order']['class_name'],'year':snapshot['order']['year'],'school':snapshot['order'].get('school',''),'city':snapshot['order'].get('city','')}.get(binding,layer['text'])
                             add({**text_element(key,bounds,value,layer['fontSize']),'valign':'middle'})
                         elif layer['type']=='photo':
                             source=layer['source']
@@ -483,7 +486,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 issue('warning', slot['ident'], f'Разрешение снимка в слоте {result["dpi"]} dpi — ниже 200')
         slot['finish'](e)
     for student in students:
-        if 'general' in snapshot and entries and report['coverage'].get(student['id'], 0) < rules_of(master)['coverageMin']:
+        if 'general' in snapshot and entries and not report['coverage'].get(student['id']):
             issue('warning', 'coverage:' + student['id'], f'{name(student)}: нет на общих фото альбома')
     for photo in report['unplaced']:
         issue('warning', 'must:' + photo, 'Обязательное фото не поместилось ни в один слот')

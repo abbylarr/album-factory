@@ -33,7 +33,7 @@ window.MasterDefaults=(()=>{const id=()=>crypto.randomUUID();
     return {id:id(),name:options.name||'Общие фотографии',kind:'fixed',spreads:Array.from({length:count},(_,i)=>options.empty?spread(page([]),page([])):spread(page([photo(14,18,182,230,'class',`Общее фото ${i*2+1}`)]),page([photo(14,18,182,230,'class',`Общее фото ${i*2+2}`)])))};
   }
   function defaultDocument(){
-    return {schemaVersion:1,rulesVersion:2,layout:'spreads',name:'Выпускной альбом · Классика',pageSize:[210,280],safety:{safe:5,bleed:3,spine:0,gap:0},textStyles:textStyles(),sections:[
+    return {schemaVersion:1,rulesVersion:2,layout:'spreads',name:'Выпускной альбом · Классика',pageSize:[210,280],safety:{safe:5,bleed:3,spine:0,gap:0,book:{safe:3,bleed:7.5,outer:3,spine:10}},textStyles:textStyles(),sections:[
       cover(),
       {id:'intro',name:'Начало',kind:'fixed',spreads:[spread(page([]),page([photo(14,18,182,230,'owner','Портрет владельца')]))]},
       {...block('flow',{source:'teachers',intro:true}),id:'teachers'},

@@ -38,7 +38,7 @@ class ClientPortalTests(unittest.TestCase):
     def test_scope_and_validation(self):
         photo = self.photo()
         base = self.link()
-        other = self.client.post('/api/orders', json=dict(school='Другая', class_name='1', copies=1)).json()['id']
+        other = self.client.post('/api/orders', json=dict(school_city='Казань', school='Другая', class_name='1', copies=1)).json()['id']
         other_photo = self.photo(order=other, person='other')
         payload = dict(photo_id=other_photo, first_name='Анна', last_name='Иванова')
         self.assertEqual(self.client.put(base+'/persons/person', json=payload).status_code, 409)

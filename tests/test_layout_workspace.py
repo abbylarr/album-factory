@@ -26,7 +26,7 @@ class LayoutWorkspaceTests(unittest.TestCase):
         self.addCleanup(self.client.__exit__, None, None, None)
         self.client.get('/v2')
         self.client.headers['origin'] = 'http://testserver'
-        self.order = self.client.post('/api/orders', json={'school':'Школа', 'class_name':'9 А', 'copies':3}).json()['id']
+        self.order = self.client.post('/api/orders', json={'school_city':'Казань', 'school':'Школа', 'class_name':'9 А', 'copies':3}).json()['id']
 
     def photo(self, person_id=None, kind='portrait', size=(2400, 3300)):
         photo_id, shoot_id = s.uid(), s.uid()
@@ -117,7 +117,7 @@ class LayoutWorkspaceTests(unittest.TestCase):
         self.assertTrue(all(custom not in v['sequence'] for v in removed.json()['document']['variants']))
         document=removed.json()['document']
         self.assertEqual(self.client.get('/api/orders').json()[0]['stage'],'layout')
-        other=self.client.post('/api/orders',json={'school':'Другая','class_name':'1 А','copies':1}).json()['id']
+        other=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Другая','class_name':'1 А','copies':1}).json()['id']
         self.assertEqual(self.client.get(f'/api/orders/{other}/layout').status_code,404)
         self.assertEqual(self.client.put(path+'/element',json={'key':'intro/class_photo','type':'photo','value':'missing','revision':document['revision']}).status_code,422)
 

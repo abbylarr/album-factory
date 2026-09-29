@@ -18,7 +18,7 @@ class ShootTests(unittest.TestCase):
         self.client = TestClient(s.app)
         self.client.__enter__(); self.addCleanup(self.client.__exit__, None, None, None)
         self.client.get('/v2'); self.client.headers['origin'] = 'http://testserver'
-        self.order = self.client.post('/api/orders', json={'school':'Тест','class_name':'А','copies':1}).json()['id']
+        self.order = self.client.post('/api/orders', json={'school_city':'Казань', 'school':'Тест','class_name':'А','copies':1}).json()['id']
 
     def shoot(self, kind='portrait'):
         response = self.client.post(f'/api/orders/{self.order}/shoots', json={'kind':kind,'title':'Съёмка'})
@@ -67,7 +67,7 @@ class ShootTests(unittest.TestCase):
         self.assertTrue(self.upload(portrait).json()['duplicate'])
         general=self.shoot('general')
         self.assertEqual(self.upload(general).status_code,409)
-        other=self.client.post('/api/orders',json={'school':'Другая','class_name':'Б','copies':1}).json()['id']
+        other=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Другая','class_name':'Б','copies':1}).json()['id']
         response=self.client.post(f'/api/orders/{other}/photos',params={'filename':'a.jpg','shoot_id':portrait},content=b'x')
         self.assertEqual(response.status_code,404)
         self.assertEqual(self.client.post(f'/api/orders/{self.order}/shoots',json={'kind':'general','title':'  '}).status_code,422)
