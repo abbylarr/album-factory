@@ -432,9 +432,7 @@ function altMeasure(on, target = measureHover) {
   }
   const a = sceneBounds(active),
     other =
-      target?.masterId &&
-      target !== active &&
-      !(active instanceof fabric.ActiveSelection && active.contains(target))
+      target?.masterId && !movingIds(active).has(target.masterId) && canvas.getObjects().includes(target)
         ? sceneBounds(target)
         : null;
   altMeasuring = true;
