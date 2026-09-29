@@ -132,7 +132,7 @@
 .folder-new img{width:24px;opacity:.6}
 .first-run{padding:40px}
 
-@media(max-width:760px){.v2 .sidebar{border-radius:0}.v2 main{margin-left:0;padding:24px 16px}.queue-row{flex-wrap:wrap}.v2 .queue-search.open input{width:150px}.stage-line li{font-size:0;padding-top:4px}.stage-line li.current{font-size:11px;flex:3}}
+@media(max-width:760px){.v2 .sidebar{border-radius:0;width:100%;flex-flow:row wrap;align-items:center}.v2 .brand{flex:1 1 auto;min-width:0}.v2 .sidebar-bottom{position:static;order:1;margin:0;padding:0 16px 0 0}.v2 .sidebar nav{order:2;flex:1 0 100%;min-width:0}.v2 main{margin-left:0;padding:24px 16px}.queue-row{flex-wrap:wrap}.v2 .queue-search.open input{width:150px}.stage-line li{font-size:0;padding-top:4px}.stage-line li.current{font-size:11px;flex:3}}
 @media(prefers-reduced-motion:reduce){.ico-loader{animation:none}}
 
 /* Desktop: compact task buttons and segmented controls; kanban columns scroll on their own. */
@@ -369,3 +369,4 @@
 @media(max-width:760px){.v2 .order-head-top{flex-wrap:wrap;padding:18px}.v2 .order-head-plate{flex-wrap:wrap;margin:0 18px}.v2 .order-head .workspace-tabs{padding:0 18px}.v2 .order-head h1{font-size:23px}}
 .v2 .queue-grid .order-tile,.v2 .registry-grid .order-tile{height:100%}
 @media(max-width:560px){.v2 .order-preview{height:212px}.v2 .order-tile-content{padding:36px 14px 10px}}
+@media(max-width:360px){.v2 .sidebar-bottom .account>span{display:none}}
