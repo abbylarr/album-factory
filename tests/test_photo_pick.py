@@ -3,7 +3,7 @@ import unittest
 
 from album_factory import photo_pick as pp
 from album_factory.master_layout import generate
-from album_factory.master_templates import preview_photos, validate, _FlatMeasurer
+from album_factory.master_templates import preview_photos, validate, validate_categories, _FlatMeasurer
 from album_factory.test_shoot import synthetic
 
 STUDENTS = [{'id': f's{i}', 'first_name': 'Ученик', 'last_name': str(i)} for i in range(12)]
@@ -52,8 +52,8 @@ class FitTests(unittest.TestCase):
         c = pp.resolve({'category': 'few', 'who': 'hero'})
         self.assertEqual((c['people'], c['include'], c['fallback']), (['few'], 'item', ['candid', 'dup']))
         self.assertEqual(pp.resolve({'category': 'missing'})['category'], 'any')
-        categories = pp.categories_of({'photoCategories': [{'id': 'wide', 'name': 'Очень общий', 'scale': ['wide'], 'people': ['class']},
-                                                           {'id': 'mine', 'name': 'Моё', 'style': 'candid'}]})
+        categories = pp.categories_of({'items': [{'id': 'wide', 'name': 'Очень общий', 'scale': ['wide'], 'people': ['class']},
+                                                 {'id': 'mine', 'name': 'Моё', 'style': 'candid'}]})
         self.assertEqual(categories['wide']['name'], 'Очень общий')
         self.assertEqual(pp.resolve({'category': 'wide'}, categories)['people'], ['class'])
         self.assertEqual(pp.resolve({'category': 'mine'}, categories)['style'], 'candid')
@@ -63,16 +63,16 @@ class FitTests(unittest.TestCase):
 
 
     def test_built_in_categories_can_be_removed_except_any(self):
-        doc = master([[layer('a', pick={'category': 'few'})], []])
-        doc['removedCategories'] = ['wide', 'empty']
-        validate(doc)
-        self.assertNotIn('wide', pp.categories_of(doc))
-        self.assertEqual(pp.resolve({'category': 'wide'}, pp.categories_of(doc))['category'], 'any')
-        for removed, pick in ((['any'], 'few'), (['nope'], 'few'), (['few', 'few'], 'any'), (['few'], 'few')):
-            broken = master([[layer('a', pick={'category': pick})], []])
-            broken['removedCategories'] = removed
+        settings = validate_categories({'removed': ['wide', 'empty']})
+        self.assertNotIn('wide', pp.categories_of(settings))
+        self.assertEqual(pp.resolve({'category': 'wide'}, pp.categories_of(settings))['category'], 'any')
+        for removed in (['any'], ['nope'], ['few', 'few']):
             with self.assertRaises(Exception, msg=removed):
-                validate(broken)
+                validate_categories({'removed': removed})
+        with self.assertRaises(Exception):
+            validate_categories({'removed': ['few'], 'items': [{'id': 'few', 'name': 'Пары'}]})
+        # A slot may name a category the studio does not have (any more): it takes any photo.
+        validate(master([[layer('a', pick={'category': 'c-gone'})], []]))
 
 
 class PickerTests(unittest.TestCase):

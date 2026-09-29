@@ -350,7 +350,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     for override in overrides:
         overrides_by_key.setdefault(override['key'], []).append(override)
     found = set()
-    categories = categories_of(master)
+    categories = categories_of(edition.get('photoCategories'))
     shared_bases = {}
     def apply_override(e, override, shared):
         """One manual edit on a compiled element. Returns a conflict reason or None."""

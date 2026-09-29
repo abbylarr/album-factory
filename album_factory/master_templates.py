@@ -31,6 +31,8 @@ def init(con):
         design_id TEXT NOT NULL REFERENCES designs(id), name TEXT NOT NULL, price INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS design_blocks (
         id TEXT PRIMARY KEY, design_id TEXT NOT NULL REFERENCES designs(id), name TEXT NOT NULL, document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS photo_categories (
+        studio_id TEXT PRIMARY KEY, document TEXT NOT NULL);
     ''')
     for row in con.execute('SELECT * FROM master_templates WHERE id NOT IN (SELECT template_id FROM master_packages)').fetchall():
         design_id = 'design-' + row['id']
@@ -101,7 +103,9 @@ def validate(document):
         from .photo_pick import LEGACY_ROLES
         check(isinstance(value, dict), 'Неверный подбор общего фото')
         if 'category' in value:
-            check(set(value) <= {'category', 'who'} and value['category'] in category_ids, 'Неизвестная категория общих фото')
+            # Categories belong to the studio; an id it no longer has takes any photo (see photo_pick.resolve).
+            check(set(value) <= {'category', 'who'} and isinstance(value['category'], str)
+                  and re.fullmatch(r'[\w-]{1,40}', value['category']), 'Неизвестная категория общих фото')
             check(value.get('who') in {None, 'hero', 'owner'}, 'Неверное условие «кто на фото»')
             check(value.get('who') != 'hero' or section.get('kind') == 'repeat', 'Герой разворота есть только в личных разворотах')
             return
@@ -110,24 +114,7 @@ def validate(document):
         filters(value, 'Неверный фильтр общего фото')
         check(value.get('include') in {None, 'owner', 'item'}, 'Неверное условие «кто на фото»')
         check(value.get('include') != 'item' or section.get('kind') == 'repeat', 'Герой разворота есть только в личных разворотах')
-    from .photo_pick import CATEGORIES, PEOPLE
-    category_ids, seen = set(CATEGORIES), set()
-    if 'removedCategories' in document:
-        removed = document['removedCategories']
-        # «Любое» stays: slots of removed categories fall back to it.
-        check(isinstance(removed, list) and len(set(removed)) == len(removed)
-              and all(isinstance(k, str) and k in CATEGORIES and k != 'any' for k in removed), 'Неверные удалённые категории')
-        category_ids -= set(removed)
-    if 'photoCategories' in document:
-        items = document['photoCategories']
-        check(isinstance(items, list) and len(items) <= 40, 'Неверные категории общих фото')
-        for item in items:
-            check(isinstance(item, dict) and set(item) <= {'id', 'name', 'people', 'scale', 'tags', 'style', 'quality'}, 'Неверная категория общих фото')
-            check(isinstance(item.get('id'), str) and re.fullmatch(r'[\w-]{1,40}', item['id']) and item['id'] not in seen
-                  and item['id'] not in document.get('removedCategories', ()), 'Неверная категория общих фото')
-            check(isinstance(item.get('name'), str) and 1 <= len(item['name'].strip()) <= 40, 'Название категории — от 1 до 40 символов')
-            filters(item, 'Неверный фильтр категории')
-            seen.add(item['id']); category_ids.add(item['id'])
+    from .photo_pick import PEOPLE
     def color(value):
         return isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value)
     def image_data(value):
@@ -334,6 +321,38 @@ def validate(document):
     return document
 
 
+def validate_categories(value):
+    """The studio's photo categories: edits of built-ins and its own ones, plus removed built-ins («Любое» stays)."""
+    from .photo_pick import CATEGORIES, PEOPLE
+    def check(ok, message):
+        if not ok:
+            raise HTTPException(422, message)
+    check(isinstance(value, dict) and set(value) <= {'items', 'removed'}, 'Неверные категории общих фото')
+    removed, items = value.get('removed', []), value.get('items', [])
+    check(isinstance(removed, list) and len(set(removed)) == len(removed)
+          and all(isinstance(k, str) and k in CATEGORIES and k != 'any' for k in removed), 'Неверные удалённые категории')
+    check(isinstance(items, list) and len(items) <= 60, 'Неверные категории общих фото')
+    seen = set()
+    for item in items:
+        check(isinstance(item, dict) and set(item) <= {'id', 'name', 'people', 'scale', 'tags', 'style', 'quality'}, 'Неверная категория общих фото')
+        check(isinstance(item.get('id'), str) and re.fullmatch(r'[\w-]{1,40}', item['id']) and item['id'] not in seen
+              and item['id'] not in removed, 'Неверная категория общих фото')
+        check(isinstance(item.get('name'), str) and 1 <= len(item['name'].strip()) <= 40, 'Название категории — от 1 до 40 символов')
+        for key, allowed, limit in (('people', PEOPLE, 5), ('scale', gm.SCALES, 5), ('tags', TAGS, 12)):
+            values = item.get(key)
+            check(values is None or (isinstance(values, list) and len(values) <= limit and len(set(values)) == len(values)
+                                     and set(values) <= set(allowed)), 'Неверный фильтр категории')
+        check(item.get('style') in {None, 'posed', 'candid'} and item.get('quality') in {None, 'best', 'good'}, 'Неверный фильтр категории')
+        seen.add(item['id'])
+    return {'items': items, 'removed': removed}
+
+
+def studio_categories(con, studio):
+    """The studio's category list as stored (empty when it keeps the built-ins as they are)."""
+    row = con.execute('SELECT document FROM photo_categories WHERE studio_id=?', (studio,)).fetchone()
+    return json.loads(row['document']) if row else {'items': [], 'removed': []}
+
+
 class Save(BaseModel):
     document: dict
     revision: int | None = None
@@ -389,7 +408,7 @@ class _FlatMeasurer:
         return set()
 
 
-def preview_photos(document, students, teachers, owner):
+def preview_photos(document, students, teachers, owner, categories=None):
     """Run the real picker on a synthetic shoot: what each automatic slot of the draft would receive."""
     from .master_layout import generate
     from .test_shoot import synthetic
@@ -405,7 +424,8 @@ def preview_photos(document, students, teachers, owner):
     if owner not in {p['id'] for p in people}:
         owner = people[0]['id']
     try:
-        result = generate({'id': 'preview', 'version': 0, 'master': document}, snapshot, _FlatMeasurer(), only_owner=owner)
+        result = generate({'id': 'preview', 'version': 0, 'master': document, 'photoCategories': categories},
+                          snapshot, _FlatMeasurer(), only_owner=owner)
     except (KeyError, TypeError, ValueError, IndexError, ZeroDivisionError) as exc:
         raise HTTPException(422, 'Не удалось построить превью: ' + str(exc)[:120]) from exc
     by_id = {e['id']: e for e in entries}
@@ -441,7 +461,8 @@ def select_order_master(con, order_id, template_id):
         raise HTTPException(404, 'Мастер-макет не найден')
     master = validate(json.loads(row['document']))
     document = {'id': f'master-{template_id}-r{row["revision"]}', 'version': row['revision'],
-                'master': master, 'capacity': {'students': [1, 1000], 'teachers': [0, 1000]}}
+                'master': master, 'capacity': {'students': [1, 1000], 'teachers': [0, 1000]},
+                'photoCategories': studio_categories(con, _studio())}
     con.execute('UPDATE order_terms SET edition_json=?, edition_id=NULL, offer_id=NULL WHERE order_id=?',
                 (json.dumps(document), order_id))
     con.execute('UPDATE orders SET master_template_id=? WHERE id=?', (template_id, order_id))
@@ -483,7 +504,23 @@ def install(app, s):
         return {'valid': True}
     @app.post('/api/master-templates/photo-preview')
     def photo_preview(payload: PhotoPreview):
-        return preview_photos(payload.document, payload.students, payload.teachers, payload.owner)
+        with s.db() as con:
+            categories = studio_categories(con, _studio())
+        return preview_photos(payload.document, payload.students, payload.teachers, payload.owner, categories)
+    # Photo categories are the studio's: one list for every design and package.
+    @app.get('/api/photo-categories')
+    def photo_categories():
+        with s.db() as con:
+            return studio_categories(con, _studio())
+    @app.put('/api/photo-categories')
+    def save_photo_categories(payload: dict):
+        value = validate_categories(payload)
+        with s.db() as con:
+            if value['items'] or value['removed']:
+                con.execute('INSERT OR REPLACE INTO photo_categories VALUES (?,?)', (_studio(), json.dumps(value)))
+            else:
+                con.execute('DELETE FROM photo_categories WHERE studio_id=?', (_studio(),))
+        return value
 
     @app.get('/api/preview-classes')
     def preview_classes():
@@ -528,6 +565,7 @@ def install(app, s):
         edition = {'id': 'class-preview', 'version': 0, 'master': master}
         with s.db() as con:
             owned(con, key)
+            edition['photoCategories'] = studio_categories(con, _studio())
             order = dict(s.require_order(con, payload.order_id))
             snapshot = snapshot_for(con, order, order_data(con, payload.order_id, s.DATA), master=True)
             if not snapshot['students']:
@@ -567,7 +605,8 @@ def install(app, s):
             if payload.price is not None: price = payload.price
             title = (package['design_name'] + ' · ' + package['name']) if package else master['name']
             edition_id = f'master-{key}-r{row["revision"]}'
-            document = {'id': edition_id, 'version': row['revision'], 'master': master, 'capacity': {'students': [1,1000], 'teachers': [0,1000]}}
+            document = {'id': edition_id, 'version': row['revision'], 'master': master, 'capacity': {'students': [1,1000], 'teachers': [0,1000]},
+                        'photoCategories': studio_categories(con, _studio())}
             con.execute('INSERT OR IGNORE INTO editions VALUES (?,?,1)', (edition_id, json.dumps(document)))
             offer = con.execute('SELECT id FROM offers WHERE studio_id=? AND edition_id=?', (_studio(), edition_id)).fetchone()
             offer_id = offer['id'] if offer else s.uid()

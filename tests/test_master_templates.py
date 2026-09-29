@@ -95,21 +95,35 @@ class MasterTests(unittest.TestCase):
         slot = {'id':'far','type':'photo','box':{'x':20,'y':40,'w':100,'h':70},'source':'class','pick':{'category':'far'}}
         doc['sections'][1]['spreads'][0]['pages'][0]['layers'].append(slot)
         doc['sections'][2]['spreads'][0]['pages'][0]['layers'].append({**slot,'id':'me','pick':{'category':'few','who':'hero'}})
-        doc['photoCategories'] = [{'id':'far','name':'Очень общий план','scale':['wide'],'people':['class','subgroup']},
-                                  {'id':'few','name':'Пары','people':['few'],'quality':'good'}]
+        # Categories are the studio's: one list for every design and package.
+        self.assertEqual(self.client.get('/api/photo-categories').json(),{'items':[],'removed':[]})
+        categories = {'items':[{'id':'far','name':'Очень общий план','scale':['wide'],'people':['class','subgroup']},
+                               {'id':'few','name':'Пары','people':['few'],'quality':'good'}],'removed':['empty']}
+        saved = self.client.put('/api/photo-categories',json=categories)
+        self.assertEqual(saved.status_code,200,saved.text)
+        self.assertEqual(self.client.get('/api/photo-categories').json(),categories)
         doc['photoRules'] = {'mixShoots':False,'posedFirst':True}
-        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        created = self.client.post('/api/master-templates',json={'document':doc})
+        self.assertEqual(created.status_code,201)
         preview = self.client.post('/api/master-templates/photo-preview',json={'document':doc,'students':6,'teachers':0,'owner':'s2'})
         self.assertEqual(preview.status_code,200,preview.text)
         self.assertEqual(preview.json()['slots']['shared:0/far']['scale'],'wide')
+        # A published edition keeps the list it was published with.
+        key = created.json()['id']
+        edition = self.client.post(f'/api/master-templates/{key}/publish',json={'revision':1}).json()['edition_id']
+        import json
+        with s.db() as con:
+            frozen = json.loads(con.execute('SELECT document FROM editions WHERE id=?',(edition,)).fetchone()[0])
+        self.assertEqual(frozen['photoCategories'],categories)
         shared = doc['sections'][1]['spreads'][0]['pages'][0]['layers']
-        for bad in ({'category':'nope'},{'category':'few','who':'hero'},{'category':'few','who':'someone'},{'category':'few','role':'any'}):
+        for bad in ({'category':'no pe'},{'category':'few','who':'hero'},{'category':'few','who':'someone'},{'category':'few','role':'any'}):
             broken = deepcopy(doc); broken['sections'][1]['spreads'][0]['pages'][0]['layers'][len(shared)-1]['pick'] = bad
             self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,bad)
-        for categories in ([{'id':'x','name':''}],[{'id':'x','name':'a'},{'id':'x','name':'b'}],[{'id':'x','name':'a','people':['crowd']}],
-                           [{'id':'x','name':'a','style':'loud'}],[{'id':'x y','name':'a'}],[{'id':'x','name':'a','extra':1}]):
-            broken = deepcopy(doc); broken['photoCategories'] = categories + [doc['photoCategories'][0]]
-            self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,categories)
+        for items in ([{'id':'x','name':''}],[{'id':'x','name':'a'},{'id':'x','name':'b'}],[{'id':'x','name':'a','people':['crowd']}],
+                      [{'id':'x','name':'a','style':'loud'}],[{'id':'x y','name':'a'}],[{'id':'x','name':'a','extra':1}]):
+            broken = {'items':items + categories['items'][:1]}
+            self.assertEqual(self.client.put('/api/photo-categories',json=broken).status_code,422,items)
+        self.assertEqual(self.client.put('/api/photo-categories',json={'items':[],'removed':[]}).json(),{'items':[],'removed':[]})
 
     def create(self):
         response=self.client.post('/api/master-templates',json={'document':master()})
