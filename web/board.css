@@ -167,7 +167,7 @@
 .folder-new img{width:24px;opacity:.6}
 .first-run{padding:40px}
 @media(max-width:1100px){.v2 .home-top{grid-template-columns:1fr}}
-@media(max-width:760px){.v2 .sidebar{border-radius:0}.v2 main{margin-left:0;padding:24px 16px}.process-head{flex-wrap:wrap}.process-head .search input{width:100%}.queue-row{flex-wrap:wrap}.v2 .queue-search.open input{width:150px}.stage-line li{font-size:0;padding-top:4px}.stage-line li.current{font-size:11px;flex:3}}
+@media(max-width:760px){.v2 .sidebar{border-radius:0;width:100%;flex-flow:row wrap;align-items:center}.v2 .brand{flex:1 1 auto;min-width:0}.v2 .sidebar-bottom{position:static;order:1;margin:0;padding:0 16px 0 0}.v2 .sidebar nav{order:2;flex:1 0 100%;min-width:0}.v2 main{margin-left:0;padding:24px 16px}.process-head{flex-wrap:wrap}.process-head .search input{width:100%}.queue-row{flex-wrap:wrap}.v2 .queue-search.open input{width:150px}.stage-line li{font-size:0;padding-top:4px}.stage-line li.current{font-size:11px;flex:3}}
 @media(prefers-reduced-motion:reduce){.ico-loader{animation:none}}
 
 /* Keep the desktop home dashboard within the viewport. */
@@ -325,3 +325,4 @@
 .v2 .package-price{flex:none;font-size:14px;font-weight:600}
 .v2 .package-empty{margin:8px 10px;font-size:13px}
 @media(max-width:560px){.v2 .form-row.three{grid-template-columns:1fr 1fr}.v2 .form-row.three label:last-child{grid-column:1/-1}}
+@media(max-width:360px){.v2 .sidebar-bottom .account>span{display:none}}
