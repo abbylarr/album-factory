@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 import json
 import secrets
 
-from . import mvp, order_stages
+from . import mvp, order_stages, school_catalog
 
 
 DEFAULT_TEMPLATES = {
@@ -209,7 +209,8 @@ def install(app, s):
                     'manager': mvp.has_level(con, request, order['id'], 'manage'),
                     'photos_url': extras['photos_url'] if extras else '',
                     'delivery': dict(delivery) if delivery and delivery['mode'] else None,
-                    'corrections': open_corrections(con, order['id'])}
+                    'corrections': open_corrections(con, order['id']),
+                    'teachers': school_catalog.client_summary(con, order['id'])}
 
     @app.put('/client-api/{token}/persons/{person_id}')
     def select(token: str, person_id: str, payload: Selection, request: Request):

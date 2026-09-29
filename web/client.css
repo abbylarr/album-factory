@@ -205,3 +205,31 @@ textarea{resize:vertical}
   .dock{bottom:16px;padding:12px;border-radius:20px;background:#fffffff2;box-shadow:0 8px 30px #0000001f;left:16px;right:16px}
 }
 @media (min-width:1000px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.teacher-list{list-style:none;padding:0;margin:24px 0 16px;display:grid;gap:10px;max-width:760px}
+.teacher-row{display:flex;align-items:center;gap:14px;padding:10px 14px;background:#fff;border:1px solid #e8e8e3;border-radius:12px}
+.teacher-pick{display:flex;align-items:center;gap:14px;flex:1;min-width:0;cursor:pointer}
+.teacher-pick input,.teacher-lead input{width:18px;height:18px;flex-shrink:0;margin:0}
+.teacher-pick img,.teacher-empty{width:48px;height:64px;object-fit:cover;border-radius:8px;background:#eee;flex-shrink:0}
+.teacher-pick span:last-child{display:grid;gap:3px;min-width:0}
+.teacher-pick strong{overflow-wrap:anywhere}
+.teacher-pick small{color:#888;font-size:13px}
+.teacher-lead{display:flex;align-items:center;gap:8px;font-size:13px;color:#666;white-space:nowrap;cursor:pointer}
+@media(max-width:700px){.teacher-row{flex-wrap:wrap}.teacher-lead{padding-left:32px}}
+.teacher-section{font-size:22px;margin:28px 0 6px}
+.sign-list{display:grid;gap:14px;margin:18px 0 10px;max-width:900px}
+.sign-card{display:grid;grid-template-columns:1fr;gap:18px;padding:14px;background:#fff;border:1px solid #e8e8e3;border-radius:14px}
+.sign-frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;align-content:start}
+.sign-frame{position:relative;cursor:pointer;margin:0}
+.sign-frame input{position:absolute;opacity:0;pointer-events:none}
+.sign-frame img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:9px;border:3px solid transparent;display:block}
+.sign-frame input:checked+img{border-color:#ffd900}
+.sign-frame input:focus-visible+img{outline:2px solid #333;outline-offset:2px}
+.sign-fields{display:grid;gap:10px;align-content:start}
+.sign-fields label{margin:0}
+.sign-new{display:grid;gap:8px}
+.sign-new[hidden]{display:none}
+.sign-error{color:#a14331;margin:0}
+.sign-error:empty{display:none}
+@media(max-width:700px){.sign-frames{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.sign-fields select{display:block;width:100%;border:1px solid var(--line);border-radius:12px;background:#fff;padding:13px 14px;margin-top:7px;font-size:16px;font-weight:400}
+.sign-fields .primary{margin-top:6px}

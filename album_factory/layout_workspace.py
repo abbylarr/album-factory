@@ -364,13 +364,13 @@ def enrich_master_snapshot(con, order_id, snapshot, selected, data_root):
                         for row in layer.get('rows') or []:
                             for cell in row:
                                 walk(cell)
-    terms = con.execute('SELECT school_id FROM order_terms WHERE order_id=?', (order_id,)).fetchone()
-    if terms and terms['school_id']:
-        for row in con.execute('SELECT * FROM teachers WHERE school_id=? ORDER BY id', (terms['school_id'],)):
-            teacher = dict(row)
-            snapshot['teachers'].append(teacher)
-            if teacher['portrait_path']:
-                path = (data_root / teacher['portrait_path']).resolve()
-                if path.is_relative_to(data_root.resolve()) and path.is_file():
-                    key = asset(path.read_bytes())
-                    snapshot['selections'].append({'owner':'teacher:'+teacher['id'],'role':'main_portrait','photo':key})
+    # Teachers the class chose in its portal; the class teacher leads the list.
+    from .school_catalog import snapshot_teachers
+    for teacher in snapshot_teachers(con, order_id):
+        portrait = teacher.pop('portrait_path')
+        snapshot['teachers'].append(teacher)
+        if portrait:
+            path = (data_root / portrait).resolve()
+            if path.is_relative_to(data_root.resolve()) and path.is_file():
+                key = asset(path.read_bytes())
+                snapshot['selections'].append({'owner':'teacher:'+teacher['id'],'role':'main_portrait','photo':key})

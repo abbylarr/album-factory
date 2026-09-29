@@ -82,6 +82,8 @@ def init_db():
         init_layout_workspace(con)
         from .mvp import init as init_mvp
         init_mvp(con)
+        from .school_catalog import init as init_school_catalog
+        init_school_catalog(con)
         from .master_templates import init as init_masters
         init_masters(con)
         from .general_photos import init as init_general
@@ -204,6 +206,8 @@ async def lifespan(app):
     init_db()
     app.state.token = secrets.token_urlsafe(32)
     executor.submit(process_pending)
+    from .school_catalog import group_pending
+    executor.submit(group_pending, _sys.modules[__name__])
     yield
 
 
@@ -304,6 +308,7 @@ def list_orders():
           COALESCE((SELECT photo_id FROM order_covers WHERE order_id=o.id), (SELECT id FROM photos p WHERE p.order_id=o.id ORDER BY created_at,id LIMIT 1)) AS cover_id,
           COALESCE((SELECT customer_name FROM order_terms WHERE order_id=o.id), '') AS customer_name,
           COALESCE((SELECT customer_contact FROM order_terms WHERE order_id=o.id), '') AS customer_contact,
+          (SELECT school_id FROM order_terms WHERE order_id=o.id) AS school_id,
           {APPROVED} AS approved
           FROM orders o {where} ORDER BY created_at DESC""".replace("{APPROVED}", APPROVED), args).fetchall()
         from .client_portal import progress_by_order
@@ -367,7 +372,10 @@ def edit_order(order_id: str, payload: OrderEditInput):
 def get_order(order_id: str):
     with db() as con:
         order = dict(require_order(con, order_id))
-        terms = con.execute("SELECT customer_name, customer_contact FROM order_terms WHERE order_id=?", (order_id,)).fetchone()
+        terms = con.execute("""SELECT t.customer_name, t.customer_contact, t.school_id, s.city AS school_city
+            FROM order_terms t LEFT JOIN schools s ON s.id=t.school_id WHERE t.order_id=?""", (order_id,)).fetchone()
+        order["school_id"] = terms["school_id"] if terms else None
+        order["school_city"] = (terms["school_city"] or "") if terms else ""
         order["customer_name"] = terms["customer_name"] if terms else ""
         order["customer_contact"] = terms["customer_contact"] if terms else ""
         order["approved"] = bool(con.execute(f"SELECT {APPROVED} FROM orders o WHERE o.id=?", (order_id,)).fetchone()[0])
@@ -749,6 +757,9 @@ _install_layout_workspace(app, _sys.modules[__name__])
 
 from .mvp import install as _install_mvp
 _install_mvp(app, _sys.modules[__name__])
+
+from .school_catalog import install as _install_school_catalog
+_install_school_catalog(app, _sys.modules[__name__])
 
 from .master_templates import install as _install_masters
 _install_masters(app, _sys.modules[__name__])
