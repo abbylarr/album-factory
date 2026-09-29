@@ -90,7 +90,15 @@ function paintColor(hex, opacity) {
       o.group.objectCaching = false;
     }
   };
-  if (key === 'page.background') {
+  if (key === 'cover.spineColor') {
+    coverSection().spineColor = hex;
+    const spine = canvas.getObjects().find(o => o.spineFill);
+    if (spine) {
+      spine.set('fill', hex);
+      touch(spine);
+    } else renderScene();
+    canvas.requestRenderAll();
+  } else if (key === 'page.background') {
     if (page()) page().background = hex;
     const bg = canvas
       .getObjects()
@@ -184,10 +192,10 @@ function syncColorPop(apply = true) {
   $('#color-alpha-knob').style.top = '50%';
   $('#color-hex').value = hex.toUpperCase();
   $('#color-alpha-input').value = Math.round(colorPop.opacity);
-  $('#color-alpha').hidden = colorPop.key === 'page.background';
+  $('#color-alpha').hidden = ['page.background', 'cover.spineColor'].includes(colorPop.key);
   $('#color-alpha-input').hidden = $('#color-alpha').hidden;
   $('#color-alpha-input').nextElementSibling.hidden = $('#color-alpha').hidden;
-  if (apply) paintColor(hex, colorPop.key === 'page.background' ? null : colorPop.opacity);
+  if (apply) paintColor(hex, $('#color-alpha').hidden ? null : colorPop.opacity);
   let rect = colorPop.anchor.getBoundingClientRect();
   if (rect.width < 2) {
     $('.right-panel').classList.add('mobile-open');

@@ -174,8 +174,10 @@ def validate(document):
             check(isinstance(cover_size, list) and len(cover_size) == 2 and all(number(v, 50, 500) for v in cover_size), 'Неверный размер обложки')
             page_width, page_height = cover_size
             safety(section.get('safety', {}), page_width, page_height)
+            check('spineColor' not in section or color(section['spineColor']), 'Неверный цвет корешка')
         else:
             check('pageSize' not in section, 'Все внутренние страницы используют общий размер макета')
+            check('spineColor' not in section, 'Цвет корешка задаётся только на обложке')
             page_width, page_height = size
         check(section.get('kind') in {'fixed', 'flow', 'repeat'}, 'Неверное правило раздела')
         check(isinstance(section.get('name'), str) and len(section['name']) <= 100, 'Неверное название раздела')

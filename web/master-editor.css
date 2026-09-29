@@ -3308,6 +3308,55 @@ body.color-picking #canvas-host {
   background: #eae9ee;
   color: var(--accent);
 }
+.type-style-row {
+  align-items: center;
+}
+.typography-section .text-style-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+.typography-section .text-style-actions [data-open-style-menu] svg {
+  fill: currentColor;
+}
+.type-style-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px 0 8px;
+  border-radius: 7px;
+  background: #f3eafa;
+  color: #3a2b45;
+  font-size: 12px;
+  text-align: left;
+}
+.type-style-chip:hover,
+.type-style-chip[aria-expanded='true'] {
+  background: #ecdcf6;
+}
+.type-style-chip .type-style-ag {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: #7712b3;
+}
+.type-style-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.type-style-chip small {
+  flex: none;
+  color: #8b7f96;
+  font-size: 11px;
+}
+.type-style-row.applied + .section-note {
+  margin: -3px 0 9px;
+  font-size: 10px;
+  color: #8a8494;
+}
 .type-font .font-row {
   margin: 0 0 8px;
   grid-template-columns: minmax(0, 1fr) 32px;
@@ -6189,6 +6238,25 @@ button.block-issue:focus-visible {
 .block-settings-body input {
   padding: 7px 9px;
 }
+.block-settings-body .block-name {
+  display: block;
+}
+.block-settings-body .block-name .block-label {
+  margin-top: 0;
+}
+.block-settings-body .block-name input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 8px;
+  background: #f5f4f6;
+  font-size: 13px;
+}
+.block-settings-body .block-name input:focus {
+  background: #fff;
+  box-shadow: 0 0 0 1px #c7a8d9;
+  outline: none;
+}
 .block-settings-body .block-type {
   margin-top: 14px;
 }
@@ -6229,4 +6297,29 @@ button.block-issue:focus-visible {
 }
 .section-card .section-gear + .section-more {
   margin-left: 0;
+}
+
+/* cover spine: colour and text */
+.spine-color {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.spine-color .link-button {
+  justify-self: start;
+}
+.wide-button {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f4f4f6;
+  color: #39363f;
+  font-size: 12px;
+  text-align: center;
+}
+.wide-button:hover {
+  background: #f3eafa;
+  color: #7712b3;
 }

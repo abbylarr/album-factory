@@ -388,6 +388,22 @@ async function renderScene() {
         shadow: new fabric.Shadow({ color: '#2222220a', blur: 9, offsetX: 0, offsetY: 3 }),
       }),
     );
+    if (side === 1 && sec.cover && sec.spineColor && spineGap() > 0)
+      backs.push(
+        Object.assign(
+          new fabric.Rect({
+            left: pageWidth(),
+            top: 0,
+            width: spineGap(),
+            height: pageHeight(),
+            fill: sec.spineColor,
+            strokeWidth: 0,
+            selectable: false,
+            evented: false,
+          }),
+          { spineFill: true },
+        ),
+      );
     if (!p) continue;
     for (const l of p.layers.filter(l => !l.hidden)) {
       let object;

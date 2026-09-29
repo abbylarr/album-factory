@@ -105,7 +105,8 @@ function blockSettings(s) {
   const [title, help] = KIND_NAMES[s.kind] || KIND_NAMES.fixed,
     from = partStart(s),
     next = continuation(s);
-  let body = `<button type="button" class="block-type" data-block-type title="Изменить тип блока"><span class="block-type-icon">${kindIcon(s.kind)}</span><span class="block-type-copy"><strong>${title}</strong><small>${help}</small></span><svg class="block-type-change" viewBox="0 0 8 12" aria-hidden="true"><path d="M2 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  let body = `<label class="block-name"><span class="block-label">Название</span><input data-block-name maxlength="100" value="${esc(s.name)}" aria-label="Название блока"></label>`;
+  body += `<button type="button" class="block-type" data-block-type title="Изменить тип блока"><span class="block-type-icon">${kindIcon(s.kind)}</span><span class="block-type-copy"><strong>${title}</strong><small>${help}</small></span><svg class="block-type-change" viewBox="0 0 8 12" aria-hidden="true"><path d="M2 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   const choices = MasterPlan.splittable(s) ? partChoices(s) : [];
   if (from || choices.length)
     body +=
@@ -593,6 +594,12 @@ $('#sections').addEventListener('dblclick', e => {
   });
   dialog.addEventListener('change', e => {
     const el = e.target;
+    if ('blockName' in el.dataset) {
+      const name = el.value.trim();
+      if (name && name !== section().name) blockSet('name', name);
+      else el.value = section().name;
+      return;
+    }
     if (!el.dataset.blockNum) return;
     if (el.value === '' || !el.validity.valid) {
       el.reportValidity();
@@ -710,9 +717,12 @@ function openBlockMenu(button, id) {
     row = (type, label, icon, enabled = true) =>
       `<button type="button" role="menuitem" data-block-menu="${type}"${enabled ? '' : ' disabled'}>${icon}<span>${label}</span></button>`;
   menu.dataset.block = id;
+  const inner = doc.sections.filter(s => !s.cover),
+    at = inner.indexOf(sec);
   menu.innerHTML =
-    row('rename', 'Переименовать', menuGlyph('rename')) +
-    row('kind', 'Изменить тип…', kindIcon('fixed')) +
+    row('section-up', 'Выше', menuGlyph('up'), at > 0) +
+    row('section-down', 'Ниже', menuGlyph('down'), at >= 0 && at < inner.length - 1) +
+    '<hr>' +
     row('duplicate', 'Дублировать', menuGlyph('duplicate')) +
     (MasterPlan.splittable(sec) && !continuation(sec) ? row('split', 'Разделить блок', SPLIT_GLYPH) : '') +
     '<hr>' +
@@ -741,8 +751,7 @@ $('#object-menu').addEventListener('click', e => {
     selected = [];
     render();
   }
-  if (type === 'rename') startRename();
-  else openBlockDialog(true);
+  if (type === 'section-up' || type === 'section-down') action(type);
 });
 /* The name is edited in place: Enter or leaving the field saves it, Esc keeps the old one. */
 function startRename() {

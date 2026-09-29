@@ -549,6 +549,19 @@ class MasterTests(unittest.TestCase):
         for value in (0,6,'1',True):
             self.assertEqual(self.client.post('/api/master-templates',json={'document':self.cover_book(value)}).status_code,422)
 
+    def test_spine_can_have_its_own_colour(self):
+        doc=self.cover_book(1.2)
+        doc['sections'][0]['spineColor']='#6a2c91'
+        elements=self.compile_cover(doc)['covers']['student:1']['elements']
+        spine=next(e for e in elements if e['key'].endswith('/spine'))
+        self.assertEqual((spine['box'],spine['fill']),([220,0,10,300],'#6a2c91'))
+        self.assertTrue(all(elements.index(e)<elements.index(spine) for e in elements if e['key'].endswith('/background')))  # over both backgrounds
+        for bad in ('purple','#12345'):
+            doc['sections'][0]['spineColor']=bad
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,422)
+        inner=self.cover_book(1.2);inner['sections'][1]['spineColor']='#6a2c91'
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':inner}).status_code,422)
+
     def test_cover_layers_keep_to_the_spine(self):
         rect=lambda i,x,w,pin=None:{'id':i,'type':'rect','box':{'x':x,'y':10,'w':w,'h':20},'fill':'#ffffff',**({'pin':pin} if pin else {})}
         doc=self.cover_book(2,[rect('back',10,50),rect('title',-4,8,'spine'),rect('wrap',0,440,'wrap')])

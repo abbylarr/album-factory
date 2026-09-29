@@ -491,6 +491,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         for side,(page, *_) in enumerate(pair):
             if page is not None and (section['id'], index + side) not in blanks:
                 add({'key':f'{spread_key}/{side}/background','type':'rect','box':[side*(page_width+gap/2),0,page_width+gap/2,page_height],'fill':page['background']})
+        if gap > 0 and section.get('spineColor'):
+            add({'key':f'{spread_key}/spine','type':'rect','box':[page_width,0,gap,page_height],'fill':section['spineColor']})
         for side,(page, item, records, layout_count) in enumerate(pair):
             if (section['id'], index + side) in blanks:
                 blank_sides.append(side); continue

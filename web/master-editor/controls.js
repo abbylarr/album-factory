@@ -71,12 +71,58 @@ function select(label, key, value, options) {
 }
 /* Cover spine: with a sheet thickness it grows with the book; the canvas shows the design's own volume until another is picked. */
 function spinePanel() {
-  if (!doc.sheetThickness) return '';
-  const v = editorVolume();
+  const cover = coverSection();
+  if (!cover || !(coverSpine() > 0)) return '';
+  const volume = doc.sheetThickness
+      ? `<div class="safety-summary spine-rows"><div>Книга на<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${v.spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.${infoTip('Только чтобы посмотреть обложку на тонкой и толстой книге. В заказе корешок посчитается по числу разворотов.')}</div></div>`
+      : '',
+    paint = cover.spineColor
+      ? `<div class="spine-color">${colorControl('Цвет корешка', 'cover.spineColor', cover.spineColor)}<button type="button" class="link-button" data-spine-color="off" title="Корешок снова продолжает фон страниц">Как у страниц</button></div>`
+      : `<button type="button" class="wide-button" data-spine-color="on">Покрасить корешок</button>`;
   return block(
     'Корешок',
-    `<div class="safety-summary spine-rows"><div>Книга на<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${v.spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.${infoTip('Только чтобы посмотреть обложку на тонкой и толстой книге. В заказе корешок посчитается по числу разворотов.')}</div></div>`,
+    `${volume}${paint}<button type="button" class="wide-button" data-spine-text>Текст на корешке</button>`,
   );
+}
+/* A text along the spine, reading bottom to top as on Russian books; it shrinks to fit the spine width. */
+function addSpineText() {
+  const sec = coverSection(),
+    H = pageHeight(),
+    s = coverSpine(),
+    safe = Number(sec?.safety?.safe) || 8,
+    w = Math.max(20, H - 2 * safe),
+    h = Math.max(2, s - 2);
+  if (!sec || !(s > 0)) return;
+  const p = sec.spreads[0].pages[0],
+    l = {
+      id: uid(),
+      type: 'text',
+      name: 'Текст на корешке',
+      opacity: 100,
+      angle: -90,
+      pin: 'spine',
+      box: { x: round(-w / 2), y: round((H - h) / 2), w: round(w), h: round(h) },
+      text: '{{class}} · {{year}}',
+      fit: true,
+      ...Object.fromEntries(
+        textStyleKeys.map(key => [
+          key,
+          (doc.textStyles || []).find(style => style.id === 'text-body')?.[key] ??
+            MasterDefaults.textStyles().find(style => style.id === 'text-body')[key],
+        ]),
+      ),
+    };
+  l.align = 'center';
+  l.valign = 'middle';
+  const bg = sec.spineColor || sec.spreads[0].pages[0].background || '#ffffff',
+    [r, g, b] = [1, 3, 5].map(i => parseInt(bg.slice(i, i + 2), 16) / 255);
+  l.color = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.55 ? '#ffffff' : '#333333';
+  l.fontSize = Math.max(4, Math.min(24, Math.floor((h * 0.7) / 0.3528)));
+  commit(() => {
+    p.layers.push(l);
+    selected = [l.id];
+    inspectorTab = 'design';
+  });
 }
 function block(title, body) {
   return `<section class="inspector-section"><h3>${title}</h3>${body}</section>`;

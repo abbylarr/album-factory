@@ -348,6 +348,18 @@ document.addEventListener('pointerup', endScrub);
 document.addEventListener('pointercancel', endScrub);
 $('#inspector').onclick = e => {
   if (MasterPhotos.click(e)) return;
+  const spineColor = e.target.closest('[data-spine-color]');
+  if (spineColor) {
+    const on = spineColor.dataset.spineColor === 'on';
+    commit(() => {
+      const cover = coverSection();
+      if (on) cover.spineColor = cover.spreads[0].pages[0].background || '#ffffff';
+      else delete cover.spineColor;
+    });
+    if (on) requestAnimationFrame(() => $('[data-color-key="cover.spineColor"]')?.click());
+    return;
+  }
+  if (e.target.closest('[data-spine-text]')) return addSpineText();
   const volumeBtn = e.target.closest('[data-cover-volume]');
   if (volumeBtn) {
     const step = volumeBtn.dataset.coverVolume;
@@ -400,6 +412,7 @@ $('#inspector').onclick = e => {
     openTextStyleMenu();
     return;
   }
+  if (e.target.closest('[data-text-style-detach]')) return property('styleId', '');
   const styleAction = e.target.closest('[data-text-style]');
   if (styleAction) {
     openTextStyleMenu(styleAction.dataset.textStyle);

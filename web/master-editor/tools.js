@@ -368,7 +368,6 @@ function addLayer(type, box) {
   if (type === 'text')
     Object.assign(l, {
       text: 'Новый текст',
-      styleId: (doc.textStyles || []).some(style => style.id === 'text-body') ? 'text-body' : undefined,
       ...Object.fromEntries(
         textStyleKeys.map(key => [
           key,
