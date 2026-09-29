@@ -5,6 +5,8 @@ from copy import deepcopy
 from datetime import datetime
 import base64
 import json
+import re
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from .layout_engine import LayoutEngine, LayoutError, ReportLabMeasurer, canonical_hash, load_edition
 from .layout_render import render_variant, variant_filename
-from .master_layout import owner_wildcard
+from .master_layout import SPREAD_TYPES, owner_wildcard, template_pages
 from .layout_custom import PAGE_TEMPLATES, add_spread, edit_element, merge_custom, remove_spread, set_page_template
 
 FONT_DIR = Path('/System/Library/Fonts/Supplemental')
@@ -72,9 +74,11 @@ class Revision(BaseModel):
 
 class Operation(BaseModel):
     key: str = Field(min_length=1, max_length=300)
-    type: Literal['photo', 'text', 'crop', 'hide', 'reset']
+    type: Literal['photo', 'text', 'crop', 'hide', 'reset', 'spread_add', 'spread_remove', 'spread_move']
     value: Any = None
     scope: Literal['variant', 'all'] = 'variant'
+    # With scope "all": leave other people's own edits of this element as they are.
+    keep_exceptions: bool = False
 
 
 class Operations(BaseModel):
@@ -136,11 +140,63 @@ def _rect(value):
     return [round(v, 6) for v in (x, y, w, h)]
 
 
-def apply_operations(document, snapshot, overrides, ops):
+_SPREAD_OWNER = re.compile(r'\[(student:[^\]]+)\]')
+
+
+def spread_owner(key):
+    match = _SPREAD_OWNER.search(key.split('/', 1)[0])
+    return match.group(1) if match else None
+
+
+def spread_operation(document, master, overrides, op):
+    """Add, remove or move a spread for everyone or for the album the key belongs to."""
+    if not master:
+        raise HTTPException(422, 'Развороты можно менять в макетах, собранных из мастер-макета')
+    sequences = [v['sequence'] for v in document.get('variants') or []]
+    if not any(op.key in sequence for sequence in sequences):
+        raise HTTPException(422, 'Разворот не найден. Обновите макет.')
+    owner = None if op.scope == 'all' else spread_owner(op.key)
+    if op.scope != 'all' and owner is None:
+        raise HTTPException(422, 'Не удалось определить альбом разворота')
+    target = wildcard(op.key) if op.scope == 'all' else op.key
+    value = op.value if isinstance(op.value, dict) else {}
+    if op.type == 'spread_add':
+        title = str(value.get('title') or '').strip()[:80] or 'Новый разворот'
+        source = value.get('source')
+        if not isinstance(source, dict) or template_pages(master, source) is None:
+            raise HTTPException(422, 'Выберите шаблон разворота')
+        source = {k: source[k] for k in ('kind', 'section', 'spread', 'left', 'right') if k in source}
+        ident = uuid.uuid4().hex[:10]
+        return overrides + [{'key': 'spread:' + ident, 'type': 'spread_add', 'base': None,
+                             'value': {'id': ident, 'title': title, 'source': source, 'after': target, 'owner': owner}}]
+    if op.key.startswith('cover['):
+        raise HTTPException(422, 'Обложку нельзя удалить или переставить')
+    if op.type == 'spread_remove':
+        added = next((o for o in overrides if o['type'] == 'spread_add' and
+                      op.key.split('[', 1)[0] == 'x' + o['value']['id']), None)
+        if added and added['value'].get('owner') == owner:
+            # Removing a spread added here simply withdraws it together with its edits.
+            prefix = 'x' + added['value']['id'] + '['
+            return [o for o in overrides if o is not added and not o['key'].startswith(prefix)]
+        return overrides + [{'key': 'spread:' + uuid.uuid4().hex[:10], 'type': 'spread_remove', 'base': None,
+                             'value': {'target': target, 'owner': owner}}]
+    after = value.get('after')
+    if after is not None and not (isinstance(after, str) and any(after in sequence for sequence in sequences)):
+        raise HTTPException(422, 'Место для разворота не найдено')
+    if after is not None and op.scope == 'all':
+        after = wildcard(after)
+    return overrides + [{'key': 'spread:' + uuid.uuid4().hex[:10], 'type': 'spread_move', 'base': None,
+                         'value': {'target': target, 'after': after, 'owner': owner}}]
+
+
+def apply_operations(document, snapshot, overrides, ops, master=None):
     """Turn editor operations into the stored override list. Pure: the caller regenerates."""
     overrides = [dict(o) for o in overrides]
     index = element_index(document)
     for op in ops:
+        if op.type in SPREAD_TYPES:
+            overrides = spread_operation(document, master, overrides, op)
+            continue
         element = index.get(op.key)
         if element is None:
             raise HTTPException(422, 'Элемент не найден. Обновите макет.')
@@ -152,7 +208,7 @@ def apply_operations(document, snapshot, overrides, ops):
 
         def drop(types):
             overrides[:] = [o for o in overrides if not (o['type'] in types and (
-                o['key'] == target or (shared and wildcard(o['key']) == target)))]
+                o['key'] in (target, op.key) or (shared and not op.keep_exceptions and wildcard(o['key']) == target)))]
 
         if op.type == 'reset':
             # Resetting a shared edit leaves other people's own edits of this element alone.
@@ -189,11 +245,36 @@ def apply_operations(document, snapshot, overrides, ops):
     return overrides
 
 
+def clean_spread(item):
+    value, key = item.get('value'), item.get('key')
+    def text(v, limit=300):
+        return v is None or (isinstance(v, str) and 0 < len(v) <= limit)
+    if not isinstance(key, str) or not key.startswith('spread:') or len(key) > 60 or not isinstance(value, dict) or not text(value.get('owner'), 200):
+        raise HTTPException(422, 'Список правок повреждён')
+    if item['type'] == 'spread_add':
+        source = value.get('source')
+        if not (isinstance(value.get('id'), str) and re.fullmatch(r'[0-9a-f]{1,32}', value['id']) and isinstance(source, dict)
+                and text(value.get('after')) and isinstance(value.get('title', ''), str)):
+            raise HTTPException(422, 'Список правок повреждён')
+        clean = {'id': value['id'], 'title': value.get('title', '')[:80], 'after': value.get('after'), 'owner': value.get('owner'),
+                 'source': {k: source[k] for k in ('kind', 'section', 'spread', 'left', 'right') if k in source}}
+    else:
+        if not (isinstance(value.get('target'), str) and text(value['target']) and text(value.get('after'))):
+            raise HTTPException(422, 'Список правок повреждён')
+        clean = {'target': value['target'], 'owner': value.get('owner')}
+        if item['type'] == 'spread_move':
+            clean['after'] = value.get('after')
+    return {'key': key, 'type': item['type'], 'value': clean, 'base': None}
+
+
 def clean_overrides(items, snapshot):
     """Validate a complete override list sent back by undo/redo."""
     result = []
     for item in items:
         key, kind, value, base = item.get('key'), item.get('type'), item.get('value'), item.get('base')
+        if kind in SPREAD_TYPES:
+            result.append(clean_spread(item))
+            continue
         if not isinstance(key, str) or not 0 < len(key) <= 300 or kind not in OVERRIDE_TYPES or not (base is None or isinstance(base, str)):
             raise HTTPException(422, 'Список правок повреждён')
         if kind == 'photo' and value not in snapshot['photos']:
@@ -301,8 +382,10 @@ def install(app, s):
         return {'document': document, 'generated_at': layout['generated_at'],
                 'overrides': layout.get('overrides') or [], 'status': layout.get('status'),
                 'fonts': layout.get('fonts') or [], 'sections': layout.get('sections') or {},
+                'shoots': layout.get('shoots') or [], 'templates': layout.get('templates') or [],
                 'photos': [{'id': id, 'filename': p['filename'], 'shoot_type': p['shoot_type'],
-                            'person_id': p['person_id'],
+                            'person_id': p['person_id'], 'shoot_id': p['shoot_id'],
+                            'people': layout.get('people', {}).get(id, []),
                             **({k: general[id].get(k) for k in ('bucket', 'scale', 'style', 'quality', 'alt')} if id in general else {}),
                             'width': layout['snapshot']['photos'][id]['width'],
                             'height': layout['snapshot']['photos'][id]['height']}
@@ -312,8 +395,15 @@ def install(app, s):
                     for key,p in layout['snapshot']['photos'].items() if p.get('url')]}
 
     def enrich(con, order_id, layout):
-        layout['photo_info'] = {r['id']: dict(r) for r in con.execute('''SELECT p.id,p.filename,p.person_id,s.kind AS shoot_type
-            FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? AND p.status='ready' ''', (order_id,))}
+        layout['photo_info'] = {r['id']: dict(r) for r in con.execute('''SELECT p.id,p.filename,p.person_id,p.shoot_id,s.kind AS shoot_type
+            FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? AND p.status='ready' ORDER BY p.created_at,p.id''', (order_id,))}
+        layout['shoots'] = [dict(r) for r in con.execute('SELECT id,title,kind FROM shoots WHERE order_id=? ORDER BY created_at,id', (order_id,))]
+        # Who is on each general photo, from recognised faces: lets the editor offer "photos with this person".
+        people = {}
+        for r in con.execute('''SELECT DISTINCT f.photo_id,f.subject FROM photo_faces f JOIN photos p ON p.id=f.photo_id
+                JOIN persons x ON x.id=f.subject WHERE p.order_id=? AND f.doubtful=0''', (order_id,)):
+            people.setdefault(r['photo_id'], []).append(r['subject'])
+        layout['people'] = people
         for photo_id in layout['photo_info']:
             if photo_id not in layout['snapshot']['photos']:
                 path = s.DATA / 'photos' / (photo_id + '.jpg')
@@ -323,6 +413,15 @@ def install(app, s):
                     layout['snapshot']['photos'][photo_id] = {'path': str(path), 'width': width, 'height': height}
         master = order_edition(con, order_id, s.ROOT).get('master') or {}
         layout['sections'] = {section['id']: section.get('name') or section['id'] for section in master.get('sections') or []}
+        layout['sections']['extra'] = 'Добавленный разворот'
+        layout['templates'] = [{'section': section['id'], 'name': section.get('name') or section['id'], 'spread': index,
+                                'pages': [{'background': page.get('background'), 'layers': [
+                                    {'type': l['type'], 'box': l['box'], 'text': l.get('text') if l['type'] == 'text' else None}
+                                    for l in page['layers'] if not l.get('hidden') and l['type'] != 'grid']} for page in spread['pages']]}
+                               for section in master.get('sections') or [] if not section.get('cover')
+                               for index, spread in enumerate(section['spreads'])
+                               # Vignettes need the class list, so a vignette-only spread would be added empty.
+                               if any(l['type'] != 'grid' and not l.get('hidden') for page in spread['pages'] for l in page['layers'])]
         layout['fonts'] = [{'id': f.get('id'), 'name': f.get('name'), 'dataUrl': f.get('dataUrl')}
                            for f in master.get('fonts') or [] if f.get('id') and f.get('dataUrl')]
         layout['status'] = layout_status(con, order_id, layout['document'])
@@ -368,7 +467,8 @@ def install(app, s):
                 except (KeyError, StopIteration, ValueError) as exc:
                     raise HTTPException(422, str(exc) if isinstance(exc, ValueError) else 'Элемент не найден') from exc
                 return save(con, order_id, layout, document, layout['overrides'])
-            overrides = apply_operations(document, layout['snapshot'], layout['overrides'], payload.ops)
+            overrides = apply_operations(document, layout['snapshot'], layout['overrides'], payload.ops,
+                                         order_edition(con, order_id, s.ROOT).get('master'))
             return save(con, order_id, layout, regenerate(con, order_id, layout, overrides), overrides)
 
     @app.put('/api/orders/{order_id}/layout/overrides')

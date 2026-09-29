@@ -9,6 +9,7 @@ async function loadLayout(){
   catch(error){if(layoutUI.orderId===id){if(error.message==='Макет ещё не создан')layoutUI.data=null;else layoutUI.error=error.message;}}
   if(layoutUI.orderId===id&&state.order?.id===id&&state.view==='layout'){layoutUI.loading=false;renderLayout();}
 }
+function spreadRange(variants){const lengths=variants.map(v=>v.sequence.length),min=Math.min(...lengths),max=Math.max(...lengths);return min===max?`${count(min,'разворот','разворота','разворотов')} в каждом`:`от ${min} до ${max} разворотов`;}
 function layoutSummary(data){
   const doc=data.document,variants=doc.variants||[],status=data.status||{},reviews=status.reviews||{};
   const errors=(doc.issues||[]).filter(i=>i.level==='error').length,warnings=(doc.issues||[]).length-errors;
@@ -16,7 +17,7 @@ function layoutSummary(data){
   const publishState=!publication?'Не опубликован':publication.current?'Опубликован':`Есть неопубликованные правки (${publication.changed.length})`;
   const next=variants.find(v=>!reviews[v.owner]?.current)?.owner;
   return `<div class="layout-summary">
-    <div class="layout-summary-head"><div><span class="status-badge ${errors?'attention':done===variants.length?'ready':'neutral'}">${errors?'Есть ошибки':done===variants.length?'Проверен':'Идёт проверка'}</span><h2>Макет альбома</h2><p class="muted">${count(variants.length,'вариант','варианта','вариантов')} · ${count(doc.spread_count,'разворот','разворота','разворотов')} в каждом</p></div>
+    <div class="layout-summary-head"><div><span class="status-badge ${errors?'attention':done===variants.length?'ready':'neutral'}">${errors?'Есть ошибки':done===variants.length?'Проверен':'Идёт проверка'}</span><h2>Макет альбома</h2><p class="muted">${count(variants.length,'вариант','варианта','вариантов')} · ${spreadRange(variants)}</p></div>
       <a class="primary" href="${editorUrl(state.order.id,next)}">${done?'Продолжить проверку →':'Открыть редактор макета →'}</a></div>
     <div class="layout-stats">
       <div><strong>${done} / ${variants.length}</strong><span>проверено</span><progress max="${variants.length||1}" value="${done}"></progress></div>

@@ -8,6 +8,15 @@ from .svg_draw import present_svg
 
 
 ORDER = ('photo', 'crop', 'text', 'hide')
+SPREAD_TYPES = ('spread_add', 'spread_remove', 'spread_move')
+# Simple page grids for spreads added while proofing, on the 210 × 280 reference page.
+BLANK_PAGES = {
+    'blank': [],
+    'full': [('photo', 0, 0, 210, 280)],
+    'editorial': [('photo', 12, 12, 186, 218), ('text', 14, 240, 182, 26)],
+    'diptych': [('photo', 10, 10, 93, 260), ('photo', 107, 10, 93, 260)],
+    'grid': [('photo', 10, 10, 93, 128), ('photo', 107, 10, 93, 128), ('photo', 10, 142, 93, 128), ('photo', 107, 142, 93, 128)],
+}
 _OWNER = re.compile(r'\[student:[^\]]*\]')
 
 
@@ -15,6 +24,47 @@ def owner_wildcard(key):
     """Key of the same element in every album variant: only the owner of the spread is replaced."""
     spread, sep, rest = key.partition('/')
     return _OWNER.sub('[*]', spread) + sep + rest
+
+
+def for_owner(key, owner_key):
+    """Inverse of owner_wildcard for one album."""
+    return key.replace('[*]', f'[{owner_key}]', 1) if key else key
+
+
+def template_pages(master, source):
+    """Master pages for a spread added in the final layout, or None when the source is unknown."""
+    source = source or {}
+    width, height = master.get('pageSize', [210, 280])
+    if source.get('kind') == 'blank':
+        pages = []
+        styles = {style['id'] for style in master.get('textStyles', [])}
+        for side in ('left', 'right'):
+            layers = []
+            for index, (kind, x, y, w, h) in enumerate(BLANK_PAGES.get(source.get(side)) or []):
+                box = {'x': x * width / 210, 'y': y * height / 280, 'w': w * width / 210, 'h': h * height / 280}
+                if kind == 'photo':
+                    # Empty frames: the photographer fills a hand-made spread (e.g. parents) with chosen photos.
+                    layers.append({'id': f'p{index}', 'type': 'photo', 'box': box, 'source': 'custom'})
+                else:
+                    layers.append({'id': f't{index}', 'type': 'text', 'box': box, 'text': 'Подпись', 'binding': 'static',
+                                   'font': 'Georgia', 'fontSize': 14, 'color': '#282a26', 'align': 'center',
+                                   **({'styleId': 'text-caption'} if 'text-caption' in styles else {})})
+            pages.append({'id': side, 'background': '#ffffff', 'layers': layers})
+        return pages if all(side in BLANK_PAGES for side in (source.get('left'), source.get('right'))) else None
+    section = next((s for s in master['sections'] if s['id'] == source.get('section') and not s.get('cover')), None)
+    index = source.get('spread')
+    if not section or not isinstance(index, int) or not 0 <= index < len(section['spreads']):
+        return None
+    pages = deepcopy(section['spreads'][index]['pages'])
+    for page in pages:
+        # An added spread has no class list and no repeated student: vignettes go, "this student" means the owner.
+        page['layers'] = [l for l in page['layers'] if l['type'] != 'grid']
+        for layer in page['layers']:
+            if layer.get('source') == 'item':
+                layer['source'] = 'owner'
+            if layer.get('binding') == 'item.name':
+                layer['binding'] = 'owner.name'
+    return pages
 
 
 def collage_frames(layer):
@@ -172,6 +222,9 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         if italic: return base+'-italic'
         return base
     applied, conflicts = [], []
+    structure = [o for o in overrides if o['type'] in SPREAD_TYPES]
+    overrides = [o for o in overrides if o['type'] not in SPREAD_TYPES]
+    removed = set()
     overrides_by_key = {}
     for override in overrides:
         overrides_by_key.setdefault(override['key'], []).append(override)
@@ -212,8 +265,185 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 'owner': owner['id'], 'target': target, 'pick': pick, 'mm': [bounds[2], bounds[3]],
                 'aspect_key': round(bounds[2] / bounds[3], 3), 'section': section['id'],
                 'spread': spread_key if personal else re.sub(r'\[student:[^\]]*\]', '[*]', spread_key)}
+    def build_spread(section, spread_key, pair, owner, owner_key, counter, page_width, page_height):
+        """Compile one spread (two master pages) for one album owner."""
+        elements=[]; appearance={}
+        def add(e, inherit_effects=True, slot=None):
+            e.update(appearance if inherit_effects else {key: appearance[key] for key in ('angle', 'rotation_center')})
+            e.setdefault('hidden',False)
+            elements.append(e)
+            if slot is not None:
+                slot['element'] = e; slot['order'] = counter[0]; counter[0] += 1; slot['in_spread'] = spread_key
+                slot['finish'] = finish; slots.append(slot)
+            else:
+                finish(e)
+        def finish(e):
+            e['base']=canonical_hash(e)
+            wild=owner_wildcard(e['key'])
+            if wild!=e['key']:
+                # Common spreads compile to the same element for every owner; a shared
+                # fingerprint lets one edit apply to all variants at once.
+                e['shared_base']=canonical_hash({**e,'base':None,'key':wild})
+                shared_bases.setdefault(wild,[]).append(e)
+            exact=overrides_by_key.get(e['key'],[])
+            kinds={o['type'] for o in exact}
+            chosen=[(o,False) for o in exact]+[(o,True) for o in overrides_by_key.get(wild,[]) if wild!=e['key'] and o['type'] not in kinds]
+            chosen.sort(key=lambda item: ORDER.index(item[0]['type']) if item[0]['type'] in ORDER else len(ORDER))
+            for override,shared in chosen:
+                found.add(override['key'])
+                reason=apply_override(e,override,shared)
+                if reason:
+                    conflicts.append({'key':override['key'],'type':override['type'],'reason':reason,'target':e['key']})
+                else:
+                    applied.append(e['key'])
+                    e.setdefault('overridden',[]).append({'type':override['type'],'scope':'all' if shared else 'variant'})
+            if e.get('hidden'):
+                return
+            if e['type']=='photo' and not e['photo']:
+                issue('error',e['key'],'Не выбрано обязательное фото')
+            if e['type']=='photo' and e['photo'] and e.get('overridden') and e.get('crop'):
+                dpi=e['crop'][2]/(e['box'][2]/25.4)
+                if dpi<GOOD_DPI:
+                    issue('warning',e['key'],f'После правки разрешение около {math.floor(dpi)} dpi — ниже {GOOD_DPI}')
+            if e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
+                issue('error',e['key'],'Текст выходит за границы рамки')
+        for side,(page, item, records, layout_count) in enumerate(pair):
+            if page is None: continue
+            appearance={}
+            prefix=f'{spread_key}/{side}'
+            add({'key':prefix+'/background','type':'rect','box':[side*page_width,0,page_width,page_height],'fill':page['background']})
+            lead = snapshot['teachers'][0] if snapshot['teachers'] else None
+            styles = {style['id']: style for style in master.get('textStyles', [])}
+            for layer in page['layers']:
+                if layer.get('hidden'): continue
+                if layer.get('type') == 'text' and layer.get('styleId') in styles:
+                    layer = {**layer, **{key: value for key, value in styles[layer['styleId']].items() if key not in {'id', 'name'}}}
+                b=layer['box']; bounds=[b['x']+side*page_width,b['y'],b['w'],b['h']]; key=prefix+'/'+layer['id']
+                common={'key':key,'box':bounds,'opacity':layer.get('opacity',100)}
+                stroke_width = 0 if layer.get('strokeOn') is False else (layer.get('strokeWidth') or (0.4 if layer.get('strokeOn') is True or layer.get('strokeMode') == 'color' else 0))
+                appearance={'angle':layer.get('angle',0),'rotation_center':[bounds[0]+bounds[2]/2,bounds[1]+bounds[3]/2], 'radius':layer.get('radius',0),'stroke':layer.get('stroke','#333333'),'strokeWidth':stroke_width}
+                if layer.get('strokeDash') not in (None, 'solid'): appearance['strokeDash']=layer['strokeDash']
+                if layer.get('strokeAlign') in ('outside','inside'): appearance['strokeAlign']=layer['strokeAlign']
+                if layer.get('strokeCap') in ('round','square'): appearance['strokeCap']=layer['strokeCap']
+                if layer.get('strokeJoin') in ('round','bevel'): appearance['strokeJoin']=layer['strokeJoin']
+                if layer.get('strokeOpacity') not in (None, 100): appearance['strokeOpacity']=layer['strokeOpacity']
+                if isinstance(layer.get('shadow'), dict): appearance['shadow']=layer['shadow']
+                font=font_key(layer)
+                def text_element(key, bounds, value, size):
+                    leading=size*float(layer.get('lineHeight') or 1.25)
+                    element={'key':key,'type':'text','box':bounds,'text':value,'font':font,'size':size,'leading':leading,'align':layer.get('align','center'),'valign':'top','color':layer['color'],'opacity':layer.get('opacity',100)}
+                    if layer.get('letterSpacing'): element['letterSpacing']=layer['letterSpacing']
+                    if layer.get('underline'): element['underline']=True
+                    if layer.get('strike'): element['strike']=True
+                    return element
+                def photo_element(key,bounds,photo):
+                    return {'key':key,'type':'photo','box':bounds,'photo':photo,'crop':crop(photo,bounds,layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1)) if photo else None,'mask':'rect','required':True,'opacity':layer.get('opacity',100)}
+                if layer['type']=='text':
+                    binding=layer.get('binding','static')
+                    value={'owner.name':name(owner),'item.name':name(item),'lead.name':name(lead),'class':snapshot['order']['class_name'],'year':snapshot['order']['year']}.get(binding,layer['text'])
+                    add({**text_element(key,bounds,value,layer['fontSize']),'valign':'middle'})
+                elif layer['type']=='photo':
+                    source=layer['source']
+                    if source=='class':
+                        add(photo_element(key,bounds,None), slot={**slot_for(key,spread_key,bounds,layer.get('pick'),section,owner,item),
+                            'crop_pref':(layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1))})
+                        continue
+                    elif source=='custom': photo=snapshot.get('master_assets',{}).get(layer['id'])
+                    else: photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
+                    add(photo_element(key,bounds,photo))
+                elif layer['type']=='collage':
+                    for frame in collage_frames(layer):
+                        cell=frame['cell']
+                        fb=[bounds[0]+frame['x'], bounds[1]+frame['y'], frame['w'], frame['h']]
+                        source=cell.get('source','class')
+                        slot={'key':key+'/'+cell['id'],'box':fb,'opacity':layer.get('opacity',100)}
+                        if source=='class':
+                            add({**slot,'type':'photo','photo':None,'crop':None,'mask':'rect','required':True},
+                                slot={**slot_for(slot['key'],spread_key,fb,cell.get('pick'),section,owner,item),'cell_fill':layer.get('fill','#e6e1ea'),'crop_pref':(cell.get('cropX',50),cell.get('cropY',50),1)})
+                            continue
+                        elif source=='custom':
+                            photo=snapshot.get('master_assets',{}).get(cell['id'])
+                        else:
+                            photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
+                        if photo:
+                            add({**slot,'type':'photo','photo':photo,'crop':crop(photo,fb,cell.get('cropX',50),cell.get('cropY',50)),'mask':'rect','required':True})
+                        else:
+                            add({**slot,'type':'rect','fill':layer.get('fill','#e6e1ea')})
+                elif layer['type']=='grid':
+                    if not records: continue
+                    geo=geometry(layout_count,layer)
+                    if not geo:
+                        issue('error',key,'Виньетки не помещаются'); continue
+                    frame_style={key:appearance[key] for key in ('stroke','strokeWidth','strokeDash','strokeAlign','strokeCap','strokeJoin','strokeOpacity') if key in appearance}
+                    if stroke_width and layer.get('strokeAlign')=='outside':
+                        add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
+                    if layer.get('shadow') or (stroke_width and layer.get('strokeAlign')=='outside'):
+                        add({'key':key+'/backing','type':'rect','box':bounds,'fill':page['background'],'opacity':layer.get('opacity',100),'shadow':layer.get('shadow'),'strokeWidth':0},False)
+                    cols=geo['cols']; cw=geo['cell_w']; ch=geo['cell_h']; pw=geo['photo_w']
+                    size=layer['fontSize']
+                    # Shared reduction for the complete source, not individual cards.
+                    all_people=snapshot[layer['source']]
+                    while size>layer['minFontSize'] and any(measurer.height(name(p),font,size,size*float(layer.get('lineHeight') or 1.25),cw*.97, layer.get('letterSpacing') or 0)>geo['name_h']+.1 for p in all_people): size=max(layer['minFontSize'],size-.5)
+                    for i,person in enumerate(records):
+                        x=bounds[0]+geo['offset_x']+(i%cols)*(cw+layer['gap']); y=bounds[1]+geo['offset_y']+(i//cols)*(ch+layer['gap'])
+                        pk=key+'/card['+('student:' if layer['source']=='students' else 'teacher:')+person['id']+']'
+                        add(photo_element(pk+'/photo',[x,y,pw,geo['photo_h']],photo_for(person)),False)
+                        name_y=y+geo['photo_h']+geo['photo_name_gap']
+                        name_height=measurer.height(name(person),font,size,size*float(layer.get('lineHeight') or 1.25),cw,layer.get('letterSpacing') or 0)
+                        add(text_element(pk+'/name',[x,name_y,cw,geo['name_h']],name(person),size),False)
+                        if layer.get('showDetail'):
+                            detail = person.get('quote','') if layer['source']=='students' else person.get('school_subject','')
+                            if detail:
+                                detail_style={'font':layer.get('detailFont',layer['font']),'bold':layer.get('detailBold',False),'italic':layer.get('detailItalic',False)}
+                                detail_size=layer.get('detailFontSize',9)
+                                detail_element={'key':pk+'/detail','type':'text','box':[x,name_y+name_height+geo['name_detail_gap'],cw,geo['detail_h']],'text':detail,'font':font_key(detail_style),'size':detail_size,'leading':detail_size*layer.get('detailLineHeight',1.25),'align':layer.get('detailAlign','center'),'valign':'top','color':layer.get('detailColor',layer['color']),'opacity':layer.get('opacity',100)}
+                                if layer.get('detailLetterSpacing'): detail_element['letterSpacing']=layer['detailLetterSpacing']
+                                if layer.get('detailUnderline'): detail_element['underline']=True
+                                if layer.get('detailStrike'): detail_element['strike']=True
+                                add(detail_element,False)
+                    if stroke_width and layer.get('strokeAlign')!='outside':
+                        add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
+                elif layer['type']=='svg':
+                    add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d'),'flipX':bool(layer.get('flipX')),'flipY':bool(layer.get('flipY'))})
+                else:
+                    add({**common,'type':layer['type'],'fill':layer['fill']})
+        return {'key':spread_key,'section':'cover' if section.get('cover') else section['id'],'elements':elements}
+    def place(sequence, key, after, owner_key):
+        anchor = for_owner(after, owner_key)
+        if anchor in sequence:
+            sequence.insert(sequence.index(anchor) + 1, key)
+        else:
+            sequence.insert(1 if sequence and sequence[0].startswith('cover[') else 0, key) if after is None else sequence.append(key)
+    def restructure(owner, owner_key, sequence, group, counter):
+        """Spreads added, removed or moved by the photographer, for everyone or one album."""
+        width, height = master.get('pageSize', [210, 280])
+        for op in structure:
+            value = op.get('value') or {}
+            if value.get('owner') not in (None, owner_key):
+                continue
+            if op['type'] == 'spread_add':
+                pages = template_pages(master, value.get('source'))
+                if pages is None:
+                    if owner is owners[0]:
+                        conflicts.append({'key': op['key'], 'type': op['type'], 'reason': 'Шаблон разворота больше недоступен'})
+                    continue
+                key = f"x{value['id']}[{owner_key}]:0"
+                spread = build_spread({'id': 'extra', 'kind': 'fixed'}, key, [(page, None, None, 0) for page in pages],
+                                      owner, owner_key, counter, width, height)
+                spread.update(section='extra', title=value.get('title') or 'Новый разворот', added=op['key'])
+                group[key] = spread
+                place(sequence, key, value.get('after'), owner_key)
+            else:
+                key = for_owner(value.get('target'), owner_key)
+                if key not in sequence or key.startswith('cover['):
+                    continue
+                sequence.remove(key)
+                if op['type'] == 'spread_remove':
+                    group.pop(key, None); removed.add(key)
+                else:
+                    place(sequence, key, value.get('after'), owner_key)
     for owner in owners:
-        owner_key = 'student:'+owner['id']; group = {}; sequence=[]; slot_order=0
+        owner_key = 'student:'+owner['id']; group = {}; sequence=[]; counter=[0]
         for section in master['sections']:
             page_width, page_height = section.get('pageSize', master.get('pageSize', [210, 280])) if section.get('cover') else master.get('pageSize', [210, 280])
             pages = pages_for(section,master,snapshot,owner,issue)
@@ -225,154 +455,18 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 plans.append({'section':section['id'],'spreads':len(pages)//2})
             for index in range(0,len(pages),2):
                 spread_key=f'cover[{owner_key}]' if section.get('cover') else f'{section["id"]}[{owner_key}]:{index//2}'
-                sequence.append(spread_key); elements=[]; appearance={}
-                def add(e, inherit_effects=True, slot=None):
-                    nonlocal slot_order
-                    e.update(appearance if inherit_effects else {key: appearance[key] for key in ('angle', 'rotation_center')})
-                    e.setdefault('hidden',False)
-                    elements.append(e)
-                    if slot is not None:
-                        slot['element'] = e; slot['order'] = slot_order; slot_order += 1
-                        slot['finish'] = finish; slots.append(slot)
-                    else:
-                        finish(e)
-                def finish(e):
-                    e['base']=canonical_hash(e)
-                    wild=owner_wildcard(e['key'])
-                    if wild!=e['key']:
-                        # Common spreads compile to the same element for every owner; a shared
-                        # fingerprint lets one edit apply to all variants at once.
-                        e['shared_base']=canonical_hash({**e,'base':None,'key':wild})
-                        shared_bases.setdefault(wild,[]).append(e)
-                    exact=overrides_by_key.get(e['key'],[])
-                    kinds={o['type'] for o in exact}
-                    chosen=[(o,False) for o in exact]+[(o,True) for o in overrides_by_key.get(wild,[]) if wild!=e['key'] and o['type'] not in kinds]
-                    chosen.sort(key=lambda item: ORDER.index(item[0]['type']) if item[0]['type'] in ORDER else len(ORDER))
-                    for override,shared in chosen:
-                        found.add(override['key'])
-                        reason=apply_override(e,override,shared)
-                        if reason:
-                            conflicts.append({'key':override['key'],'type':override['type'],'reason':reason,'target':e['key']})
-                        else:
-                            applied.append(e['key'])
-                            e.setdefault('overridden',[]).append({'type':override['type'],'scope':'all' if shared else 'variant'})
-                    if e.get('hidden'):
-                        return
-                    if e['type']=='photo' and not e['photo']:
-                        issue('error',e['key'],'Не выбрано обязательное фото')
-                    if e['type']=='photo' and e['photo'] and e.get('overridden') and e.get('crop'):
-                        dpi=e['crop'][2]/(e['box'][2]/25.4)
-                        if dpi<GOOD_DPI:
-                            issue('warning',e['key'],f'После правки разрешение около {math.floor(dpi)} dpi — ниже {GOOD_DPI}')
-                    if e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
-                        issue('error',e['key'],'Текст выходит за границы рамки')
-                for side,(page, item, records, layout_count) in enumerate(pages[index:index+2]):
-                    if page is None: continue
-                    appearance={}
-                    prefix=f'{spread_key}/{side}'
-                    add({'key':prefix+'/background','type':'rect','box':[side*page_width,0,page_width,page_height],'fill':page['background']})
-                    lead = snapshot['teachers'][0] if snapshot['teachers'] else None
-                    styles = {style['id']: style for style in master.get('textStyles', [])}
-                    for layer in page['layers']:
-                        if layer.get('hidden'): continue
-                        if layer.get('type') == 'text' and layer.get('styleId') in styles:
-                            layer = {**layer, **{key: value for key, value in styles[layer['styleId']].items() if key not in {'id', 'name'}}}
-                        b=layer['box']; bounds=[b['x']+side*page_width,b['y'],b['w'],b['h']]; key=prefix+'/'+layer['id']
-                        common={'key':key,'box':bounds,'opacity':layer.get('opacity',100)}
-                        stroke_width = 0 if layer.get('strokeOn') is False else (layer.get('strokeWidth') or (0.4 if layer.get('strokeOn') is True or layer.get('strokeMode') == 'color' else 0))
-                        appearance={'angle':layer.get('angle',0),'rotation_center':[bounds[0]+bounds[2]/2,bounds[1]+bounds[3]/2], 'radius':layer.get('radius',0),'stroke':layer.get('stroke','#333333'),'strokeWidth':stroke_width}
-                        if layer.get('strokeDash') not in (None, 'solid'): appearance['strokeDash']=layer['strokeDash']
-                        if layer.get('strokeAlign') in ('outside','inside'): appearance['strokeAlign']=layer['strokeAlign']
-                        if layer.get('strokeCap') in ('round','square'): appearance['strokeCap']=layer['strokeCap']
-                        if layer.get('strokeJoin') in ('round','bevel'): appearance['strokeJoin']=layer['strokeJoin']
-                        if layer.get('strokeOpacity') not in (None, 100): appearance['strokeOpacity']=layer['strokeOpacity']
-                        if isinstance(layer.get('shadow'), dict): appearance['shadow']=layer['shadow']
-                        font=font_key(layer)
-                        def text_element(key, bounds, value, size):
-                            leading=size*float(layer.get('lineHeight') or 1.25)
-                            element={'key':key,'type':'text','box':bounds,'text':value,'font':font,'size':size,'leading':leading,'align':layer.get('align','center'),'valign':'top','color':layer['color'],'opacity':layer.get('opacity',100)}
-                            if layer.get('letterSpacing'): element['letterSpacing']=layer['letterSpacing']
-                            if layer.get('underline'): element['underline']=True
-                            if layer.get('strike'): element['strike']=True
-                            return element
-                        def photo_element(key,bounds,photo):
-                            return {'key':key,'type':'photo','box':bounds,'photo':photo,'crop':crop(photo,bounds,layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1)) if photo else None,'mask':'rect','required':True,'opacity':layer.get('opacity',100)}
-                        if layer['type']=='text':
-                            binding=layer.get('binding','static')
-                            value={'owner.name':name(owner),'item.name':name(item),'lead.name':name(lead),'class':snapshot['order']['class_name'],'year':snapshot['order']['year']}.get(binding,layer['text'])
-                            add({**text_element(key,bounds,value,layer['fontSize']),'valign':'middle'})
-                        elif layer['type']=='photo':
-                            source=layer['source']
-                            if source=='class':
-                                add(photo_element(key,bounds,None), slot={**slot_for(key,spread_key,bounds,layer.get('pick'),section,owner,item),
-                                    'crop_pref':(layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1))})
-                                continue
-                            elif source=='custom': photo=snapshot.get('master_assets',{}).get(layer['id'])
-                            else: photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
-                            add(photo_element(key,bounds,photo))
-                        elif layer['type']=='collage':
-                            for frame in collage_frames(layer):
-                                cell=frame['cell']
-                                fb=[bounds[0]+frame['x'], bounds[1]+frame['y'], frame['w'], frame['h']]
-                                source=cell.get('source','class')
-                                slot={'key':key+'/'+cell['id'],'box':fb,'opacity':layer.get('opacity',100)}
-                                if source=='class':
-                                    add({**slot,'type':'photo','photo':None,'crop':None,'mask':'rect','required':True},
-                                        slot={**slot_for(slot['key'],spread_key,fb,cell.get('pick'),section,owner,item),'cell_fill':layer.get('fill','#e6e1ea'),'crop_pref':(cell.get('cropX',50),cell.get('cropY',50),1)})
-                                    continue
-                                elif source=='custom':
-                                    photo=snapshot.get('master_assets',{}).get(cell['id'])
-                                else:
-                                    photo=photo_for({'owner':owner,'item':item,'lead':lead}.get(source))
-                                if photo:
-                                    add({**slot,'type':'photo','photo':photo,'crop':crop(photo,fb,cell.get('cropX',50),cell.get('cropY',50)),'mask':'rect','required':True})
-                                else:
-                                    add({**slot,'type':'rect','fill':layer.get('fill','#e6e1ea')})
-                        elif layer['type']=='grid':
-                            if not records: continue
-                            geo=geometry(layout_count,layer)
-                            if not geo:
-                                issue('error',key,'Виньетки не помещаются'); continue
-                            frame_style={key:appearance[key] for key in ('stroke','strokeWidth','strokeDash','strokeAlign','strokeCap','strokeJoin','strokeOpacity') if key in appearance}
-                            if stroke_width and layer.get('strokeAlign')=='outside':
-                                add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
-                            if layer.get('shadow') or (stroke_width and layer.get('strokeAlign')=='outside'):
-                                add({'key':key+'/backing','type':'rect','box':bounds,'fill':page['background'],'opacity':layer.get('opacity',100),'shadow':layer.get('shadow'),'strokeWidth':0},False)
-                            cols=geo['cols']; cw=geo['cell_w']; ch=geo['cell_h']; pw=geo['photo_w']
-                            size=layer['fontSize']
-                            # Shared reduction for the complete source, not individual cards.
-                            all_people=snapshot[layer['source']]
-                            while size>layer['minFontSize'] and any(measurer.height(name(p),font,size,size*float(layer.get('lineHeight') or 1.25),cw*.97, layer.get('letterSpacing') or 0)>geo['name_h']+.1 for p in all_people): size=max(layer['minFontSize'],size-.5)
-                            for i,person in enumerate(records):
-                                x=bounds[0]+geo['offset_x']+(i%cols)*(cw+layer['gap']); y=bounds[1]+geo['offset_y']+(i//cols)*(ch+layer['gap'])
-                                pk=key+'/card['+('student:' if layer['source']=='students' else 'teacher:')+person['id']+']'
-                                add(photo_element(pk+'/photo',[x,y,pw,geo['photo_h']],photo_for(person)),False)
-                                name_y=y+geo['photo_h']+geo['photo_name_gap']
-                                name_height=measurer.height(name(person),font,size,size*float(layer.get('lineHeight') or 1.25),cw,layer.get('letterSpacing') or 0)
-                                add(text_element(pk+'/name',[x,name_y,cw,geo['name_h']],name(person),size),False)
-                                if layer.get('showDetail'):
-                                    detail = person.get('quote','') if layer['source']=='students' else person.get('school_subject','')
-                                    if detail:
-                                        detail_style={'font':layer.get('detailFont',layer['font']),'bold':layer.get('detailBold',False),'italic':layer.get('detailItalic',False)}
-                                        detail_size=layer.get('detailFontSize',9)
-                                        detail_element={'key':pk+'/detail','type':'text','box':[x,name_y+name_height+geo['name_detail_gap'],cw,geo['detail_h']],'text':detail,'font':font_key(detail_style),'size':detail_size,'leading':detail_size*layer.get('detailLineHeight',1.25),'align':layer.get('detailAlign','center'),'valign':'top','color':layer.get('detailColor',layer['color']),'opacity':layer.get('opacity',100)}
-                                        if layer.get('detailLetterSpacing'): detail_element['letterSpacing']=layer['detailLetterSpacing']
-                                        if layer.get('detailUnderline'): detail_element['underline']=True
-                                        if layer.get('detailStrike'): detail_element['strike']=True
-                                        add(detail_element,False)
-                            if stroke_width and layer.get('strokeAlign')!='outside':
-                                add({'key':key+'/outline','type':'frame','box':bounds,'opacity':layer.get('opacity',100),**frame_style},False)
-                        elif layer['type']=='svg':
-                            add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d'),'flipX':bool(layer.get('flipX')),'flipY':bool(layer.get('flipY'))})
-                        else:
-                            add({**common,'type':layer['type'],'fill':layer['fill']})
-                spread={'key':spread_key,'section':'cover' if section.get('cover') else section['id'],'elements':elements}
+                sequence.append(spread_key)
+                spread=build_spread(section,spread_key,pages[index:index+2],owner,owner_key,counter,page_width,page_height)
                 if section.get('cover'):
                     covers[owner_key] = spread
                 else:
                     group[spread_key] = spread
+        restructure(owner, owner_key, sequence, group, counter)
         groups[owner_key]=group
         variants.append({'owner':owner_key,'name':name(owner),'kind':'student','sequence':sequence})
+    if removed:
+        slots[:] = [slot for slot in slots if slot['in_spread'] not in removed]
+        issues[:] = [i for i in issues if str(i['key']).split('/', 1)[0] not in removed]
     if 'general' in snapshot:
         report = Picker(entries, snapshot['photos'], rules_of(master), students).assign(slots)
     else:
@@ -399,12 +493,12 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     for key in overrides_by_key.keys()-found:
         for override in overrides_by_key[key]:
             conflicts.append({'key':key,'type':override['type'],'reason':'Элемент отсутствует в новой генерации'})
-    if len(variants) > 1:
-        for wild, elements in shared_bases.items():
-            if len(elements) == len(variants) and len({e['shared_base'] for e in elements}) == 1:
-                for e in elements:
-                    e['shared'] = len(variants)
-    count=len(variants[0]['sequence'])
+    for wild, elements in shared_bases.items():
+        elements = [e for e in elements if e['key'].split('/', 1)[0] not in removed]
+        if len(elements) > 1 and len({e['shared_base'] for e in elements}) == 1:
+            for e in elements:
+                e['shared'] = len(elements)
+    count=max(len(v['sequence']) for v in variants)
     inner_width, inner_height = master.get('pageSize', [210, 280])
     cover_section = next((s for s in master['sections'] if s.get('cover')), None)
     cover_width, cover_height = cover_section.get('pageSize', [inner_width, inner_height]) if cover_section else (inner_width, inner_height)

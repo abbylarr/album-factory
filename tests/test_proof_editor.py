@@ -161,6 +161,71 @@ class ApiTests(unittest.TestCase):
                                                             'overrides': [{'key': frame['key'], 'type': 'photo', 'value': 'nope'}]})
         self.assertEqual(broken.status_code, 422)
 
+    def test_spreads_are_added_removed_and_moved_per_album_or_for_everyone(self):
+        order, data = self.make_order()
+        path = f'/api/orders/{order}/layout'
+        doc = data['document']
+        sequences = lambda d: {v['owner']: v['sequence'] for v in d['variants']}
+        base = sequences(doc)['student:person0']
+        anchor = base[3]
+        self.assertTrue(any(t['section'] == 'shared' for t in data['templates']))
+        def run(document, *ops):
+            response = self.client.post(path + '/edits', json={'revision': document['revision'], 'ops': list(ops)})
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()
+        # A parents' spread for one album only: that album gets one spread more.
+        mine = run(doc, {'key': anchor, 'type': 'spread_add', 'scope': 'variant',
+                         'value': {'title': 'Родители', 'source': {'kind': 'blank', 'left': 'full', 'right': 'editorial'}}})
+        seq = sequences(mine['document'])
+        self.assertEqual(len(seq['student:person0']), len(base) + 1)
+        self.assertEqual(len(seq['student:person1']), len(base))
+        added = seq['student:person0'][4]
+        spread = mine['document']['variant_spreads']['student:person0'][added]
+        self.assertEqual(spread['title'], 'Родители')
+        frames = [e for e in spread['elements'] if e['type'] == 'photo']
+        self.assertEqual(len(frames), 2)
+        self.assertTrue(all(e['photo'] is None for e in frames))
+        self.assertTrue(any(i['key'] == frames[0]['key'] for i in mine['document']['issues']))
+        # For everyone, from the design's own spreads; common spreads compile identically, so edits can be shared.
+        everyone = run(mine['document'], {'key': anchor, 'type': 'spread_add', 'scope': 'all',
+                                          'value': {'title': 'Ещё общий', 'source': {'kind': 'master', 'section': 'shared', 'spread': 0}}})
+        seq = sequences(everyone['document'])
+        self.assertTrue(all(s[4].startswith('x') for s in seq.values()))
+        caption = next(e for e in everyone['document']['variant_spreads']['student:person1'][seq['student:person1'][4]]['elements'] if e['key'].endswith('/caption'))
+        self.assertEqual(caption['shared'], 3)
+        # Removing the one-album spread withdraws it; removing a design spread only for one album keeps others intact.
+        withdrawn = run(everyone['document'], {'key': added, 'type': 'spread_remove', 'scope': 'variant'})
+        self.assertFalse(any(o['type'] == 'spread_add' and o['value']['owner'] for o in withdrawn['overrides']))
+        removed = run(withdrawn['document'], {'key': sequences(withdrawn['document'])['student:person2'][2], 'type': 'spread_remove', 'scope': 'variant'})
+        counts = {owner: len(s) for owner, s in sequences(removed['document']).items()}
+        self.assertEqual(counts, {'student:person0': len(base) + 1, 'student:person1': len(base) + 1, 'student:person2': len(base)})
+        moved = run(removed['document'], {'key': sequences(removed['document'])['student:person0'][5], 'type': 'spread_move', 'scope': 'all',
+                                          'value': {'after': sequences(removed['document'])['student:person0'][1]}})
+        self.assertEqual(sequences(moved['document'])['student:person1'][2], sequences(removed['document'])['student:person1'][5])
+        missing = self.client.post(path + '/edits', json={'revision': moved['document']['revision'], 'ops': [
+            {'key': 'nowhere[student:person0]:0', 'type': 'spread_remove', 'scope': 'all'}]})
+        self.assertEqual(missing.status_code, 422)
+        # Undo restores the structure through the same override list.
+        undone = self.client.put(path + '/overrides', json={'revision': moved['document']['revision'], 'overrides': mine['overrides']})
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(sequences(undone.json()['document']), sequences(mine['document']))
+
+    def test_shared_edit_can_keep_personal_exceptions(self):
+        order, data = self.make_order()
+        path = f'/api/orders/{order}/layout'
+        doc = data['document']
+        mine = elements(doc, 'student:person1', '/0/caption')[0]
+        own = self.client.post(path + '/edits', json={'revision': doc['revision'], 'ops': [
+            {'key': mine['key'], 'type': 'text', 'value': 'Моя подпись'}]}).json()
+        other = elements(own['document'], 'student:person0', '/0/caption')[0]
+        kept = self.client.post(path + '/edits', json={'revision': own['document']['revision'], 'ops': [
+            {'key': other['key'], 'type': 'text', 'value': 'Общая', 'scope': 'all', 'keep_exceptions': True}]}).json()
+        self.assertEqual(elements(kept['document'], 'student:person1', '/0/caption')[0]['text'], 'Моя подпись')
+        self.assertEqual(elements(kept['document'], 'student:person2', '/0/caption')[0]['text'], 'Общая')
+        replaced = self.client.post(path + '/edits', json={'revision': kept['document']['revision'], 'ops': [
+            {'key': other['key'], 'type': 'text', 'value': 'Всем', 'scope': 'all'}]}).json()
+        self.assertEqual(elements(replaced['document'], 'student:person1', '/0/caption')[0]['text'], 'Всем')
+
     def test_publication_is_blocked_by_errors(self):
         order, data = self.make_order()
         path = f'/api/orders/{order}/layout'
