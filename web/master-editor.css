@@ -6005,7 +6005,7 @@ button.block-issue:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-
+}
 
 /* canvas lane */
 .guide-measure {
