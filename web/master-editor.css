@@ -5896,3 +5896,28 @@ button.block-issue:focus-visible {
   transform: skewX(-13deg);
   font-style: normal;
 }
+
+/* settings lane */
+.save-indicator .save-state[data-state='saved'],
+.save-indicator .save-state[data-state='saving'] {
+  gap: 4px;
+  padding: 6px 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.save-indicator .save-state[data-state='saved'] {
+  color: #5f8a6b;
+}
+.save-indicator .save-state svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+@media (max-width: 1150px) {
+  .save-indicator .save-state[data-state='saved'],
+  .save-indicator .save-state[data-state='saving'] {
+    display: none;
+  }
+}

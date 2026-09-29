@@ -172,20 +172,33 @@ async function api(path, method = 'GET', body) {
   if (!r.ok) throw Error(typeof d.detail === 'string' ? d.detail : 'Проверьте значения полей');
   return d;
 }
+/* The header always says whether the work is safe: saved, being saved, or not saved with a retry. */
+const SAVE_TICK =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 function updateSaveState() {
   const state = $('#server-state'),
-    retry = $('#retry-save');
-  state.classList.remove('offline', 'failed');
-  retry.hidden = true;
-  if (!navigator.onLine) {
-    state.textContent = 'Нет сети · Подключитесь, чтобы сохранить изменения';
-    state.classList.add('offline');
-  } else if (saveError) {
-    state.textContent = `Не удалось сохранить: ${saveError}`;
-    state.classList.add('failed');
-    retry.hidden = false;
-  } else state.textContent = saving ? 'Сохраняем…' : '';
-  state.hidden = !state.textContent;
+    retry = $('#retry-save'),
+    kind = !ready
+      ? ''
+      : !navigator.onLine && (dirty || saving)
+        ? 'offline'
+        : saveError
+          ? 'failed'
+          : dirty || saving
+            ? 'saving'
+            : 'saved';
+  state.dataset.state = kind;
+  state.classList.toggle('offline', kind === 'offline');
+  state.classList.toggle('failed', kind === 'failed');
+  state.innerHTML = {
+    offline: 'Нет сети · не сохранено',
+    failed: 'Не сохранено',
+    saving: 'Сохраняем…',
+    saved: `Сохранено${SAVE_TICK}`,
+  }[kind] || '';
+  state.title = kind === 'failed' ? saveError : kind === 'offline' ? 'Сохраним, когда появится сеть' : '';
+  retry.hidden = kind !== 'failed';
+  state.hidden = !kind;
 }
 function scheduleAutosave(delay = 900) {
   clearTimeout(saveTimer);
