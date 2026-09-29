@@ -264,8 +264,8 @@ class SchoolCatalogTests(unittest.TestCase):
                         'min': 1, 'max': 12, 'gap': 5, 'minPhotoWidth': 32, 'font': 'Arial', 'fontSize': 12, 'minFontSize': 10,
                         'color': '#34332f', 'excludeLead': True, 'showDetail': True}
         lead_photo = {'id': 'lead-photo', 'type': 'photo', 'box': {'x': 20, 'y': 20, 'w': 80, 'h': 110}, 'source': 'lead'}
-        lead_name = {'id': 'lead-name', 'type': 'text', 'box': {'x': 20, 'y': 140, 'w': 170, 'h': 20}, 'text': 'Классный руководитель',
-                     'binding': 'lead.name', 'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'}
+        lead_name = {'id': 'lead-name', 'type': 'text', 'box': {'x': 20, 'y': 140, 'w': 170, 'h': 20}, 'text': '{{lead.name}}',
+                     'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'}
         doc['sections'].insert(1, {'id': 'teachers', 'name': 'Учителя', 'kind': 'flow', 'target': 1, 'spreads': [
             {'id': 't1', 'pages': [{'id': 'tp1', 'background': '#ffffff', 'layers': [teacher_grid]},
                                    {'id': 'tp2', 'background': '#ffffff', 'layers': [lead_photo, lead_name]}]}]})
@@ -304,7 +304,7 @@ class SchoolCatalogTests(unittest.TestCase):
         layers = doc['sections'][1]['spreads'][0]['pages'][0]['layers']
         for index, binding in enumerate(('school', 'city')):
             layers.append({'id': binding, 'type': 'text', 'box': {'x': 10, 'y': 10 + index * 80, 'w': 180, 'h': 70},
-                           'text': '', 'binding': binding, 'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'})
+                           'text': '{{' + binding + '}}', 'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'})
         design = self.client.post('/api/master-templates', json={'document': doc})
         self.assertEqual(design.status_code, 201, design.text)
         response = self.client.post('/api/orders', json={'school': name, 'school_city': '  Нижний   Новгород ', 'class_name': '11А', 'copies': 1, 'master_template_id': design.json()['id']})
@@ -322,6 +322,13 @@ class SchoolCatalogTests(unittest.TestCase):
         texts = [e.get('text') for spread in spreads for e in spread['elements']]
         self.assertIn(name, texts)
         self.assertIn('Нижний Новгород', texts)
+
+    def test_changing_copies_updates_the_print_run(self):
+        order = self.order_for(self.school()['id'])
+        self.assertEqual(self.client.patch(f'/api/orders/{order}', json={'copies': 25}).status_code, 200)
+        self.assertEqual(self.client.get(f'/api/orders/{order}').json()['copies'], 25)
+        deal = self.client.get(f'/api/orders/{order}/deal').json()
+        self.assertEqual(deal['planned_paid'], 25)
 
     def test_school_change_is_confirmed_atomic_and_blocked_after_print(self):
         from album_factory.school_catalog import snapshot_teachers
@@ -344,6 +351,11 @@ class SchoolCatalogTests(unittest.TestCase):
                 con.execute('UPDATE orders SET stage=? WHERE id=?', (stage, order))
             change['school_id'] = a['id']
             self.assertEqual(self.client.patch(f'/api/orders/{order}', json=change).status_code, 409)
+        self.assertEqual(self.client.patch(f'/api/orders/{order}', json={'copies': 30}).status_code, 409)
+        customer = {'customer_name': ' Ирина Петрова ', 'customer_contact': '+7 900 000-00-00'}
+        self.assertEqual(self.client.patch(f'/api/orders/{order}', json=customer).status_code, 200)
+        saved = self.client.get(f'/api/orders/{order}').json()
+        self.assertEqual((saved['customer_name'], saved['customer_contact'], saved['class_name']), ('Ирина Петрова', '+7 900 000-00-00', '11Б'))
 
     def test_archived_selection_survives_saving_and_can_be_restored(self):
         school = self.school()

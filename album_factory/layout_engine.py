@@ -64,7 +64,7 @@ class ReportLabMeasurer:
             raise LayoutError(f"Шрифт {font!r} не передан генератору")
         return self.names[font]
 
-    def paragraph(self, text, font, size, leading, align="left", color="#1D1D1D", letter=0, render_mode=0, underline=False, strike=False):
+    def paragraph(self, text, font, size, leading, align="left", color="#1D1D1D", letter=0, render_mode=0, underline=False, strike=False, skew=0):
         from xml.sax.saxutils import escape
         from reportlab.lib.colors import HexColor
         from reportlab.lib.styles import ParagraphStyle
@@ -78,6 +78,8 @@ class ReportLabMeasurer:
                                textColor=HexColor(color), splitLongWords=True,
                                alignment={"left": 0, "center": 1, "right": 2, "justify": 4}[align])
         char_space = size * float(letter or 0) / 100
+        # Faux italic as in InDesign: each line leans around its own baseline, so lines do not drift apart.
+        slant = math.tan(math.radians(float(skew or 0)))
 
         class Styled(Paragraph):
             def beginText(self, x, y):
@@ -85,6 +87,17 @@ class ReportLabMeasurer:
                 if char_space:
                     tx.setCharSpace(char_space)
                 tx.setTextRenderMode(render_mode or 0)
+                if slant:
+                    tx.setTextTransform(1, 0, slant, 1, x, y)
+                    move, out = tx.moveCursor, tx._textOut
+                    tx.moveCursor = lambda dx, dy: move(dx + slant * dy, dy)
+
+                    def text_out(text, next_line=0):
+                        # T* would step down along the slanted axis; step straight down instead.
+                        out(text)
+                        if next_line:
+                            tx._code.append(f'{slant * tx._leading:.6f} {-tx._leading:.6f} Td')
+                    tx._textOut = text_out
                 return tx
 
         return Styled(body, style)

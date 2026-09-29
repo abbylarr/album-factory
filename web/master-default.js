@@ -3,7 +3,7 @@ window.MasterDefaults=(()=>{const id=()=>crypto.randomUUID();
   const spread = (left, right) => ({id:id(), pages:[left,right]});
   const box = (x,y,w,h) => ({x,y,w,h});
   const layer = (type, placement, other = {}) => ({id:id(),type,box:placement,opacity:100,...other});
-  const text = (x,y,w,h,value,size = 24,extra = {}) => layer('text',box(x,y,w,h),{name:'Текст',text:value,binding:'static',font:'Georgia',fontSize:size,color:'#282a26',align:'left',...extra});
+  const text = (x,y,w,h,value,size = 24,extra = {}) => layer('text',box(x,y,w,h),{name:'Текст',text:value,font:'Georgia',fontSize:size,color:'#282a26',align:'left',...extra});
   const textStyles = () => [
     {id:'text-title',name:'Заголовок',font:'Georgia',fontSize:32,color:'#282a26',align:'center',bold:true,italic:false,underline:false,strike:false,lineHeight:1.15,letterSpacing:0},
     {id:'text-name',name:'Имя',font:'Georgia',fontSize:23,color:'#282a26',align:'center',bold:false,italic:false,underline:false,strike:false,lineHeight:1.25,letterSpacing:0},
@@ -28,7 +28,7 @@ window.MasterDefaults=(()=>{const id=()=>crypto.randomUUID();
       if(options.last)spreads.push(withRole(spread(page([grid(source)]),page([photo(14,18,182,230,'class','Общее фото',{pick:{category:'class'}})])),'last'));
       return {id:id(),name:options.name||(teachers?'Наши учителя':'Наш класс'),kind:'flow',target:options.target||1,list:{...listDefaults(source),min:options.min??4,max:options.max??12},spreads};
     }
-    if(kind==='repeat')return {id:id(),name:options.name||'Личные развороты',kind:'repeat',people:options.people||'all',spreads:[spread(page([photo(16,22,178,210,'item','Портрет ученика'),text(16,239,178,24,'Имя ученика',23,{styleId:'text-name',binding:'item.name',align:'center'})]),page([flexCollage(14,18,182,244)]))]};
+    if(kind==='repeat')return {id:id(),name:options.name||'Личные развороты',kind:'repeat',people:options.people||'all',spreads:[spread(page([photo(16,22,178,210,'item','Портрет ученика'),text(16,239,178,24,'{{item.name}}',23,{styleId:'text-name',align:'center'})]),page([flexCollage(14,18,182,244)]))]};
     const count=Math.max(1,Math.min(10,Number(options.spreads)||1));
     return {id:id(),name:options.name||'Общие фотографии',kind:'fixed',spreads:Array.from({length:count},(_,i)=>options.empty?spread(page([]),page([])):spread(page([photo(14,18,182,230,'class',`Общее фото ${i*2+1}`)]),page([photo(14,18,182,230,'class',`Общее фото ${i*2+2}`)])))};
   }

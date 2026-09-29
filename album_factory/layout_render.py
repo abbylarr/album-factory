@@ -225,7 +225,8 @@ def _draw(pdf, spread, size, measurer, images):
                 paragraph = measurer.paragraph(element["text"], element["font"], element["size"],
                                                element["leading"], element.get("align","left"), color,
                                                letter=element.get("letterSpacing") or 0, render_mode=mode,
-                                               underline=bool(element.get("underline")), strike=bool(element.get("strike")))
+                                               underline=bool(element.get("underline")), strike=bool(element.get("strike")),
+                                               skew=element.get("skew") or 0)
                 _, used = paragraph.wrap(w * mm, 100000)
                 offset = {"top": 0, "middle": (h * mm - used) / 2, "bottom": h * mm - used}[element["valign"]]
                 paragraph.drawOn(pdf, x * mm, (height - top) * mm - offset - used)

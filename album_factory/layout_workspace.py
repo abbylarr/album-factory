@@ -126,6 +126,8 @@ def snapshot_for(con, order, data, master=False):
             'students': students, 'teachers': [], 'photos': photos, 'selections': selections,
             'general_photos': [p['id'] for p in data['photos'] if p['id'] in photos and p['shoot_type'] == 'general'],
             'general': [e for e in general_entries(con, order['id']) if e['id'] in photos],
+            'shoots': {r['id']: {'title': r['title'], 'date': r['shot_on']} for r in con.execute(
+                "SELECT id,title,shot_on FROM shoots WHERE order_id=? AND kind='general' ORDER BY created_at,id", (order['id'],))},
             'teacher_variant': {'enabled': False}}
 
 

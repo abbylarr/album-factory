@@ -264,13 +264,17 @@ def graduation_year_for(date):
     return date.year + (1 if date.month >= 9 else 0)
 
 
+# School and class are left out once the order is printed; the customer can still be corrected then.
 class OrderEditInput(BaseModel):
     school: str = Field(default="", max_length=300)
     school_city: str = Field(default="", max_length=100)
     school_id: str | None = None
-    class_name: str = Field(min_length=1, max_length=30)
-    graduation_year: int = Field(ge=2000, le=2100)
+    class_name: str | None = Field(default=None, min_length=1, max_length=30)
+    graduation_year: int | None = Field(default=None, ge=2000, le=2100)
     confirm_school_change: bool = False
+    customer_name: str | None = Field(default=None, max_length=100)
+    customer_contact: str | None = Field(default=None, max_length=40)
+    copies: int | None = Field(default=None, ge=1, le=1000)
 
 
 class OrderInput(BaseModel):
@@ -411,6 +415,19 @@ def edit_order(order_id: str, payload: OrderEditInput):
     with db() as con:
         con.execute("BEGIN IMMEDIATE")
         order = require_order(con, order_id)
+        if payload.customer_name is not None or payload.customer_contact is not None:
+            con.execute("UPDATE order_terms SET customer_name=COALESCE(?,customer_name),customer_contact=COALESCE(?,customer_contact) WHERE order_id=?",
+                        (payload.customer_name and payload.customer_name.strip(), payload.customer_contact and payload.customer_contact.strip(), order_id))
+        if payload.copies is not None and payload.copies != order["copies"]:
+            if order["stage"] in LOCKED_STAGES:
+                raise HTTPException(409, "Заказ уже в печати или архиве. Тираж зафиксирован")
+            # A new print run replaces the plan; a custom split that no longer adds up is proposed again from the students.
+            con.execute("UPDATE orders SET copies=? WHERE id=?", (payload.copies, order_id))
+            con.execute("""UPDATE order_terms SET planned_paid=?, current_paid=?,
+                allocations_custom=CASE WHEN (SELECT COALESCE(SUM(paid),0) FROM allocations WHERE order_id=?)=? THEN allocations_custom ELSE 0 END
+                WHERE order_id=?""", (payload.copies, payload.copies, order_id, payload.copies, order_id))
+        if payload.class_name is None:
+            return {"id": order_id}
         if order["stage"] in LOCKED_STAGES:
             raise HTTPException(409, "Заказ уже в печати или архиве. Данные школы и класса зафиксированы")
         old_school = order_school_id(con, order_id)
@@ -425,7 +442,7 @@ def edit_order(order_id: str, payload: OrderEditInput):
             raise HTTPException(422, "Укажите класс")
         con.execute("UPDATE order_terms SET school_id=? WHERE order_id=?", (school_id, order_id))
         con.execute("UPDATE orders SET school=?,school_city=?,class_name=?,graduation_year=? WHERE id=?",
-                    (name, city, payload.class_name.strip(), payload.graduation_year, order_id))
+                    (name, city, payload.class_name.strip(), payload.graduation_year or order["graduation_year"], order_id))
     return {"id": order_id}
 
 

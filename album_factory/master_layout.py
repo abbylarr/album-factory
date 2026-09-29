@@ -7,6 +7,7 @@ from .layout_engine import canonical_hash
 from .master_plan import ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people
 from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, categories_of, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
+from . import auto_text
 
 
 def collage_frames(layer):
@@ -215,22 +216,19 @@ def _legacy_assign(slots, general):
     return {'slots': {}, 'coverage': {}, 'unplaced': []}
 
 
-def cover_spine(master, spreads, pages):
-    """Spine width for a book of this volume and a problem text when the printer cannot bind it.
+SPINE_BOARD, SPINE_MIN = 3.5, 8  # the cover boards add to the block; spines come in whole even millimetres
 
-    With a print profile the width comes from the printer's table «volume range → mm»; without one it is the
-    fixed width set on the cover."""
-    cover = next((s for s in master['sections'] if s.get('cover')), None)
-    profile = master.get('print')
-    if not profile:
-        return float((cover or {}).get('safety', {}).get('spine', 0) or 0), None
-    volume, unit = (pages, 'стр.') if profile['unit'] == 'pages' else (spreads, 'разв.')
-    rows = profile['spine']
-    for low, high, mm in rows:
-        if low <= volume <= high:
-            return float(mm), None
-    nearest = rows[0] if volume < rows[0][0] else rows[-1]
-    return float(nearest[2]), f'{profile["name"]}: переплёт принимает {rows[0][0]}–{rows[-1][1]} {unit}, в альбоме {volume}'
+
+def cover_spine(master, sheets):
+    """Spine width of the cover for a block of this many sheets.
+
+    With a sheet thickness the spine is the block plus the cover boards, rounded up to even millimetres;
+    without one it is the fixed width set on the cover."""
+    thickness = master.get('sheetThickness')
+    if not thickness:
+        cover = next((s for s in master['sections'] if s.get('cover')), None)
+        return float((cover or {}).get('safety', {}).get('spine', 0) or 0)
+    return float(max(SPINE_MIN, 2 * math.ceil(round(SPINE_BOARD + sheets * thickness, 2) / 2)))
 
 
 def cover_box(layer, side, width, spine):
@@ -300,6 +298,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     v2 = master.get('rulesVersion') == 2
     book = v2 and master.get('layout') == 'book'
     flex_groups = []
+    late_texts = []  # texts with shoot chips wait until the spread's general photos are picked
     for owner in owners:
         owner_key = 'student:'+owner['id']; group = {}; sequence=[]; slot_order=0
         planned = []
@@ -311,9 +310,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 raise ValueError('Раздел превышает 1000 разворотов')
             planned.append((section, pages))
         inner_spreads = sum(len(pages) // 2 for section, pages in planned if not section.get('cover'))
-        spine, spine_problem = cover_spine(master, inner_spreads, 2 * inner_spreads - (2 if book and inner_spreads else 0))
-        if spine_problem:
-            issue('error', 'cover:spine', spine_problem)
+        # A layflat spread is one sheet; a book printed page by page has two pages to a sheet.
+        spine = cover_spine(master, inner_spreads - 1 if book and inner_spreads else inner_spreads)
         # A book starts on a right page and ends on a left one: the outer pages of the inner block are not printed.
         blanks = set()
         inner = [(section['id'], len(pages)) for section, pages in planned if not section.get('cover') and pages]
@@ -326,12 +324,14 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
             for index in range(0,len(pages),2):
                 spread_key=f'cover[{owner_key}]' if section.get('cover') else f'{section["id"]}[{owner_key}]:{index//2}'
                 sequence.append(spread_key); elements=[]; appearance={}
-                def add(e, inherit_effects=True, slot=None):
+                def add(e, inherit_effects=True, slot=None, late=None):
                     nonlocal slot_order
                     e.update(appearance if inherit_effects else {key: appearance[key] for key in ('angle', 'rotation_center')})
                     e.setdefault('hidden',False)
                     elements.append(e)
-                    if slot is not None:
+                    if late is not None:
+                        late_texts.append((e, *late, finish, spread_key))
+                    elif slot is not None:
                         slot['element'] = e; slot['order'] = slot_order; slot_order += 1
                         slot['finish'] = finish; slots.append(slot)
                     else:
@@ -391,13 +391,18 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                             if layer.get('letterSpacing'): element['letterSpacing']=layer['letterSpacing']
                             if layer.get('underline'): element['underline']=True
                             if layer.get('strike'): element['strike']=True
+                            if layer.get('skew'): element['skew']=layer['skew']
                             return element
                         def photo_element(key,bounds,photo):
                             return {'key':key,'type':'photo','box':bounds,'photo':photo,'crop':crop(photo,bounds,layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1)) if photo else None,'mask':'rect','required':True,'opacity':layer.get('opacity',100)}
                         if layer['type']=='text':
-                            binding=layer.get('binding','static')
-                            value={'owner.name':name(owner),'item.name':name(item),'lead.name':name(lead),'class':snapshot['order']['class_name'],'year':snapshot['order']['year'],'school':snapshot['order'].get('school',''),'city':snapshot['order'].get('city','')}.get(binding,layer['text'])
-                            add({**text_element(key,bounds,value,layer['fontSize']),'valign':'middle'})
+                            order=snapshot['order']
+                            values={'owner.name':name(owner),'owner.quote':owner.get('quote',''),'item.name':name(item),'item.quote':(item or {}).get('quote',''),
+                                    'lead.name':name(lead),'lead.subject':(lead or {}).get('school_subject',''),'school':order.get('school',''),'city':order.get('city',''),
+                                    'class':order['class_name'],'year':order['year']}
+                            element={**text_element(key,bounds,auto_text.resolve(layer['text'],values),layer['fontSize']),'valign':'middle'}
+                            late=(layer['text'],values) if auto_text.fields(layer['text'])&auto_text.SHOOT_FIELDS else None
+                            add(element, late=late)
                         elif layer['type']=='photo':
                             source=layer['source']
                             if source=='class':
@@ -521,6 +526,18 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
             if result['dpi'] < GOOD_DPI:
                 issue('warning', slot['ident'], f'Разрешение снимка в слоте {result["dpi"]} dpi — ниже 200')
         slot['finish'](e)
+    shoots = snapshot.get('shoots', {})
+    for e, template, values, finish, spread_key in late_texts:
+        # The spread's shoot is the one most of its placed general photos come from; ties go to the first placed.
+        counts = {}
+        for slot in slots:
+            result = slot.get('result')
+            shoot = entry_by_id.get(result['photo'], {}).get('shoot') if result and not slot.get('dropped') and slot['key'].startswith(spread_key + '/') else None
+            if shoot in shoots:
+                counts[shoot] = counts.get(shoot, 0) + 1
+        shoot = shoots[max(counts, key=counts.get)] if counts else {}
+        e['text'] = auto_text.resolve(template, {**values, 'shoot.title': shoot.get('title', ''), 'shoot.date': auto_text.shoot_date(shoot.get('date', ''))})
+        finish(e)
     for student in students:
         if 'general' in snapshot and entries and not report['coverage'].get(student['id']):
             issue('warning', 'coverage:' + student['id'], f'{name(student)}: нет на общих фото альбома')
@@ -533,7 +550,6 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     document={'schema_version':1,'master_template':True,'edition':{'id':edition['id'],'version':edition['version']},'input_hash':canonical_hash(snapshot),'spread_count':count,'page_count':count*2-(2 if book and count>1 else 0),'spread_size_mm':[2*inner_width,inner_height],'cover_size_mm':next(iter(covers.values()))['size_mm'] if covers else None,'covers':covers,'shared_spreads':{},'variant_spreads':groups,'variants':variants,'plan':plans,'issues':issues,'overrides':{'applied':applied,'conflicts':conflicts},'photo_report':report}
     if book:
         document['layout'] = 'book'
-    profile = master.get('print')
-    document['print'] = {'name': profile['name'], 'files': profile['files'], 'dpi': profile['dpi']} if profile else {'name': '', 'files': 'pages' if book else 'spreads', 'dpi': 300}
+    document['print'] = {'files': 'pages' if book else 'spreads', 'dpi': 300}
     document['revision']=canonical_hash(document)
     return document

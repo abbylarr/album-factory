@@ -26,9 +26,7 @@
 .v2 .eyebrow{font-size:12px;letter-spacing:0;color:#a59ca9;margin-bottom:14px}
 .v2 .eyebrow a:hover{color:var(--ink)}
 .v2 .muted{color:var(--muted)}
-.v2 .status-panel,.v2 .future-state,.v2 .empty-state,.v2 .panel{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--card-shadow)}
-.v2 .status-panel.attention{background:#fffcf0;border-color:#f3e6b0}
-.v2 .status-panel.neutral{background:#fff}
+.v2 .future-state,.v2 .empty-state,.v2 .panel{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--card-shadow)}
 .v2 .workspace-tabs a.active{border-color:#ffd400}
 .v2 dialog{border:1px solid #ece8ef;border-radius:20px;box-shadow:0 15px 90px #17101f28}
 .v2 dialog::backdrop{background:#28212f33;backdrop-filter:blur(3px)}
@@ -100,7 +98,7 @@
 /* Stage queue: one stage, one kind of work */
 .stage-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:5px 10px;border-radius:8px;background:var(--stage);color:var(--stage-ink);margin-bottom:14px}
 .queue-hint{font-size:15px;margin-bottom:28px;max-width:640px}
-.queue-head{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:940px}
+.queue-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .v2 .queue-head .segmented button{display:grid;place-items:center;padding:7px 10px}
 .queue-tools{display:flex;align-items:center;gap:8px}
 .queue-search{position:relative;display:flex;align-items:center}
@@ -109,9 +107,9 @@
 .v2 .queue-search input{width:36px;height:36px;min-height:0;margin:0;padding:0 0 0 36px;border:1px solid transparent;border-radius:10px;background:transparent;font-size:13px;opacity:0;pointer-events:none;transition:width .2s,opacity .2s}
 .v2 .queue-search.open input{width:240px;padding-right:10px;background:#fff;border-color:var(--line);opacity:1;pointer-events:auto}
 .v2 .queue-search.open button{pointer-events:none;background:transparent}
-.queue-list{display:flex;flex-direction:column;gap:6px;max-width:940px}
-.v2 .queue{margin-left:clamp(0px,3vw,48px)}
-.queue-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;max-width:940px}
+.queue-list{display:flex;flex-direction:column;gap:6px}
+.queue-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.v2 .queue .empty-state{padding:42px 0;background:transparent;border:0;border-radius:0;box-shadow:none}
 @media(max-width:1000px){.queue-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.queue-grid{grid-template-columns:1fr}}
 .queue-card{display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--card-shadow);overflow:hidden}
@@ -146,17 +144,13 @@
 @keyframes deal-spin{to{transform:rotate(360deg)}}
 
 /* Order page */
-.stage-line{list-style:none;display:flex;gap:4px;padding:0;margin:0 0 16px}
-.stage-line li{flex:1;min-width:0;font-size:11px;color:#a8a6ad;padding-top:8px;border-top:3px solid #e6e6e9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stage-line li.done{border-color:#ffd400;color:#6b6770}
-.stage-line li.current{border-color:var(--ink);color:var(--ink);font-weight:600}
 .step-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .back-link{margin-bottom:12px}
 .folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px;margin-top:8px}
 .folder{position:relative;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--card-shadow);overflow:hidden}
 .folder:hover{border-color:#dcdbe0}
 .folder-open{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;padding:0 0 14px;background:none;border:0;text-align:left;color:inherit}
-.folder-open>img,.folder-empty{display:grid;place-items:center;width:100%;height:140px;object-fit:cover;background:#f0f0f2;margin-bottom:8px}
+.folder-open>img,.folder-empty{display:grid;place-items:center;width:100%;aspect-ratio:4/3;height:auto;object-fit:cover;object-position:center 22%;background:#f0f0f2;margin-bottom:8px}
 .folder-empty img{width:28px;opacity:.5}
 .folder-open strong{font-size:14px;padding:0 14px}
 .folder-open small{font-size:12px;color:var(--muted);padding:0 14px}
@@ -336,64 +330,106 @@
 .v2 .package-empty{margin:8px 10px;font-size:13px}
 @media(max-width:560px){.v2 .form-row.three{grid-template-columns:1fr 1fr}.v2 .form-row.three label:last-child{grid-column:1/-1}}
 
-/* One compact order card in stage grids and the full order grid. */
-.v2 .order-tile{display:flex;flex-direction:column;min-width:0;background:#fff;border:1px solid var(--line);border-radius:19px;box-shadow:var(--card-shadow);overflow:hidden;transition:border-color .15s,box-shadow .15s}
-.v2 .order-tile:hover{border-color:#dedbe2;box-shadow:0 8px 28px #2222220d}
-.v2 .order-tile-main{display:flex;flex:1;flex-direction:column;align-items:flex-start;min-width:0;padding:20px;color:var(--ink)}
-.v2 .order-tile-top{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin-bottom:22px}
-.v2 .order-tile-icon{display:grid;place-items:center;flex:none;width:38px;height:38px;border-radius:11px;background:#f3f3f5;color:#85828c}
-.v2 .order-tile.state-done .order-tile-icon{background:#edf6ef;color:#438b55}
-.v2 .order-tile.state-error .order-tile-icon{background:#fcefeb;color:#bd5748}
-.v2 .order-tile.state-working .order-tile-icon{background:#edf2fb;color:#5478b9}
-.v2 .order-tile-stage{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#77717d;background:#f5f4f6;padding:6px 9px;border-radius:7px}
-.v2 .order-tile-school{display:block;max-width:100%;font-size:14px;line-height:1.35;color:#77717d;overflow-wrap:anywhere}
-.v2 .order-tile-class{display:block;max-width:100%;margin-top:5px;font-size:26px;font-weight:650;line-height:1.15;letter-spacing:-.5px;overflow-wrap:anywhere}
-.v2 .order-tile-status{display:block;max-width:100%;margin-top:16px;font-size:12px;line-height:1.45;color:#77717d;overflow-wrap:anywhere}
-.v2 .order-tile.state-error .order-tile-status{color:#ad5145}
-.v2 .order-tile progress{width:100%;height:5px;margin-top:12px;accent-color:#8e9fc0}
-.v2 .order-tile-footer{display:flex;align-items:center;min-height:54px;margin:0 20px;border-top:1px solid #f0eff2}
-.v2 .order-tile-footer .task-button,.v2 .order-tile-open{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:46px;margin:0;padding:8px 0;border:0;border-radius:0;background:transparent;color:#514d56;font-size:12px;font-weight:600;text-align:left}
-.v2 .order-tile-footer .task-button:hover,.v2 .order-tile-open:hover{background:transparent;color:#1f1d22}
-.v2 .order-tile-footer .task-button.is-ready{background:transparent;color:#665000}
-.v2 .order-tile-footer .task-button.is-ready:hover{background:transparent;color:#2d2400}
-.v2 .order-tile-open span{font-size:16px;font-weight:400;color:#aaa5af}
-.v2 .queue-grid .order-tile,.v2 .registry-grid .order-tile{height:100%}
-@media(max-width:560px){.v2 .order-tile-main{padding:18px}.v2 .order-tile-footer{margin:0 18px}.v2 .order-tile-top{margin-bottom:16px}.v2 .order-tile-class{font-size:23px}}
-
+/* One compact order card in stage grids and the full order grid: preview, name, stage with its state, next step. */
+.v2 .order-tile{--tile-bg:#fefefe;--tile-bg-clear:#f8f6f300;position:relative;display:flex;flex-direction:column;min-width:0;background:var(--tile-bg);border:1px solid var(--line);border-radius:19px;box-shadow:var(--card-shadow);overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.v2 .order-tile:hover{border-color:#e2ddd6;box-shadow:0 8px 28px #2222220d}
+.v2 .order-tile-main{position:relative;display:flex;flex:1;flex-direction:column;align-items:stretch;min-width:0;padding:0;color:var(--ink)}
 /* Previews change with the order: class cover, photo collage, then the actual layout. */
-.v2 .order-tile-main{position:relative;padding:0;align-items:stretch}
-.v2 .order-preview{position:relative;display:grid;place-items:center;width:100%;height:164px;overflow:hidden;background:#ece8e3}
-.v2 .order-preview-empty{background:#e9e5df}
-.v2 .order-preview-paper{position:relative;display:flex;flex-direction:column;justify-content:space-between;width:67%;height:75%;padding:13px 15px;background:#fcfaf7;box-shadow:4px 7px 18px #28212f20;transform:rotate(-3deg);overflow:hidden}
+.v2 .order-preview{position:relative;display:grid;place-items:center;box-sizing:border-box;width:100%;height:232px;padding-bottom:66px;overflow:hidden;background:var(--tile-bg,#f1efec)}
+.v2 .order-preview-paper{position:relative;display:flex;flex-direction:column;justify-content:space-between;width:62%;height:68%;padding:13px 15px;background:#f6f3ee;box-shadow:3px 6px 16px #28212f1f;transform:rotate(-3deg);overflow:hidden}
 .v2 .order-preview-paper small{position:relative;z-index:1;max-width:85%;font-size:9px;line-height:1.25;color:#777167;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v2 .order-preview-paper strong{position:relative;z-index:1;font-family:Georgia,serif;font-size:34px;font-weight:400;line-height:1;letter-spacing:-1px;color:#3d3a36}
-.v2 .order-preview-paper i{position:absolute;right:-6%;bottom:-25%;width:38%;height:125%;border-radius:48% 48% 0 0;background:#d5cfc3;transform:rotate(16deg)}
-.v2 .order-preview-collage{display:grid;grid-template-columns:1.25fr 1fr;grid-template-rows:1fr 1fr;gap:5px;width:72%;height:78%;transform:rotate(-3deg);filter:drop-shadow(3px 5px 8px #27221e24)}
-.v2 .order-preview-collage img{width:100%;height:100%;min-width:0;min-height:0;object-fit:cover;background:#d8d6d3;border:3px solid #fff}
-.v2 .order-preview-collage img:first-child{grid-row:1/3}
-.v2 .order-preview-collage.count-1{display:block;width:56%}
-.v2 .order-preview-collage.count-2{grid-template-columns:1fr 1fr;grid-template-rows:1fr}
-.v2 .order-preview-collage.count-2 img:first-child{grid-row:auto}
-.v2 .order-preview-has-layout{background:#e6e1eb}
-.v2 .order-preview-book{display:grid;place-items:center;width:90%;height:100%}
-.v2 .order-preview-book .layout-canvas{width:100%;max-height:86%;box-shadow:4px 7px 18px #28212f22;transform:rotate(-2deg)}
-.v2 .order-tile-content{display:flex;flex:1;flex-direction:column;align-items:flex-start;padding:18px 20px 20px}
-.v2 .order-tile-top{margin-bottom:16px}
-.v2 .order-tile-school{font-size:13px}
-.v2 .order-tile-class{font-size:23px}
-.v2 .order-tile-status{margin-top:12px}
-@media(max-width:560px){.v2 .order-preview{height:152px}.v2 .order-tile-content{padding:16px 18px 18px}}
-
-.v2 .order-tile-content{padding:18px 20px 16px}
-.v2 .order-tile-heading{display:flex;align-items:baseline;gap:6px;width:100%;min-width:0;white-space:nowrap;font-size:20px;line-height:1.25;letter-spacing:-.35px;color:var(--ink)}
-.v2 .order-tile-school,.v2 .order-tile-class{display:block;min-width:0;max-width:none;margin:0;font:inherit;font-weight:650;line-height:inherit;letter-spacing:inherit;color:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v2 .order-preview-paper i{position:absolute;right:-6%;bottom:-25%;width:38%;height:125%;border-radius:48% 48% 0 0;background:#e2ddd3;transform:rotate(16deg)}
+.v2 .order-preview-fan{position:absolute;inset:0 0 58px;display:flex;align-items:center;justify-content:center}
+.v2 .order-preview-fan img{flex:none;height:74%;aspect-ratio:3/4;object-fit:cover;background:#dcd9d5;border:4px solid #fff;border-radius:3px;box-shadow:2px 5px 12px #28212f1c}
+.v2 .order-preview-fan img+img{margin-left:-10px}
+.v2 .order-preview-fan.count-3 img:first-child{transform:rotate(-6deg) translateY(4px)}
+.v2 .order-preview-fan.count-3 img:nth-child(2){position:relative;z-index:1;height:80%}
+.v2 .order-preview-fan.count-3 img:last-child{transform:rotate(6deg) translateY(4px)}
+.v2 .order-preview-fan.count-2 img:first-child{transform:rotate(-4deg)}
+.v2 .order-preview-fan.count-2 img:last-child{transform:rotate(4deg)}
+.v2 .order-preview-book{display:grid;place-items:center;width:90%;height:100%;pointer-events:none}
+.v2 .order-preview-book .layout-canvas{width:100%;max-height:86%;box-shadow:3px 6px 16px #28212f1c;transform:rotate(-2deg)}
+/* Name and stage ring sit on the preview, fading it out at the bottom so the card reads as one piece. */
+.v2 .order-tile-content{position:absolute;left:0;right:0;bottom:0;z-index:1;display:flex;align-items:center;gap:11px;min-width:0;padding:40px 16px 12px;background:linear-gradient(to top,var(--tile-bg) 52%,var(--tile-bg-clear))}
+.v2 .order-tile .stage-ring circle{stroke:#e3dfda}
+.v2 .order-tile-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.v2 .order-tile-heading{display:flex;align-items:baseline;gap:6px;width:100%;min-width:0;white-space:nowrap;font-size:17px;line-height:1.25;letter-spacing:-.3px}
+.v2 .order-tile-school,.v2 .order-tile-class{display:block;min-width:0;font-weight:650;overflow:hidden;text-overflow:ellipsis}
 .v2 .order-tile-school{flex:0 1 auto}
 .v2 .order-tile-class{flex:none}
 .v2 .order-tile-separator{flex:none;color:#b1adb5;font-weight:400}
-.v2 .order-tile-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;margin-top:13px}
-.v2 .order-tile-state{display:flex;align-items:center;gap:7px;min-width:0}
-.v2 .order-tile-icon{width:24px;height:24px;border-radius:7px}
-.v2 .order-tile-status{min-width:0;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
-.v2 .order-tile-stage{position:absolute;top:12px;right:12px;z-index:2;max-width:calc(100% - 24px);font-size:10px;padding:5px 8px;background:#fffef9e8;box-shadow:0 2px 8px #28212f12}
-.v2 .order-tile progress{margin-top:10px}
-@media(max-width:560px){.v2 .order-tile-content{padding:16px 18px 14px}.v2 .order-tile-heading{font-size:19px}}
+.v2 .order-tile-stage{font-size:12px;color:#8d8992}
+/* Stage ring: filled segments are the stages passed, colour is whose turn it is. */
+.v2 .stage-ring{position:relative;display:inline-grid;place-items:center;flex:none;--turn:#a9a6ae}
+.v2 .stage-ring svg{position:absolute;inset:0}
+.v2 .stage-ring circle{fill:none;stroke:#e9e7ec}
+.v2 .stage-ring circle.on{stroke:var(--turn)}
+.v2 .stage-ring>.ico{position:relative;color:var(--turn)}
+.v2 .turn-mine{--turn:#d39a1a;--plate:#fcf1da;--plate-ink:#6b4708}
+.v2 .turn-wait{--turn:#a9a6ae;--plate:#f3f2f4;--plate-ink:#5f5c64}
+.v2 .turn-done{--turn:#5b9a2c;--plate:#eaf4e2;--plate-ink:#2e5a12}
+.v2 .turn-alert{--turn:#d2493b;--plate:#fcecea;--plate-ink:#8a2a22}
+/* Status plate: what is happening and the next step, tinted by whose turn it is. */
+.v2 .order-plate{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:8px 16px;background:var(--plate);color:var(--plate-ink);font-size:13px}
+.v2 .order-tile .order-plate{min-height:40px;margin:2px 10px 10px;padding:6px 14px;border-radius:12px}
+.v2 .order-plate-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v2 .order-plate-action{flex:none;margin:0;padding:6px 0;border:0;background:none;color:inherit;font:inherit;font-weight:650;white-space:nowrap;cursor:pointer}
+.v2 .order-plate-action:hover{background:none;color:inherit;text-decoration:underline;text-underline-offset:3px}
+/* The order menu shows on hover; touch screens keep it visible. */
+.v2 .order-tile-menu .design-menu-toggle{opacity:0}
+.v2 .order-tile:hover .order-tile-menu .design-menu-toggle,.v2 .order-tile-menu.open .design-menu-toggle,.v2 .order-tile-menu .design-menu-toggle:focus-visible{opacity:1}
+@media(hover:none){.v2 .order-tile-menu .design-menu-toggle{opacity:1}}
+/* Light hover motion: portraits fan out, paper and layout lift a little. */
+.v2 .order-preview-fan img,.v2 .order-preview-paper,.v2 .order-preview-book .layout-canvas{transition:transform .35s cubic-bezier(.2,.7,.3,1),box-shadow .35s}
+.v2 .order-tile:hover .order-preview-fan.count-3 img:first-child{transform:rotate(-8deg) translate(-8px,4px)}
+.v2 .order-tile:hover .order-preview-fan.count-3 img:nth-child(2){transform:translateY(-3px)}
+.v2 .order-tile:hover .order-preview-fan.count-3 img:last-child{transform:rotate(8deg) translate(8px,4px)}
+.v2 .order-tile:hover .order-preview-fan.count-2 img:first-child{transform:rotate(-6deg) translateX(-6px)}
+.v2 .order-tile:hover .order-preview-fan.count-2 img:last-child{transform:rotate(6deg) translateX(6px)}
+.v2 .order-tile:hover .order-preview-fan.count-1 img{transform:translateY(-3px) rotate(-2deg)}
+.v2 .order-tile:hover .order-preview-paper{transform:rotate(-1deg) translateY(-3px)}
+.v2 .order-tile:hover .order-preview-book .layout-canvas{transform:rotate(0deg) translateY(-3px) scale(1.02);box-shadow:5px 10px 22px #28212f24}
+@media(prefers-reduced-motion:reduce){.v2 .order-preview-fan img,.v2 .order-preview-paper,.v2 .order-preview-book .layout-canvas{transition:none}}
+/* Order page head: stage ring with the order's path, facts about the order, status plate and sections. */
+.v2 .order-head{margin-bottom:24px;background:#fff;border:1px solid var(--line);border-radius:19px;box-shadow:var(--card-shadow)}
+.v2 .order-head-top{display:flex;align-items:flex-start;gap:18px;padding:22px 22px 18px}
+.v2 .order-head-info{flex:1;min-width:0}
+.v2 .order-head-stage{font-size:12px;color:#8d8992}
+.v2 .order-head h1{margin:3px 0 0;font-size:28px;line-height:1.2;letter-spacing:-.6px}
+.v2 .order-head-meta{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:9px;font-size:13px;color:#6f6b74}
+.v2 .order-head-meta span{display:inline-flex;align-items:center;gap:6px}
+.v2 .order-head-meta .ico{color:#a3a0a8}
+.v2 .order-head-meta a{color:inherit;text-decoration:underline;text-decoration-color:#d6d3da;text-underline-offset:3px}
+.v2 .order-head-meta a:hover{color:var(--ink);text-decoration-color:currentColor}
+.v2 .order-head-menu{position:relative;top:auto;right:auto;flex:none}
+.v2 .order-head-menu .design-menu-toggle{width:36px;height:36px;border:1px solid var(--line);background:#fff;color:#6f6b74;box-shadow:none;opacity:1}
+.v2 .order-head-menu .design-menu-toggle:hover,.v2 .order-head-menu.open .design-menu-toggle{background:#f6f5f7;color:var(--ink)}
+.v2 .order-head-menu .design-menu-list{top:42px}
+.v2 .stage-path{position:relative;flex:none}
+.v2 .stage-path-toggle{display:block;padding:0;border:0;border-radius:50%;background:none;cursor:pointer;transition:transform .2s}
+.v2 .stage-path-toggle:hover{transform:scale(1.05)}
+.v2 .stage-path-list{position:absolute;top:64px;left:0;z-index:6;width:230px;margin:0;padding:6px;list-style:none;background:#fff;border:1px solid #ecebe6;border-radius:12px;box-shadow:0 14px 40px #28212f24}
+.v2 .stage-path-list li{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;font-size:13px;color:#a3a0a8}
+.v2 .stage-path-list li i{flex:none;width:9px;height:9px;border-radius:50%;border:1.5px solid #d6d3da}
+.v2 .stage-path-list li.done{color:#5f5c64}
+.v2 .stage-path-list li.done i{border-color:#8d8992;background:#8d8992}
+.v2 .stage-path-list li.current{background:#f6f5f7;color:var(--ink);font-weight:600}
+.v2 .stage-path-list li.current i{border-color:var(--ink);background:var(--ink)}
+.v2 .stage-path-list small{margin-left:auto;font-size:11px;font-weight:400;color:#8d8992}
+.v2 .order-head-plate{margin:0 22px;padding:14px 18px;border-radius:14px;align-items:center}
+.v2 .order-plate-body{flex:1;min-width:0}
+.v2 .order-plate-title{font-size:15px;font-weight:650}
+.v2 .order-plate-body p{margin:4px 0 0;font-size:13px;line-height:1.45;opacity:.85}
+.v2 .order-plate-body progress{max-width:560px;margin-top:10px}
+/* Plate buttons stay neutral: the plate colour already says whose turn it is. */
+.v2 .order-head-plate .step-actions .primary,.v2 .order-head-plate .step-actions .secondary{border:0;box-shadow:none;transition:background .15s,box-shadow .15s}
+.v2 .order-head-plate .step-actions .primary{background:#fff;color:var(--ink);box-shadow:0 1px 3px #28212f14}
+.v2 .order-head-plate .step-actions .primary:hover{background:#fff;color:#000;box-shadow:0 2px 8px #28212f1f}
+.v2 .order-head-plate .step-actions .secondary{background:transparent;color:var(--plate-ink)}
+.v2 .order-head-plate .step-actions .secondary:hover{background:#ffffff80;color:var(--plate-ink)}
+.v2 .order-head .workspace-tabs{margin:6px 0 0;padding:0 22px;border-bottom:0}
+.v2 .order-head .workspace-tabs a{padding:14px 0}
+@media(max-width:760px){.v2 .order-head-top{flex-wrap:wrap;padding:18px}.v2 .order-head-plate{flex-wrap:wrap;margin:0 18px}.v2 .order-head .workspace-tabs{padding:0 18px}.v2 .order-head h1{font-size:23px}}
+.v2 .queue-grid .order-tile,.v2 .registry-grid .order-tile{height:100%}
+@media(max-width:560px){.v2 .order-preview{height:212px}.v2 .order-tile-content{padding:36px 14px 10px}}

@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from .layout_engine import canonical_hash, LayoutError
 from .svg_draw import svg_is_safe
+from . import auto_text
 from . import general_meta as gm
 from .vision import TAGS
 
@@ -71,19 +72,6 @@ def validate(document):
         for key in ('safe', 'bleed', 'spine', 'gap'):
             check(number(value.get(key, 0), 0, limit if key != 'bleed' else 30), 'Неверные линии безопасности')
         check(value.get('safe', 0) + value.get('bleed', 0) < limit, 'Зона безопасности не помещается')
-    # The printer's product: files it takes and the spine table «volume range → spine, mm».
-    def print_profile(value):
-        check(isinstance(value, dict) and set(value) <= {'id', 'name', 'unit', 'files', 'dpi', 'spine'}, 'Неверный профиль печати')
-        check(isinstance(value.get('name'), str) and 0 < len(value['name']) <= 200 and isinstance(value.get('id', ''), str) and len(value.get('id', '')) <= 100, 'Неверный профиль печати')
-        check(value.get('unit') in {'spreads', 'pages'} and value.get('files') in {'spreads', 'pages'} and value.get('dpi') in {150, 200, 300, 400, 600}, 'Неверный профиль печати')
-        rows = value.get('spine')
-        check(isinstance(rows, list) and 1 <= len(rows) <= 60, 'Нужна таблица корешка')
-        last = 0
-        for row in rows:
-            check(isinstance(row, list) and len(row) == 3 and all(number(v, 0, 1000) for v in row), 'Неверная строка таблицы корешка')
-            low, high, mm = row
-            check(int(low) == low and int(high) == high and last < low <= high and 1 <= mm <= 100, 'Строки таблицы корешка должны идти по возрастанию без пересечений')
-            last = high
     # A book is printed page by page: bleed on the top, bottom and outer edge, a spine strip on the inner edge.
     def book_safety(value, width, height):
         check(isinstance(value, dict) and set(value) <= {'safe', 'bleed', 'outer', 'spine'}, 'Неверные линии безопасности книги')
@@ -91,8 +79,9 @@ def validate(document):
             check(number(value.get(key, 0), 0, high), 'Неверные линии безопасности книги')
         safe = value.get('safe', 0)
         check(value.get('outer', 0) + value.get('spine', 0) + 2 * safe < width and 2 * (value.get('bleed', 0) + safe) < height, 'Зона безопасности книги не помещается')
-    if 'print' in document:
-        print_profile(document['print'])
+    # Thickness of one inner sheet sizes the cover spine to the book.
+    if 'sheetThickness' in document:
+        check(number(document['sheetThickness'], 0.02, 5), 'Толщина листа — от 0,02 до 5 мм')
     if 'safety' in document:
         safety(document['safety'], page_width, page_height)
         if 'book' in document['safety']:
@@ -185,6 +174,7 @@ def validate(document):
         check(style.get('font') in known_fonts and number(style.get('fontSize'), 4, 120) and color(style.get('color')), 'Неверный стиль текста')
         check(style.get('align') in {'left', 'center', 'right', 'justify'}, 'Неверное выравнивание стиля')
         check(number(style.get('lineHeight'), 0.8, 3) and number(style.get('letterSpacing'), -20, 80), 'Неверные интервалы стиля')
+        check(number(style.get('skew', 0), -30, 30), 'Неверный наклон стиля')
         for flag in ('bold', 'italic', 'underline', 'strike'):
             check(isinstance(style.get(flag), bool), 'Неверное начертание стиля')
     for section in sections:
@@ -270,11 +260,12 @@ def validate(document):
                                 check(isinstance(layer[flag], bool), 'Неверное начертание')
                         check(number(layer.get('lineHeight', 1.25), 0.8, 3), 'Неверный интерлиньяж')
                         check(number(layer.get('letterSpacing', 0), -20, 80), 'Неверный межбуквенный интервал')
+                        check(number(layer.get('skew', 0), -30, 30), 'Наклон текста — от −30° до 30°')
                     if kind == 'text':
                         if layer.get('styleId'):
                             check(layer['styleId'] in known_styles, 'Неизвестный стиль текста')
                         check(isinstance(layer.get('text'), str) and len(layer['text']) <= 2000, 'Текст длиннее 2000 символов')
-                        check(layer.get('binding') in {'static','owner.name','item.name','lead.name','class','year','school','city'}, 'Неверное поле текста')
+                        check('binding' not in layer and not auto_text.unknown(layer['text']), 'Неизвестные данные в тексте')
                         check(layer.get('align') in {'left','center','right','justify'}, 'Неверное выравнивание')
                     if kind == 'photo':
                         check(layer.get('source') in {'lead','owner','item','class','custom'}, 'Неверный источник фото')

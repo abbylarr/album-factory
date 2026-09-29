@@ -46,7 +46,7 @@ def master():
          'spreads': [{'id': 'm', 'pages': [page('ml', [photo('mp', 'item')]), page('mr')]}]},
         {'id': 'others', 'name': 'Одноклассники', 'kind': 'repeat', 'people': 'others',
          'spreads': [{'id': 'o', 'pages': [page('ol', [photo('op', 'item')]), page('or', [{'id': 'who', 'type': 'text', 'box': {'x': 10, 'y': 10, 'w': 150, 'h': 20},
-                                                                                          'text': '', 'binding': 'item.name', 'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'}])]}]},
+                                                                                          'text': '{{item.name}}', 'font': 'Arial', 'fontSize': 12, 'color': '#333333', 'align': 'left'}])]}]},
     ]}
 
 

@@ -11,7 +11,7 @@ import test_server_v2
 def master():
     def page(key, layers=None): return {'id':key,'background':'#ffffff','layers':layers or []}
     grid={'id':'grid','type':'grid','box':{'x':16,'y':33,'w':178,'h':224},'source':'students','min':4,'max':12,'gap':5,'minPhotoWidth':32,'font':'Arial','fontSize':12,'minFontSize':10,'color':'#34332f'}
-    title={'id':'title','type':'text','box':{'x':15,'y':10,'w':170,'h':25},'text':'Наш класс','binding':'static','font':'Arial','fontSize':22,'color':'#333333','align':'left'}
+    title={'id':'title','type':'text','box':{'x':15,'y':10,'w':170,'h':25},'text':'Наш класс','font':'Arial','fontSize':22,'color':'#333333','align':'left'}
     return {'schemaVersion':1,'name':'Тестовый дизайн','personalMode':'all','sections':[
         {'id':'students','name':'Ученики','kind':'flow','target':2,'spreads':[{'id':'s1','pages':[page('p1',[grid]),page('p2',[title])]}]},
         {'id':'shared','name':'Общие','kind':'fixed','spreads':[{'id':f'g{i}','pages':[page(f'g{i}l'),page(f'g{i}r')]} for i in range(4)]},
@@ -169,7 +169,7 @@ class MasterTests(unittest.TestCase):
                    {'id':'cover-back','background':'#ffffff','layers':[]},
                    {'id':'cover-front','background':'#ffffff','layers':[
                        {'id':'cover-title','type':'text','box':{'x':20,'y':20,'w':180,'h':30},
-                        'text':'Моя обложка','binding':'static','font':'Arial','fontSize':24,
+                        'text':'Моя обложка','font':'Arial','fontSize':24,
                         'color':'#333333','align':'left'}]}]}]}
         doc['sections'].insert(0,cover)
         draft=self.client.post('/api/master-templates',json={'document':doc})
@@ -302,7 +302,7 @@ class MasterTests(unittest.TestCase):
         doc['sections'][0]['spreads'][0]['pages'][0]['layers']=[
             {'id':'asset','type':'photo','box':{'x':10,'y':10,'w':90,'h':120},'source':'custom','angle':12,'radius':8,'stroke':'#333333','strokeWidth':.5,'dataUrl':'data:image/png;base64,'+base64.b64encode(buffer.getvalue()).decode()},
             {'id':'oval','type':'ellipse','box':{'x':110,'y':10,'w':40,'h':40},'fill':'#aabbcc','opacity':50},
-            {'id':'caption','type':'text','box':{'x':10,'y':140,'w':180,'h':30},'text':'Проверка PDF','binding':'static','font':'Times New Roman','fontSize':24,'align':'center','color':'#333333'}]
+            {'id':'caption','type':'text','box':{'x':10,'y':140,'w':180,'h':30},'text':'Проверка PDF','font':'Times New Roman','fontSize':24,'align':'center','color':'#333333'}]
         draft=self.client.post('/api/master-templates',json={'document':doc}).json()
         pub=self.client.post(f'/api/master-templates/{draft["id"]}/publish',json={'revision':1}).json()
         order=self.client.post('/api/orders',json={'school_city':'Казань', 'school':'Тест','class_name':'9Б','copies':1,'offer_id':pub['offer_id']}).json()['id']
@@ -500,13 +500,13 @@ class MasterTests(unittest.TestCase):
         grid=deepcopy(doc);grid['sections'][0]['spreads'][0]['pages'][0]['layers'][0]['box']['w']=250
         self.assertEqual(self.client.post('/api/master-templates',json={'document':grid}).status_code,422)
 
-    def cover_book(self, spine_rows, layers=()):
+    def cover_book(self, sheet, layers=()):
         doc=master();doc['rulesVersion']=2;doc['layout']='spreads'
         doc['sections']=[{'id':'cover','name':'Обложка','cover':True,'kind':'fixed','pageSize':[220,300],'safety':{'safe':5,'bleed':3,'spine':6,'gap':2},
                           'spreads':[{'id':'cs','pages':[{'id':'cb','background':'#112233','layers':list(layers)},{'id':'cf','background':'#445566','layers':[]}]}]},
                          {'id':'shared','name':'Общие','kind':'fixed','spreads':[{'id':f'g{i}','pages':[{'id':f'g{i}l','background':'#ffffff','layers':[]},{'id':f'g{i}r','background':'#ffffff','layers':[]}]} for i in range(4)]}]
-        if spine_rows is not None:
-            doc['print']={'id':'test','name':'Тест · Лайфлат','unit':'spreads','files':'spreads','dpi':150,'spine':spine_rows}
+        if sheet is not None:
+            doc['sheetThickness']=sheet
         return doc
 
     def compile_cover(self, doc):
@@ -514,39 +514,40 @@ class MasterTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
         return generate({'id':'test','version':1,'master':doc},snapshot,measurer())
 
-    def test_spine_follows_the_printers_table(self):
-        compiled=self.compile_cover(self.cover_book([[1,3,8],[4,6,10]]))
+    def test_spine_follows_the_sheet_thickness(self):
+        # 4 spreads × 1.2 mm + 3.5 mm of boards = 8.3 → 10 mm, rounded up to even millimetres
+        compiled=self.compile_cover(self.cover_book(1.2))
         cover=compiled['covers']['student:1']
         self.assertEqual((cover['spine_mm'],cover['size_mm'],compiled['cover_size_mm']),(10,[450,300],[450,300]))
         backgrounds=[e['box'] for e in cover['elements'] if e['key'].endswith('/background')]
         self.assertEqual(backgrounds,[[0,0,225,300],[225,0,225,300]])
-        self.assertEqual(compiled['print'],{'name':'Тест · Лайфлат','files':'spreads','dpi':150})
+        self.assertEqual(compiled['print'],{'files':'spreads','dpi':300})
         self.assertFalse(compiled['issues'])
-        compiled=self.compile_cover(self.cover_book([[5,9,8]]))
-        self.assertEqual(compiled['covers']['student:1']['spine_mm'],8)
-        self.assertIn('5–9 разв., в альбоме 4',next(i['message'] for i in compiled['issues'] if i['key']=='cover:spine'))
+        self.assertEqual(self.compile_cover(self.cover_book(0.14))['covers']['student:1']['spine_mm'],8)  # never thinner than 8 mm
+        book=self.cover_book(2);book['layout']='book'  # a book of 4 spreads has 6 pages on 3 sheets: 3.5 + 6 → 10
+        self.assertEqual(self.compile_cover(book)['covers']['student:1']['spine_mm'],10)
         compiled=self.compile_cover(self.cover_book(None))
         self.assertEqual(compiled['covers']['student:1']['size_mm'],[446,300])  # fixed spine of the cover
-        for rows in ([[4,6,10],[1,3,8]],[[1,3,0.5]],[]):
-            self.assertEqual(self.client.post('/api/master-templates',json={'document':self.cover_book(rows)}).status_code,422)
+        for value in (0,6,'1',True):
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':self.cover_book(value)}).status_code,422)
 
     def test_cover_layers_keep_to_the_spine(self):
         rect=lambda i,x,w,pin=None:{'id':i,'type':'rect','box':{'x':x,'y':10,'w':w,'h':20},'fill':'#ffffff',**({'pin':pin} if pin else {})}
-        doc=self.cover_book([[1,6,12]],[rect('back',10,50),rect('title',-4,8,'spine'),rect('wrap',0,440,'wrap')])
+        doc=self.cover_book(2,[rect('back',10,50),rect('title',-4,8,'spine'),rect('wrap',0,440,'wrap')])
         doc['sections'][0]['spreads'][0]['pages'][1]['layers']=[rect('front',10,50)]
         boxes={e['key'].rsplit('/',1)[1]:e['box'][:3] for e in self.compile_cover(doc)['covers']['student:1']['elements']}
         self.assertEqual(boxes['back'],[10,10,50]);self.assertEqual(boxes['front'],[242,10,50])
         self.assertEqual(boxes['title'],[222,10,8]);self.assertEqual(boxes['wrap'],[0,10,452])
         bad=deepcopy(doc);bad['sections'][1]['spreads'][0]['pages'][0]['layers']=[rect('x',0,10,'spine')]
         self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
-        bad=deepcopy(doc);bad['sections'][0]['spreads'][0]['pages'][0]['layers'][1]={'id':'t','type':'text','box':{'x':0,'y':0,'w':100,'h':20},'text':'x','binding':'static','font':'Arial','fontSize':12,'color':'#333333','align':'left','pin':'wrap'}
+        bad=deepcopy(doc);bad['sections'][0]['spreads'][0]['pages'][0]['layers'][1]={'id':'t','type':'text','box':{'x':0,'y':0,'w':100,'h':20},'text':'x','font':'Arial','fontSize':12,'color':'#333333','align':'left','pin':'wrap'}
         self.assertEqual(self.client.post('/api/master-templates',json={'document':bad}).status_code,422)
 
     def test_printer_files_are_jpeg_spreads_or_pages(self):
         import zipfile
         from io import BytesIO
         from PIL import Image
-        doc=self.cover_book([[1,6,12]])
+        doc=self.cover_book(2)
         def files(document, class_name):
             draft=self.client.post('/api/master-templates',json={'document':document})
             self.assertEqual(draft.status_code,201,draft.text)
@@ -559,14 +560,14 @@ class MasterTests(unittest.TestCase):
         archive=files(doc,'9А')
         self.assertEqual(archive.namelist(),['cover.jpg']+[f'spread-{i:02d}.jpg' for i in range(1,5)])
         cover=Image.open(BytesIO(archive.read('cover.jpg')))
-        self.assertEqual((cover.format,cover.mode,cover.size,round(cover.info['dpi'][0])),('JPEG','RGB',(round(452/25.4*150),round(300/25.4*150)),150))
+        self.assertEqual((cover.format,cover.mode,cover.size,round(cover.info['dpi'][0])),('JPEG','RGB',(round(452/25.4*300),round(300/25.4*300)),300))
         self.assertIn('icc_profile',cover.info)
         self.assertTrue(all(abs(a-b)<=2 for a,b in zip(cover.getpixel((10,10)),(0x11,0x22,0x33))))
-        book=deepcopy(doc);book['layout']='book';book['print'].update(unit='pages',files='pages',spine=[[1,20,8]])
+        book=deepcopy(doc);book['layout']='book'
         archive=files(book,'9Б')
         self.assertEqual(archive.namelist(),['cover.jpg']+[f'page-{i:03d}.jpg' for i in range(1,7)])
         page=Image.open(BytesIO(archive.read('page-001.jpg')))
-        self.assertEqual(page.size,(round(420/25.4*150)//2,round(280/25.4*150)))
+        self.assertEqual(page.size,(round(210/25.4*300)+1,round(280/25.4*300)))  # a page takes the odd pixel of the 4961 px spread
 
     def test_svg_shape_is_saved_and_drawn(self):
         from pypdf import PdfReader
@@ -600,13 +601,13 @@ class MasterTests(unittest.TestCase):
         doc=master();doc['fonts']=[{'id':'font-demo','name':'Мой шрифт','dataUrl':data}]
         doc['sections']=doc['sections'][1:2];doc['sections'][0]['spreads']=doc['sections'][0]['spreads'][:1]
         doc['sections'][0]['spreads'][0]['pages'][0]['layers']=[{
-            'id':'caption','type':'text','box':{'x':10,'y':20,'w':180,'h':40},'text':'Свой шрифт','binding':'static',
+            'id':'caption','type':'text','box':{'x':10,'y':20,'w':180,'h':40},'text':'Свой шрифт',
             'font':'font-demo','fontSize':28,'align':'center','color':'#222222','bold':True,'italic':True,'underline':True,
             'lineHeight':1.3,'letterSpacing':2,'stroke':'#7712b3','strokeWidth':0.4,'strokeOn':True,'strokeAlign':'outside','strokeDash':'solid',
             'shadow':{'color':'#000000','opacity':40,'blur':1.2,'offsetX':0.4,'offsetY':0.8}}]
         saved=self.client.post('/api/master-templates',json={'document':doc})
         self.assertEqual(saved.status_code,201,saved.text)
-        unknown=master();unknown['sections'][1]['spreads'][0]['pages'][0]['layers']=[{'id':'t','type':'text','box':{'x':10,'y':10,'w':40,'h':12},'text':'А','binding':'static','font':'Comic Sans','fontSize':12,'align':'left','color':'#333333'}]
+        unknown=master();unknown['sections'][1]['spreads'][0]['pages'][0]['layers']=[{'id':'t','type':'text','box':{'x':10,'y':10,'w':40,'h':12},'text':'А','font':'Comic Sans','fontSize':12,'align':'left','color':'#333333'}]
         self.assertEqual(self.client.post('/api/master-templates',json={'document':unknown}).status_code,422)
         broken=master();broken['fonts']=[{'id':'font-bad','name':'Битый','dataUrl':'data:font/ttf;base64,AAAA'}]
         self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422)

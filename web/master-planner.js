@@ -51,7 +51,8 @@ let planning=[];
     return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="133" viewBox="0 0 100 133"><rect width="100" height="133" fill="#e7e5e0"/>${circles}</svg>`);
   }
   function resolvedPhoto(item,generated){if(item.source==='custom')return item.dataUrl||null;if(item.source==='class')return placeholderSvg(null,true);const person=photoPerson(item.source,generated.personId);return person&&!person.missing?placeholderSvg(person):null;}
-  function resolvedText(item,generated){if(item.binding==='static')return item.text;const person=photoPerson(item.binding.startsWith('item')?'item':item.binding.startsWith('lead')?'lead':'owner',generated.personId);if(item.binding.endsWith('.name'))return person?.name||'Нет данных';if(item.binding==='class')return '11 «А»';if(item.binding==='year')return '2026';if(item.binding==='school')return 'Школа № 5';if(item.binding==='city')return 'Казань';return item.text;}
+  const TEXT_SAMPLES={'owner.quote':'Цитата владельца альбома','item.quote':'Цитата героя разворота','lead.subject':'Русский язык','class':'11 «А»','year':'2026','school':'Школа № 5','city':'Казань','shoot.title':'Никольская сопка','shoot.date':'27.09.2020'};
+  function resolvedText(item,generated){return AutoText.resolve(item.text,field=>{if(field.endsWith('.name')){const person=photoPerson(field.split('.')[0],generated.personId);return person?.name||'Нет данных';}return TEXT_SAMPLES[field];});}
 
 return {plan,people,gridGeometry,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
 };
