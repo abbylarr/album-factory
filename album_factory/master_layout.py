@@ -317,6 +317,25 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     entries = entries_from(snapshot)
     entry_by_id = {e['id']: e for e in entries}
     slots = []
+    def fit_text(e):
+        """«Shrink to fit»: explicit lines never wrap; the whole text shrinks by one factor until the widest
+        line and all lines fit the frame, so a first and last name on two lines keep one size."""
+        if not hasattr(measurer, 'width') or not e['text'].strip():
+            return
+        w, h = e['box'][2], e['box'][3]
+        ratio = e['leading'] / e['size']
+        def fits(size):
+            return (measurer.width(e['text'], e['font'], size, e.get('letterSpacing') or 0) <= w * .995
+                    and measurer.height(e['text'], e['font'], size, size * ratio, 100000, e.get('letterSpacing') or 0) <= h + .1)
+        size = e['size']
+        if fits(size):
+            return
+        wide = measurer.width(e['text'], e['font'], size, e.get('letterSpacing') or 0)
+        tall = measurer.height(e['text'], e['font'], size, size * ratio, 100000, e.get('letterSpacing') or 0)
+        size = max(2, math.floor(size * min(w * .995 / max(wide, .01), h / max(tall, .01)) * 10) / 10)
+        while size > 2 and not fits(size):
+            size = round(size - .1, 1)
+        e['size'], e['leading'] = size, round(size * ratio, 3)
     def name(person):
         return ' '.join(str(person[k]) for k in ('first_name','patronymic','last_name') if person.get(k)) if person else ''
     def photo_for(person):
@@ -433,7 +452,11 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 dpi=e['crop'][2]/(e['box'][2]/25.4)
                 if dpi<GOOD_DPI:
                     issue('warning',e['key'],f'После правки разрешение около {math.floor(dpi)} dpi — ниже {GOOD_DPI}')
-            if e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
+            if e['type']=='text' and e.get('textCase'):
+                e['text']=auto_text.apply_case(e['text'],e['textCase'])
+            if e['type']=='text' and e.get('fit'):
+                fit_text(e)
+            elif e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
                 issue('error',e['key'],'Текст выходит за границы рамки')
         blank_sides = []
         # Both page backgrounds go first: an object may cross the fold and must not be covered by the next page.
@@ -461,6 +484,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 common={'key':key,'box':bounds,'opacity':layer.get('opacity',100)}
                 stroke_width = 0 if layer.get('strokeOn') is False else (layer.get('strokeWidth') or (0.4 if layer.get('strokeOn') is True or layer.get('strokeMode') == 'color' else 0))
                 appearance={'angle':layer.get('angle',0),'rotation_center':[bounds[0]+bounds[2]/2,bounds[1]+bounds[3]/2], 'radius':layer.get('radius',0),'stroke':layer.get('stroke','#333333'),'strokeWidth':stroke_width}
+                for flip in ('flipX','flipY'):
+                    if layer.get(flip) and layer['type'] not in ('grid','collage'): appearance[flip]=True
                 if layer.get('strokeDash') not in (None, 'solid'): appearance['strokeDash']=layer['strokeDash']
                 if layer.get('strokeAlign') in ('outside','inside'): appearance['strokeAlign']=layer['strokeAlign']
                 if layer.get('strokeCap') in ('round','square'): appearance['strokeCap']=layer['strokeCap']
@@ -476,14 +501,20 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                     if layer.get('strike'): element['strike']=True
                     if layer.get('skew'): element['skew']=layer['skew']
                     return element
+                def frame_text(element):
+                    """A master text frame: its letter case, vertical alignment and auto-shrink travel with the element."""
+                    element['valign']=layer.get('valign') if layer.get('valign') in ('middle','bottom') else 'top'
+                    if layer.get('textCase') in auto_text.CASES: element['textCase']=layer['textCase']
+                    if layer.get('fit'): element['fit']=True
+                    return element
                 def photo_element(key,bounds,photo):
                     return {'key':key,'type':'photo','box':bounds,'photo':photo,'crop':crop(photo,bounds,layer.get('cropX',50),layer.get('cropY',50),layer.get('cropZoom',1)) if photo else None,'mask':'rect','required':True,'opacity':layer.get('opacity',100)}
                 if layer['type']=='text':
                     order=snapshot['order']
-                    values={'owner.name':name(owner),'owner.quote':owner.get('quote',''),'item.name':name(item),'item.quote':(item or {}).get('quote',''),
-                            'lead.name':name(lead),'lead.subject':(lead or {}).get('school_subject',''),'school':order.get('school',''),'city':order.get('city',''),
+                    values={'owner.name':auto_text.person_name(owner),'owner.quote':owner.get('quote',''),'item.name':auto_text.person_name(item),'item.quote':(item or {}).get('quote',''),
+                            'lead.name':auto_text.person_name(lead),'lead.subject':(lead or {}).get('school_subject',''),'school':{'full':order.get('school',''),'short':order.get('school_short','')},'city':order.get('city',''),
                             'class':order['class_name'],'year':order['year']}
-                    element={**text_element(key,bounds,auto_text.resolve(layer['text'],values),layer['fontSize']),'valign':'middle'}
+                    element=frame_text(text_element(key,bounds,auto_text.resolve(layer['text'],values),layer['fontSize']))
                     late=(layer['text'],values) if auto_text.fields(layer['text'])&auto_text.SHOOT_FIELDS else None
                     add(element, late=late)
                 elif layer['type']=='photo':
@@ -560,7 +591,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                                 if layer.get('detailStrike'): detail_element['strike']=True
                                 add(detail_element,False)
                 elif layer['type']=='svg':
-                    add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d'),'flipX':bool(layer.get('flipX')),'flipY':bool(layer.get('flipY'))})
+                    add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d')})
                 else:
                     add({**common,'type':layer['type'],'fill':layer['fill']})
         spread={'key':spread_key,'section':'cover' if section.get('cover') else section['id'],'elements':elements}

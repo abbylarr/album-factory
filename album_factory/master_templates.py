@@ -175,6 +175,7 @@ def validate(document):
         check(style.get('align') in {'left', 'center', 'right', 'justify'}, 'Неверное выравнивание стиля')
         check(number(style.get('lineHeight'), 0.8, 3) and number(style.get('letterSpacing'), -20, 80), 'Неверные интервалы стиля')
         check(number(style.get('skew', 0), -30, 30), 'Неверный наклон стиля')
+        check(style.get('textCase', '') in ('', *auto_text.CASES), 'Неверный регистр стиля')
         for flag in ('bold', 'italic', 'underline', 'strike'):
             check(isinstance(style.get(flag), bool), 'Неверное начертание стиля')
     for section in sections:
@@ -230,6 +231,7 @@ def validate(document):
                     check(b['x'] + b['w'] <= right + .01 and b['y'] + b['h'] <= page_height + .01, 'Слой выходит за разворот')
                     check(number(layer.get('opacity', 100), 0, 100), 'Неверная прозрачность')
                     check(number(layer.get('angle', 0), -180, 180), 'Неверный угол поворота')
+                    check(all(isinstance(layer.get(k, False), bool) for k in ('flipX', 'flipY')), 'Неверное отражение')
                     check(number(layer.get('radius', 0), 0, 100), 'Неверный радиус')
                     check(number(layer.get('strokeWidth', 0), 0, 10), 'Неверная толщина обводки')
                     check(color(layer.get('stroke', '#333333')), 'Неверный цвет обводки')
@@ -267,6 +269,9 @@ def validate(document):
                         check(isinstance(layer.get('text'), str) and len(layer['text']) <= 2000, 'Текст длиннее 2000 символов')
                         check('binding' not in layer and not auto_text.unknown(layer['text']), 'Неизвестные данные в тексте')
                         check(layer.get('align') in {'left','center','right','justify'}, 'Неверное выравнивание')
+                        check(layer.get('valign', 'top') in {'top','middle','bottom'}, 'Неверное выравнивание по вертикали')
+                        check(layer.get('textCase', '') in ('', *auto_text.CASES), 'Неверный регистр')
+                        check(isinstance(layer.get('fit', False), bool), 'Неверная настройка рамки текста')
                     if kind == 'photo':
                         check(layer.get('source') in {'lead','owner','item','class','custom'}, 'Неверный источник фото')
                         if 'pick' in layer:
@@ -383,6 +388,9 @@ class ClassPreview(BaseModel):
 class _FlatMeasurer:
     """Text is irrelevant for photo previews; everything fits."""
     def height(self, *args, **kwargs):
+        return 0
+
+    def width(self, *args, **kwargs):
         return 0
 
     def missing_glyphs(self, *args, **kwargs):

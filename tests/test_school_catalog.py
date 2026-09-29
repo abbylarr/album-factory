@@ -63,6 +63,16 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f'/api/schools/{school["id"]}').status_code, 409)
         self.assertEqual(self.client.delete(f'/api/schools/{other_city["id"]}').status_code, 200)
 
+    def test_short_name_feeds_the_short_school_chip(self):
+        school = self.school()
+        self.assertEqual(school['short_name'], '')
+        edited = self.client.patch(f'/api/schools/{school["id"]}', json={'name': school['name'], 'city': 'Казань', 'short_name': ' Школа  № 5 '})
+        self.assertEqual(edited.json()['short_name'], 'Школа № 5')
+        order = self.order_for(school['id'])
+        from album_factory.layout_workspace import school_short
+        with s.db() as con:
+            self.assertEqual(school_short(con, order), 'Школа № 5')
+
     def test_teachers_and_portraits_belong_to_one_studio(self):
         school = self.school()
         teacher = self.teacher(school['id'], 'Петрова')

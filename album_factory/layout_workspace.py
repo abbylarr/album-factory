@@ -316,6 +316,13 @@ class MasterSelection(BaseModel):
     master_template_id: str | None = None
 
 
+def school_short(con, order_id):
+    """The catalogue's short school name for the «Школа · краткое» chip; empty falls back to the full name."""
+    row = con.execute("""SELECT s.short_name FROM order_terms t JOIN schools s ON s.id=t.school_id
+        WHERE t.order_id=?""", (order_id,)).fetchone()
+    return row[0] if row else ''
+
+
 def snapshot_for(con, order, data, master=False):
     photos = {}
     for photo in data['photos']:
@@ -348,7 +355,7 @@ def snapshot_for(con, order, data, master=False):
         raise HTTPException(409, 'Для макета нужны портреты минимум трёх персон. Проверьте группы фотографий.')
     from .school_catalog import catalog_state
     return {'schema_version': 2, 'school_catalog_state': catalog_state(con, order['id']),
-            'order': {'id': order['id'], 'school': order['school'], 'city': order['school_city'], 'class_name': order['class_name'],
+            'order': {'id': order['id'], 'school': order['school'], 'school_short': school_short(con, order['id']), 'city': order['school_city'], 'class_name': order['class_name'],
                       'year': str(order['graduation_year']), 'studio': ''},
             'students': students, 'teachers': [], 'photos': photos, 'selections': selections,
             'general_photos': [p['id'] for p in data['photos'] if p['id'] in photos and p['shoot_type'] == 'general'],

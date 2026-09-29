@@ -63,11 +63,14 @@ def _cast_shadow(pdf, element, paint):
 
 
 def _rotate(pdf, element, height):
-    if element.get('angle'):
+    """Rotation and mirroring around the layer's centre; the mirror is applied first, as in the editor."""
+    flip_x, flip_y = bool(element.get('flipX')), bool(element.get('flipY'))
+    if element.get('angle') or flip_x or flip_y:
         x, top, w, h = element["box"]
         cx,cy=element.get('rotation_center',[x+w/2,top+h/2])
         pdf.translate(cx*mm,(height-cy)*mm)
-        pdf.rotate(-element['angle'])
+        if element.get('angle'): pdf.rotate(-element['angle'])
+        if flip_x or flip_y: pdf.scale(-1 if flip_x else 1, -1 if flip_y else 1)
         pdf.translate(-cx*mm,-(height-cy)*mm)
 
 
@@ -182,15 +185,7 @@ def _draw(pdf, spread, size, measurer, images):
             else:
                 pdf.drawPath(path, stroke=1, fill=0)
         elif element["type"]=="svg" and element.get("svg"):
-            flipped=element.get("flipX") or element.get("flipY")
-            if flipped:
-                pdf.saveState()
-                cx,cy=(x+w/2)*mm,(bottom+h/2)*mm
-                pdf.translate(cx,cy)
-                pdf.scale(-1 if element.get("flipX") else 1, -1 if element.get("flipY") else 1)
-                pdf.translate(-cx,-cy)
             draw_svg(pdf, element["svg"], x*mm, bottom*mm, w*mm, h*mm, element.get("strokeAlign") or "center")
-            if flipped: pdf.restoreState()
         elif element["type"] == "photo":
             if not element["photo"] and not element.get("required"):
                 pdf.restoreState()

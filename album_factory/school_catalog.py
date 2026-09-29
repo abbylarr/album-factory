@@ -54,6 +54,8 @@ def init(con):
     schools = {r[1] for r in con.execute("PRAGMA table_info(schools)")}
     if "city" not in schools:
         con.execute("ALTER TABLE schools ADD COLUMN city TEXT NOT NULL DEFAULT ''")
+    if "short_name" not in schools:
+        con.execute("ALTER TABLE schools ADD COLUMN short_name TEXT NOT NULL DEFAULT ''")
     teachers = {r[1] for r in con.execute("PRAGMA table_info(teachers)")}
     for column, kind in (("patronymic", "TEXT NOT NULL DEFAULT ''"), ("subject", "TEXT NOT NULL DEFAULT ''"),
                          ("archived", "INTEGER NOT NULL DEFAULT 0"), ("created_at", "TEXT NOT NULL DEFAULT ''"),
@@ -320,6 +322,7 @@ def client_summary(con, order_id):
 class SchoolInput(BaseModel):
     name: str = Field(min_length=1, max_length=300)
     city: str = Field(min_length=1, max_length=100)
+    short_name: str = Field(default="", max_length=100)
 
 
 class TeacherInput(BaseModel):
@@ -367,7 +370,7 @@ def install(app, s):
         counts = con.execute("""SELECT
             (SELECT COUNT(*) FROM teachers WHERE school_id=? AND archived=0) AS teachers,
             (SELECT COUNT(*) FROM order_terms WHERE school_id=?) AS orders""", (row["id"], row["id"])).fetchone()
-        return {"id": row["id"], "name": row["name"], "city": row["city"],
+        return {"id": row["id"], "name": row["name"], "short_name": row["short_name"], "city": row["city"],
                 "teacher_count": counts["teachers"], "order_count": counts["orders"]}
 
     def same_school(con, name, city, skip=None):
@@ -394,8 +397,8 @@ def install(app, s):
             if existing is not None:
                 return school_body(existing, con)
             school_id = s.uid()
-            con.execute("INSERT INTO schools (id,studio_id,name,address,city) VALUES (?,?,?,?,?)",
-                        (school_id, mvp._studio(), name, "", city))
+            con.execute("INSERT INTO schools (id,studio_id,name,address,city,short_name) VALUES (?,?,?,?,?,?)",
+                        (school_id, mvp._studio(), name, "", city, clean(payload.short_name)))
             return school_body(require_school(con, school_id), con)
 
     @app.get("/api/schools/{school_id}")
@@ -418,7 +421,7 @@ def install(app, s):
             require_school(con, school_id)
             if same_school(con, name, city, skip=school_id):
                 raise HTTPException(409, "Такая школа уже есть в каталоге")
-            con.execute("UPDATE schools SET name=?, city=? WHERE id=?", (name, city, school_id))
+            con.execute("UPDATE schools SET name=?, city=?, short_name=? WHERE id=?", (name, city, clean(payload.short_name), school_id))
             con.execute("""UPDATE orders SET school=?,school_city=? WHERE stage NOT IN ('print','delivery','archive')
                 AND id IN (SELECT order_id FROM order_terms WHERE school_id=?)""", (name, city, school_id))
             return school_body(require_school(con, school_id), con)
