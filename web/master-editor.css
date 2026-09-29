@@ -5921,3 +5921,53 @@ button.block-issue:focus-visible {
     display: none;
   }
 }
+#block-settings {
+  width: min(560px, calc(100vw - 24px));
+  max-height: min(90dvh, 860px);
+  padding: 0;
+  overflow: auto;
+}
+.block-settings-body input {
+  padding: 7px 9px;
+}
+.block-settings-body .block-type {
+  margin-top: 14px;
+}
+.block-settings-body .block-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+}
+.block-settings-body .block-spreads {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px 10px;
+}
+.block-settings-body .issue {
+  margin-top: 10px;
+  font-size: 11px;
+  padding: 8px 10px;
+}
+.block-settings-body > .pick-picker .pick-trigger {
+  height: 34px;
+  padding: 0 10px;
+}
+.block-role-picker .pick-trigger {
+  padding: 3px 6px;
+  background: transparent;
+  color: #8d6aa6;
+  font-size: 11px;
+}
+.block-role-picker .pick-trigger:hover {
+  background: #f6f0fa;
+}
+.block-role-picker .cell-sources.pick-menu {
+  right: auto;
+  width: 200px;
+}
+.section-card .section-gear {
+  margin-left: auto;
+}
+.section-card .section-gear + .section-more {
+  margin-left: 0;
+}

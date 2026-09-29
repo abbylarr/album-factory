@@ -273,6 +273,7 @@ function ensureCover() {
     changed = true;
   }
   if (MasterPhotos.migrate(doc)) changed = true;
+  if (MasterPlan.linkParts(doc)) changed = true;
   return changed;
 }
 function commit(fn) {

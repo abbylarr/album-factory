@@ -68,9 +68,7 @@ vignetteDialog.addEventListener('click', e => {
   }
   if (e.target.closest('[data-vignette-block]')) {
     vignetteDialog.close();
-    const panel = document.querySelector('.block-settings');
-    panel?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    panel?.querySelector('[data-block-num="min"]')?.focus();
+    openBlockSettings();
     return;
   }
   const pageStep = e.target.closest('[data-vignette-page]');

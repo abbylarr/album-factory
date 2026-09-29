@@ -54,44 +54,94 @@ const KIND_GLYPHS = {
 function kindIcon(kind) {
   return `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${KIND_GLYPHS[kind] || KIND_GLYPHS.fixed}</svg>`;
 }
+/* A split block: the block that continues this one, and the block this one continues. */
+const continuation = s => doc.sections.find(x => x.continues === s.id),
+  partStart = s => doc.sections.find(x => x.id === s.continues);
 function blockSummary(s) {
   if (s.cover) return 'Обложка · один разворот';
+  const who =
+    s.kind === 'flow'
+      ? blockList(s).source === 'teachers'
+        ? 'Учителя'
+        : 'Ученики'
+      : s.kind === 'repeat'
+        ? PEOPLE_NAMES[s.people] || PEOPLE_NAMES.all
+        : KIND_NAMES.fixed[0];
+  if (s.continues) return `${who} · продолжение`;
+  if (continuation(s)) return `${who} · первые ${plural(s.limit || 1, 'разворот', 'разворота', 'разворотов')}`;
   if (s.kind === 'flow') {
     const l = blockList(s);
-    return `${l.source === 'teachers' ? 'Учителя' : 'Ученики'} · ${l.min}–${l.max} на странице`;
+    return `${who} · ${l.min}–${l.max} на странице`;
   }
-  if (s.kind === 'repeat') return PEOPLE_NAMES[s.people] || PEOPLE_NAMES.all;
-  return KIND_NAMES.fixed[0];
+  return who;
 }
 const pluralWord = (n, one, few, many) => plural(n, one, few, many).slice(String(n).length + 1);
 function blockSegments(key, value, items, label) {
   return `<div class="segments block-segments" role="group" aria-label="${label}">${items.map(([id, name, title]) => `<button type="button" data-block="${key}" data-value="${id}" class="${value === id ? 'active' : ''}" aria-pressed="${value === id}"${title ? ` title="${esc(title)}"` : ''}>${name}</button>`).join('')}</div>`;
 }
-/* A setting reads as a question with answers; one line under it says what the chosen answer does. */
-function blockQuestion(label, key, value, items, hint) {
-  return `<p class="block-label">${label}</p>${blockSegments(key, value, items, label)}${hint ? `<p class="block-hint">${hint}</p>` : ''}`;
+/* A setting reads as a question with answers; a short «i» next to it explains the rare case. */
+function blockQuestion(label, key, value, items, tip) {
+  return `<p class="block-label">${label}${tip ? infoTip(tip) : ''}</p>${blockSegments(key, value, items, label)}`;
 }
-function blockSettings(s, plan) {
-  const [title, help] = KIND_NAMES[s.kind] || KIND_NAMES.fixed;
+/* Block settings live in their own dialog, like the layout settings: the card in the list stays short and drags. */
+let blockPick = null;
+function blockPicker(key, label, rows, extra = '') {
+  const open = blockPick === key;
+  return `<div class="pick-picker${extra}"><button type="button" class="pick-trigger" data-block-pick="${esc(key)}" aria-haspopup="menu" aria-expanded="${open}"><span>${esc(label)}</span>${SHEET_CARET}</button>${open ? `<div class="cell-sources pick-menu" role="menu">${rows.map(([value, text, on]) => `<button type="button" class="menu-row${on ? ' on' : ''}" role="menuitemradio" aria-checked="${on}" data-block-pick-value="${esc(value)}"><span>${esc(text)}</span>${on ? SHEET_TICK : ''}</button>`).join('')}</div>` : ''}</div>`;
+}
+/* Blocks a part may continue: earlier blocks of the same kind that nothing else continues yet. */
+function partChoices(s) {
+  const at = doc.sections.indexOf(s);
+  return doc.sections.filter(
+    (x, i) =>
+      i < at &&
+      x.kind === s.kind &&
+      MasterPlan.splittable(x) &&
+      (s.kind !== 'flow' || blockList(x).source === blockList(s).source) &&
+      (!continuation(x) || continuation(x) === s),
+  );
+}
+function blockSettings(s) {
+  const [title, help] = KIND_NAMES[s.kind] || KIND_NAMES.fixed,
+    from = partStart(s),
+    next = continuation(s);
   let body = `<button type="button" class="block-type" data-block-type title="Изменить тип блока"><span class="block-type-icon">${kindIcon(s.kind)}</span><span class="block-type-copy"><strong>${title}</strong><small>${help}</small></span><svg class="block-type-change" viewBox="0 0 8 12" aria-hidden="true"><path d="M2 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  const choices = MasterPlan.splittable(s) ? partChoices(s) : [];
+  if (from || choices.length)
+    body +=
+      `<p class="block-label">С кого начать</p>` +
+      blockPicker('continues', from ? `Где закончился «${from.name}»` : 'С начала списка', [
+        ['', 'С начала списка', !from],
+        ...choices.map(x => [x.id, `Где закончился «${x.name}»`, x === from]),
+      ]);
+  if (next) {
+    const limit = s.limit || 1;
+    body += `<p class="block-label">Сколько разворотов в этой части${infoTip(`Остальные — в блоке «${next.name}».`)}</p><div class="block-range"><label>до<input type="number" data-block-num="limit" min="1" max="100" value="${limit}" aria-label="Разворотов в этой части"></label><span>${pluralWord(limit, 'разворота', 'разворотов', 'разворотов')}</span></div>`;
+  }
   if (s.kind === 'flow') {
     const l = blockList(s),
       target = s.target || 1,
       dense = target <= 1;
-    body += blockQuestion('Кого разместить', 'source', l.source, [
-      ['students', 'Учеников'],
-      ['teachers', 'Учителей'],
-    ]);
+    if (!from)
+      body += blockQuestion('Кого разместить', 'source', l.source, [
+        ['students', 'Учеников'],
+        ['teachers', 'Учителей'],
+      ]);
     body += `<p class="block-label">Карточек на странице</p><div class="block-range"><label>от<input type="number" data-block-num="min" min="1" max="100" value="${l.min}" aria-label="Карточек на странице: от"></label><label>до<input type="number" data-block-num="max" min="1" max="100" value="${l.max}" aria-label="Карточек на странице: до"></label></div>`;
     body +=
-      blockQuestion('Если людей немного', 'density', dense ? 'dense' : 'spread', [
-        ['dense', 'Плотнее'],
-        ['spread', 'Растянуть'],
-      ]) +
+      blockQuestion(
+        'Если людей немного',
+        'density',
+        dense ? 'dense' : 'spread',
+        [
+          ['dense', 'Плотнее'],
+          ['spread', 'Растянуть'],
+        ],
+        `Плотнее — меньше страниц, до ${l.max} карточек на каждой. Растянуть — фото крупнее, но не меньше ${l.min} на странице.`,
+      ) +
       (dense
         ? ''
-        : `<div class="block-range"><label>до<input type="number" data-block-num="target" min="1" max="100" value="${target}" aria-label="Растянуть до, разворотов в блоке"></label><span>${pluralWord(target, 'разворота', 'разворотов', 'разворотов')} в блоке</span></div>`) +
-      `<p class="block-hint">${dense ? `Как можно меньше страниц: до ${l.max} карточек на каждой.` : `Карточек на странице меньше, фото крупнее, но не меньше ${l.min}. Если людей много, разворотов будет больше.`}</p>`;
+        : `<div class="block-range"><label>до<input type="number" data-block-num="target" min="1" max="100" value="${target}" aria-label="Растянуть до, разворотов в блоке"></label><span>${pluralWord(target, 'разворота', 'разворотов', 'разворотов')} в блоке</span></div>`);
     body += blockQuestion(
       `Если на странице меньше ${l.min}`,
       'strictMin',
@@ -100,9 +150,7 @@ function blockSettings(s, plan) {
         ['warn', 'Предупредить'],
         ['stop', 'Не выпускать'],
       ],
-      l.strictMin
-        ? 'Такой заказ не выгрузится в PDF, пока его не поправят.'
-        : 'Альбом соберётся, в заказе будет предупреждение.',
+      'Не выпускать — заказ не выгрузится в PDF, пока его не поправят.',
     );
     if (l.source === 'teachers')
       body += blockQuestion(
@@ -113,13 +161,11 @@ function blockSettings(s, plan) {
           ['show', 'Показывать'],
           ['skip', 'Не повторять'],
         ],
-        l.excludeLead
-          ? 'Если в блоке уже есть его отдельный портрет, в виньетке его не будет.'
-          : 'Руководитель стоит в виньетке вместе со всеми учителями.',
+        'Не повторять — если в блоке уже есть его отдельный портрет.',
       );
-  } else if (s.kind === 'repeat') {
+  } else if (s.kind === 'repeat' && !from) {
     const mode = MasterPlan.PEOPLE.includes(s.people) ? s.people : 'all';
-    body += `<p class="block-label">Для кого</p><div class="block-people" role="radiogroup" aria-label="Для кого личные развороты">${[
+    body += `<p class="block-label">Для кого${infoTip('Портрет, имя и фото «героя разворота» — того, чей разворот сейчас печатается.')}</p><div class="block-people" role="radiogroup" aria-label="Для кого личные развороты">${[
       'all',
       'others',
       'owner',
@@ -129,51 +175,59 @@ function blockSettings(s, plan) {
         id =>
           `<button type="button" class="photo-choice${mode === id ? ' active' : ''}" role="radio" aria-checked="${mode === id}" data-block="people" data-value="${id}"><span class="photo-radio" aria-hidden="true"></span><span class="photo-choice-copy"><strong>${PEOPLE_NAMES[id]}</strong><small>${PEOPLE_HELP[id]}</small></span></button>`,
       )
-      .join(
-        '',
-      )}</div><p class="block-hint">Портрет, имя и фото «героя разворота» — того, чей разворот сейчас печатается.</p>`;
+      .join('')}</div>`;
   }
   const size = doc.pageSize || [210, 280];
-  body += `<p class="block-label">Развороты</p><ol class="block-spreads">${s.spreads
+  body += `<p class="block-label">Развороты${s.kind === 'flow' ? infoTip(MasterPlan.ROLES.map(r => `${ROLE_NAMES[r]} — ${ROLE_HELP[r]}.`).join(' ')) : ''}</p><ol class="block-spreads">${s.spreads
     .map((sp, i) => {
       const role = MasterPlan.roleOf(sp);
-      return `<li class="${i === view.spread ? 'current' : ''}"><button type="button" class="block-spread-thumb" data-goto-spread="${i}" aria-label="Открыть разворот ${i + 1}">${miniSpread(sp, s)}</button>${s.kind === 'flow' ? `<select class="block-role" data-role-spread="${sp.id}" aria-label="Роль разворота ${i + 1}" title="${esc(ROLE_HELP[role])}">${MasterPlan.ROLES.map(r => `<option value="${r}"${role === r ? ' selected' : ''}>${ROLE_NAMES[r]}</option>`).join('')}</select>` : `<span class="block-spread-no">${i + 1}</span>`}</li>`;
+      return `<li class="${i === view.spread ? 'current' : ''}"><button type="button" class="block-spread-thumb" data-goto-spread="${i}" aria-label="Открыть разворот ${i + 1}">${miniSpread(sp, s)}</button>${
+        s.kind === 'flow'
+          ? blockPicker(
+              'role:' + sp.id,
+              ROLE_NAMES[role],
+              MasterPlan.ROLES.map(r => [r, ROLE_NAMES[r], r === role]),
+              ' block-role-picker',
+            )
+          : `<span class="block-spread-no">${i + 1}</span>`
+      }</li>`;
     })
     .join(
       '',
     )}<li><button type="button" class="block-spread-add" data-add-spread style="aspect-ratio:${2 * size[0]}/${size[1]}" title="Добавить разворот" aria-label="Добавить разворот">+</button></li></ol>`;
-  if (s.kind === 'flow')
-    body += `<details class="block-roles-help"><summary>Что значат роли</summary>${MasterPlan.ROLES.map(r => `<p><b>${ROLE_NAMES[r]}</b> — ${ROLE_HELP[r]}.</p>`).join('')}</details>`;
-  body += blockResult(s, plan);
-  return `<li class="block-settings" aria-label="Настройки блока «${esc(s.name)}»">${body}</li>`;
+  body += planner
+    .designIssues(s)
+    .map(i => `<div class="issue ${i.severity}">${esc(i.text)}</div>`)
+    .join('');
+  return body;
 }
-/* What the block turns into on the test class: spreads, and for a list how many cards land on each page. */
-function blockResult(s, plan) {
-  if (!plan) return '';
-  const issues = plan.issues || [],
-    state = issues.some(i => i.severity === 'error') ? 'error' : issues.length ? 'warning' : 'ok',
-    spreads = plural(plan.spreads, 'разворот', 'разворота', 'разворотов');
-  let line,
-    pages = '';
-  const count = (key, one, few, many, label) =>
-    `<label class="block-test"><input type="number" data-test-count="${key}" min="1" max="99" value="${view[key]}" aria-label="${label} в тестовом классе"><span>${pluralWord(view[key], one, few, many)}</span></label><span>→ ${spreads}</span>`;
-  if (s.kind === 'flow') {
-    const l = blockList(s),
-      teachers = l.source === 'teachers';
-    line = teachers
-      ? count('teachers', 'учитель', 'учителя', 'учителей', 'Учителей')
-      : count('students', 'ученик', 'ученика', 'учеников', 'Учеников');
-    const cells = plan.pages.map(p =>
-      p.source === 'padding' || p.blank
-        ? '<i class="blank"></i>'
-        : p.part == null
-          ? '<i class="fixed"></i>'
-          : `<i class="${p.records.length < l.min ? (l.strictMin ? 'bad' : 'low') : ''}">${p.records.length}</i>`,
-    );
-    pages = `<div class="block-pages" aria-hidden="true">${Array.from({ length: Math.ceil(cells.length / 2) }, (_, i) => `<span>${cells[2 * i]}${cells[2 * i + 1] || ''}</span>`).join('')}</div>`;
-  } else if (s.kind === 'repeat') line = count('students', 'ученик', 'ученика', 'учеников', 'Учеников');
-  else line = `<span>${spreads}, как в шаблоне</span>`;
-  return `<p class="block-label">${s.kind === 'fixed' ? 'Как выйдет в альбоме' : 'Как выйдет на тестовом классе'}</p><div class="block-result ${state}"><div class="block-result-line">${line}</div>${pages}</div>${issues.map(i => `<div class="issue ${i.severity}">${esc(i.text)}</div>`).join('')}`;
+function openBlockSettings(id = view.section) {
+  const s = doc.sections.find(x => x.id === id);
+  if (preview || !s || s.cover) return;
+  if (view.section !== id) {
+    view.section = id;
+    view.spread = 0;
+    view.side = 0;
+    selected = [];
+    render();
+  }
+  blockPick = null;
+  const dialog = $('#block-settings');
+  if (!dialog.open) dialog.showModal();
+  renderBlockSettings();
+}
+function renderBlockSettings() {
+  const dialog = $('#block-settings');
+  if (!dialog?.open) return;
+  const s = section();
+  if (s.cover) return dialog.close();
+  const body = $('#block-settings-body'),
+    scroll = body.scrollTop,
+    focus = body.contains(document.activeElement) ? document.activeElement.dataset.blockNum : null;
+  $('#block-settings-title').textContent = s.name;
+  body.innerHTML = blockSettings(s);
+  body.scrollTop = scroll;
+  if (focus) body.querySelector(`[data-block-num="${focus}"]`)?.focus();
 }
 /* Spreads with a vignette repeat; the others stay once before or after them. */
 function assignRoles(s) {
@@ -221,8 +275,20 @@ function blockSet(key, value) {
       return;
     }
     if (key === 'density') {
-      s.target =
-        value === 'dense' ? 1 : Math.max(2, (plans.find(p => p.sectionId === s.id)?.spreads || 1) + 1);
+      s.target = value === 'dense' ? 1 : Math.max(2, s.spreads.length);
+      return;
+    }
+    if (key === 'limit') {
+      s.limit = clamp(Math.round(value) || 1, 1, 100);
+      return;
+    }
+    if (key === 'continues') {
+      const from = doc.sections.find(x => x.id === value);
+      if (!from) delete s.continues;
+      else {
+        s.continues = from.id;
+        from.limit ??= partLimit(from);
+      }
       return;
     }
     if (key === 'people') {
@@ -256,6 +322,32 @@ function blockSet(key, value) {
     if (key === 'strictMin') list.strictMin = value === 'stop';
     if (key === 'excludeLead') list.excludeLead = value === 'skip';
   });
+}
+/* Where the first part of a split block stops until the designer sets it: its own spreads of a list, ten personal spreads. */
+function partLimit(s) {
+  return s.kind === 'flow' ? Math.max(1, s.spreads.length) : 10;
+}
+/* «Split» makes the block that continues this one right after it, without the opening spreads of a list. */
+function splitBlock(id) {
+  if (preview) return;
+  const i = doc.sections.findIndex(s => s.id === id),
+    sec = doc.sections[i];
+  if (!sec || !MasterPlan.splittable(sec) || continuation(sec)) return;
+  commit(() => {
+    const part = freshIds(sec);
+    part.name = (sec.name + ' — продолжение').slice(0, 100);
+    part.continues = sec.id;
+    delete part.limit;
+    if (part.kind === 'flow' && part.spreads.some(sp => MasterPlan.roleOf(sp) !== 'intro'))
+      part.spreads = part.spreads.filter(sp => MasterPlan.roleOf(sp) !== 'intro');
+    sec.limit = partLimit(sec);
+    doc.sections.splice(i + 1, 0, part);
+    view.section = part.id;
+    view.spread = 0;
+    view.side = 0;
+    selected = [];
+  });
+  notify(`Блок разделён: «${sec.name}» и «${section().name}»`);
 }
 /* In a book the first inner page stands alone on the right and the last one on the left; those template pages are shaded. */
 function bookMarks() {
@@ -309,8 +401,8 @@ const BLOCK_KINDS = [
 ];
 const KIND_CHANGE = {
   fixed: 'Каждый разворот выведется один раз, в том же порядке. Дизайн разворотов не меняется.',
-  flow: 'Развороты с виньеткой станут повторяемыми, остальные — открывающими или закрывающими. Кого и сколько на странице — в карточке блока.',
-  repeat: 'Развороты будут повторяться для людей. Для кого — в карточке блока.',
+  flow: 'Развороты с виньеткой станут повторяемыми, остальные — открывающими или закрывающими.',
+  repeat: 'Развороты будут повторяться для людей.',
 };
 const blockHasGrids = s => s.kind === 'flow' && s.spreads.some(sp => sp.pages.some(MasterPlan.hasGrid));
 function openBlockDialog(change = false) {
@@ -422,52 +514,25 @@ $('#block-form').onsubmit = e => {
     view.side = 0;
     selected = [];
   });
-  notify(`Блок «${created.name}» добавлен. Его правила — в карточке слева.`);
+  notify(`Блок «${created.name}» добавлен`);
 };
 $('#sections').onclick = e => {
   if (e.target.closest('.section-rename')) return;
-  const blockButton = e.target.closest('[data-block]');
-  if (blockButton) {
-    blockSet(blockButton.dataset.block, blockButton.dataset.value);
-    return;
-  }
-  if (e.target.closest('[data-block-type]')) return openBlockDialog(true);
-  if (e.target.closest('[data-add-spread]')) {
-    view.spread = section().spreads.length - 1;
-    $('#add-spread').click();
-    return;
-  }
-  const issuesMark = e.target.closest('[data-block-issues]');
-  if (issuesMark) {
-    hideIssues();
-    const id = issuesMark.closest('[data-section]').dataset.section;
-    if (view.section !== id) {
-      view.section = id;
-      view.spread = 0;
-      view.side = 0;
-      selected = [];
-      render();
-    }
-    $('#sections .block-result')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    return;
-  }
-  const go = e.target.closest('[data-goto-spread]');
-  if (go) {
-    view.spread = Number(go.dataset.gotoSpread);
-    view.side = 0;
-    selected = [];
-    render();
-    return;
-  }
   const node = e.target.closest('[data-section]');
   if (!node) return;
-  const more = e.target.closest('[data-block-menu-open]');
+  const id = node.dataset.section,
+    more = e.target.closest('[data-block-menu-open]');
   if (more) {
     e.stopPropagation();
-    openBlockMenu(more, node.dataset.section);
+    openBlockMenu(more, id);
     return;
   }
-  view.section = node.dataset.section;
+  if (e.target.closest('[data-block-settings],[data-block-issues]')) {
+    hideIssues();
+    openBlockSettings(id);
+    return;
+  }
+  view.section = id;
   view.spread = 0;
   view.side = 0;
   selected = [];
@@ -477,28 +542,65 @@ $('#sections').onkeydown = e => {
   if (e.key === 'Enter' && e.target.matches('[data-section]')) e.target.click();
 };
 $('#sections').addEventListener('dblclick', e => {
-  if (e.target.closest('.section-card.open .section-name')) startRename();
+  if (e.target.closest('.section-card.active .section-name')) startRename();
 });
-$('#sections').addEventListener('change', e => {
-  const el = e.target;
-  if (el.dataset.testCount) {
+{
+  const dialog = $('#block-settings');
+  let fromBackdrop = false;
+  dialog.addEventListener('pointerdown', e => {
+    fromBackdrop = e.target === dialog;
+  });
+  dialog.addEventListener('click', e => {
+    if (e.target === dialog) {
+      if (fromBackdrop) dialog.close();
+      return;
+    }
+    const trigger = e.target.closest('[data-block-pick]'),
+      value = e.target.closest('[data-block-pick-value]');
+    if (trigger) {
+      blockPick = blockPick === trigger.dataset.blockPick ? null : trigger.dataset.blockPick;
+      renderBlockSettings();
+      return;
+    }
+    if (value) {
+      const key = blockPick;
+      blockPick = null;
+      if (key === 'continues') blockSet('continues', value.dataset.blockPickValue);
+      else if (key?.startsWith('role:')) blockSet('role', [key.slice(5), value.dataset.blockPickValue]);
+      else renderBlockSettings();
+      return;
+    }
+    if (blockPick) {
+      blockPick = null;
+      renderBlockSettings();
+    }
+    const choice = e.target.closest('[data-block]');
+    if (choice) return blockSet(choice.dataset.block, choice.dataset.value);
+    if (e.target.closest('[data-block-type]')) return openBlockDialog(true);
+    if (e.target.closest('[data-add-spread]')) {
+      view.spread = section().spreads.length - 1;
+      $('#add-spread').click();
+      return;
+    }
+    const go = e.target.closest('[data-goto-spread]');
+    if (go) {
+      dialog.close();
+      view.spread = Number(go.dataset.gotoSpread);
+      view.side = 0;
+      selected = [];
+      render();
+    }
+  });
+  dialog.addEventListener('change', e => {
+    const el = e.target;
+    if (!el.dataset.blockNum) return;
     if (el.value === '' || !el.validity.valid) {
       el.reportValidity();
       return;
     }
-    view[el.dataset.testCount] = Number(el.value);
-    render();
-    return;
-  }
-  if (el.dataset.blockNum) {
-    if (el.value === '' || !el.validity.valid) {
-      el.reportValidity();
-      return;
-    }
-    return blockSet(el.dataset.blockNum, Number(el.value));
-  }
-  if (el.dataset.roleSpread) return blockSet('role', [el.dataset.roleSpread, el.value]);
-});
+    blockSet(el.dataset.blockNum, Number(el.value));
+  });
+}
 let dragSection = null;
 function clearSectionDrop() {
   $$('#sections .drop-before,#sections .drop-after').forEach(n =>
@@ -551,10 +653,10 @@ $('#sections').addEventListener('dragend', () => {
   clearSectionDrop();
   $$('#sections .dragging').forEach(n => n.classList.remove('dragging'));
 });
-/* The issue mark on a block card shows its warnings on hover; a click opens them in the block's result. */
+/* The issue mark on a block card shows its warnings on hover; a click opens the block settings. */
 function showIssues(mark) {
-  const plan = plans.find(p => p.sectionId === mark.closest('[data-section]')?.dataset.section),
-    issues = plan?.issues || [];
+  const block = doc.sections.find(s => s.id === mark.closest('[data-section]')?.dataset.section),
+    issues = block ? planner.designIssues(block) : [];
   if (!issues.length) return;
   let pop = $('#issue-pop');
   if (!pop) {
@@ -572,7 +674,7 @@ function showIssues(mark) {
     ]
       .filter(Boolean)
       .join(' · ');
-  pop.innerHTML = `<strong>${head}</strong>${issues.map(i => `<p class="${i.severity}"><i></i><span>${esc(i.text)}</span></p>`).join('')}<small>Нажмите на значок, чтобы открыть в настройках блока</small>`;
+  pop.innerHTML = `<strong>${head}</strong>${issues.map(i => `<p class="${i.severity}"><i></i><span>${esc(i.text)}</span></p>`).join('')}`;
   pop.hidden = false;
   const r = mark.getBoundingClientRect(),
     box = pop.getBoundingClientRect();
@@ -599,8 +701,11 @@ function hideIssues() {
 );
 $('#sections').parentElement.addEventListener('scroll', hideIssues, { passive: true });
 /* «⋯» on a block card: the rare actions stay out of the way of the thumbnail. */
+const SPLIT_GLYPH =
+  '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="5" height="12" rx="1"/><rect x="10.5" y="3" width="5" height="12" rx="1"/></svg>';
 function openBlockMenu(button, id) {
   const menu = $('#object-menu'),
+    sec = doc.sections.find(s => s.id === id),
     solo = doc.sections.filter(s => !s.cover).length <= 1,
     row = (type, label, icon, enabled = true) =>
       `<button type="button" role="menuitem" data-block-menu="${type}"${enabled ? '' : ' disabled'}>${icon}<span>${label}</span></button>`;
@@ -609,6 +714,7 @@ function openBlockMenu(button, id) {
     row('rename', 'Переименовать', menuGlyph('rename')) +
     row('kind', 'Изменить тип…', kindIcon('fixed')) +
     row('duplicate', 'Дублировать', menuGlyph('duplicate')) +
+    (MasterPlan.splittable(sec) && !continuation(sec) ? row('split', 'Разделить блок', SPLIT_GLYPH) : '') +
     '<hr>' +
     row('delete', 'Удалить', menuGlyph('delete'), !solo);
   menu.hidden = false;
@@ -627,6 +733,7 @@ $('#object-menu').addEventListener('click', e => {
     id = $('#object-menu').dataset.block;
   closeObjectMenu();
   if (type === 'duplicate' || type === 'delete') return sectionAction(type, id);
+  if (type === 'split') return splitBlock(id);
   if (view.section !== id) {
     view.section = id;
     view.spread = 0;
