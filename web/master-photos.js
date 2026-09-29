@@ -1,5 +1,6 @@
-/* Categories of automatic general-photo slots (built-in and the master's own), album photo rules and the server preview on a test shoot.
-   Built-ins mirror CATEGORIES in album_factory/photo_pick.py; a master may edit them or add its own in doc.photoCategories. */
+/* Categories of automatic general-photo slots (built-in and the photographer's own), album photo rules and the server preview on a test shoot.
+   Built-ins mirror CATEGORIES in album_factory/photo_pick.py. Categories belong to the studio, not to a design: one list behind
+   /api/photo-categories ({items: edits of built-ins and own ones, removed: built-in ids}), shared by every design and package. */
 window.MasterPhotos=(()=>{
   const BUILTIN=[
     ['any','Любое','Лучший из свободных снимков.',{}],
@@ -18,15 +19,21 @@ window.MasterPhotos=(()=>{
   const SCALES=[['close','Крупный'],['medium','Средний'],['full','В рост'],['wide','Общий'],['detail','Детали']];
   const STYLES=[['','Любой'],['posed','Постановка'],['candid','Репортаж']],QUALITY=[['','Любое'],['good','Без брака'],['best','Лучшее']];
   const TAGS=[['classroom','Класс'],['library','Библиотека'],['hall','Коридор'],['gym','Спортзал'],['stage','Сцена'],['ceremony','Праздник'],['studio','Студия'],['nature','Природа'],['beach','Море'],['city','Город'],['picnic','Пикник'],['winter','Зима']];
-  const RELAX={quality:'качество',scale:'крупность',people:'число людей',style:'стиль',tags:'сцена',include:'кто на фото',any:'категория',cut:'обрезка людей',reuse:'повтор',fallback:'похожий кадр с героем',dup:'дубль групповой',small:'герой мелко'};
   const RULES={reuse:'album',rhythm:true,chronology:true,mixShoots:true,posedFirst:true};
-  let hooks=null,data=null,sent='',timer=null,version=0,failed='',openCategory=null,menuOpen=false;
+  let hooks=null,data=null,sent='',timer=null,version=0,failed='',openCategory=null,menuOpen=false,lastView=null;
+  let studio={items:[],removed:[]},saving=Promise.resolve();
   const tick='<svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',caret='<svg class="caret" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 4 5 6.5 7.5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const clean=f=>Object.fromEntries(FILTERS.filter(k=>Array.isArray(f[k])?f[k].length:f[k]).map(k=>[k,f[k]]));
-  /* Built-in categories with the master's edits and without its removed ones, then its own: {id,name,note,filters,builtin,edited}. */
-  function categories(doc){const own=doc?.photoCategories||[],removed=doc?.removedCategories||[],list=BUILTIN.filter(([id])=>!removed.includes(id)).map(([id,name,note,filters])=>{const edit=own.find(c=>c.id===id);return {id,name:edit?.name||name,note,filters:edit?clean(edit):filters,builtin:true,edited:!!edit};});for(const c of own)if(!BUILTIN.some(([id])=>id===c.id))list.push({id:c.id,name:c.name,note:'',filters:clean(c),builtin:false,edited:false});return list;}
-  function category(doc,id){const list=categories(doc);return list.find(c=>c.id===id)||list[0];}
+  /* Built-in categories with the studio's edits and without its removed ones, then its own: {id,name,note,filters,builtin,edited}.
+     The document argument callers pass is ignored: categories are the same in every design. */
+  function categories(){const own=studio.items,removed=studio.removed,list=BUILTIN.filter(([id])=>!removed.includes(id)).map(([id,name,note,filters])=>{const edit=own.find(c=>c.id===id);return {id,name:edit?.name||name,note,filters:edit?clean(edit):filters,builtin:true,edited:!!edit};});for(const c of own)if(!BUILTIN.some(([id])=>id===c.id))list.push({id:c.id,name:c.name,note:'',filters:clean(c),builtin:false,edited:false});return list;}
+  function category(doc,id){const list=categories();return list.find(c=>c.id===id)||list[0];}
+  /* The studio list: loaded once, saved in order after every change; a failed save reloads what the server has. */
+  function loadStudio(){return fetch('/api/photo-categories').then(r=>r.ok?r.json():null).then(value=>{if(value){studio={items:value.items||[],removed:value.removed||[]};changed();}}).catch(()=>{});}
+  function changed(){sent='';if(lastView&&hooks)refresh(hooks.doc(),lastView);keepFocus(()=>hooks?.updated());}
+  function saveStudio(mutator){const next=JSON.parse(JSON.stringify(studio));mutator(next);for(const item of next.items)for(const k of FILTERS)if(item[k]==null||(Array.isArray(item[k])&&!item[k].length))delete item[k];studio=next;changed();const body=JSON.stringify(next);
+    saving=saving.then(()=>fetch('/api/photo-categories',{method:'PUT',headers:{'Content-Type':'application/json'},body})).then(r=>{if(!r.ok)throw Error();}).catch(()=>loadStudio());}
   /* Slots saved with the first role presets become category + who. */
   function upgrade(pick){if(!pick||'category' in pick)return pick;const [category,who]=LEGACY[pick.role]||LEGACY.any,include=pick.include==='item'?'hero':pick.include==='owner'?'owner':null;return {category,...((include||who)?{who:include||who}:{})};}
   function migrate(doc){let changed=false;const fix=item=>{if(item?.pick&&!('category' in item.pick)){item.pick=upgrade(item.pick);changed=true;}};const walk=c=>{if(c.split)c.cells.forEach(walk);else fix(c);};for(const s of doc.sections||[])for(const sp of s.spreads||[])for(const p of sp.pages||[])for(const l of p.layers||[]){if(l.type==='photo')fix(l);if(l.type==='collage'){fix(l);(l.rows||[]).forEach(r=>r.forEach(walk));}}return changed;}
@@ -35,18 +42,45 @@ window.MasterPhotos=(()=>{
   function describe(f){const parts=[];if(f.people?.length)parts.push(f.people.map(p=>label(PEOPLE,p)).join(', '));if(f.scale?.length)parts.push(f.scale.map(p=>label(SCALES,p)).join(', ').toLowerCase()+' план');if(f.style)parts.push(label(STYLES,f.style));if(f.quality)parts.push(f.quality==='best'?'лучшее качество':'без брака');if(f.tags?.length)parts.push(f.tags.map(t=>label(TAGS,t)).join(', '));const text=parts.join(' · ');return text?text[0].toUpperCase()+text.slice(1):'Без ограничений';}
   function chips(attr,key,options,values){return `<div class="pick-chips" role="group">${options.map(([id,text])=>{const on=!!values?.includes(id);return `<button type="button" ${attr}="${key}" data-value="${id}" class="${on?'active':''}" aria-pressed="${on}">${text}</button>`;}).join('')}</div>`;}
   function segmented(attr,key,options,value){return `<div class="pick-chips pick-segmented" role="group">${options.map(([id,text])=>{const on=(value??'')===id;return `<button type="button" ${attr}="${key}" data-value="${id}" class="${on?'active':''}" aria-pressed="${on}">${text}</button>`;}).join('')}</div>`;}
-  function stats(key){if(failed)return `<p class="pick-stats warning">${esc(failed)}</p>`;const slot=data?.slots?.[key];if(!slot)return `<p class="pick-stats">${data?'На этой странице слот не участвует в примере.':'Подбираем фото на тестовой съёмке…'}</p>`;const relaxed=slot.relaxed.filter(r=>RELAX[r]);return `<p class="pick-stats${relaxed.length?' warning':''}"><strong>${slot.candidates}</strong> из ${data.photos} тестовых фото подходят без уступок.${relaxed.length?`<br>Для примера взято: ${relaxed.map(r=>RELAX[r]).join(', ')}.`:''}</p>`;}
-  /* Who must be on the photo: the hero exists only on personal spreads; elsewhere the album owner may be asked for. */
-  /* Category rows of both frame menus (canvas and inspector): name, what it takes, and «new category» at the end. */
-  function categoryRows(doc,current,attr){return categories(doc).map(c=>{const on=c.id===current;return `<button type="button" class="menu-row${on?' on':''}" role="menuitemradio" aria-checked="${on}" title="${esc(describe(c.filters))}" ${attr}="${esc(c.id)}"><span>${esc(c.name)}</span>${on?tick:''}</button>`;}).join('')+`<button type="button" class="menu-row menu-add" data-new-category><i aria-hidden="true">+</i><span>Новая категория</span></button>`;}
+  /* Category rows of both frame menus (canvas and inspector): pictogram and name, built-ins first, then the photographer's own
+     after a thin divider (with small captions when `captions`), and «new category» at the end. */
+  function categoryRows(doc,current,attr,captions=false){const list=categories(),row=c=>{const on=c.id===current;return `<button type="button" class="menu-row cat-row${on?' on':''}" role="menuitemradio" aria-checked="${on}" title="${esc(describe(c.filters))}" ${attr}="${esc(c.id)}">${pictogram(c)}<span>${esc(c.name)}</span>${on?tick:''}</button>`;},
+      own=list.filter(c=>!c.builtin);
+    return (captions?'<p class="menu-label">Стандартные</p>':'')+list.filter(c=>c.builtin).map(row).join('')+(own.length?`<hr class="menu-divider">${captions?'<p class="menu-label">Мои</p>':''}${own.map(row).join('')}`:'')
+      +`<hr class="menu-divider"><button type="button" class="menu-row menu-add" data-new-category><i aria-hidden="true">+</i><span>Новая категория</span></button>`;}
   /* A new category for the selected slot: it is chosen right away and opened for editing in the album settings. */
-  function newCategory(){const t=target(),id='c-'+Math.random().toString(36).slice(2,8);openCategory=id;menuOpen=false;hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=[...(doc.photoCategories||[]),{id,name:'Новая категория'}];if(t){t.obj.source='class';t.obj.pick={...(upgrade(t.obj.pick)||{}),category:id};}});hooks.rules();requestAnimationFrame(()=>{const input=document.querySelector('.category-item.open [data-cat-name]');input?.scrollIntoView({block:'nearest'});input?.select();});}
-  function whoOptions(section){return section.kind==='repeat'?[['hero','С героем разворота'],['','Любой']]:[['','Любой'],['owner','С владельцем альбома']];}
-  /* Body of «what is in the frame» for an automatic general-photo slot (layer or collage cell): category, who, test-shoot stats. */
-  function panel(pick,key,section){const doc=hooks.doc(),p=upgrade(pick)||{category:'any'},c=category(doc,p.category),note=p.who==='hero'&&HERO_FALLBACK[c.id]?`<p class="section-note">${HERO_FALLBACK[c.id]}</p>`:'';
-    return `<div class="pick-section"><div class="pick-field pick-picker"><span>Категория</span><button type="button" class="pick-trigger" data-pick-menu aria-haspopup="menu" aria-expanded="${menuOpen}"><span>${esc(c.name)}</span>${caret}</button>${menuOpen?`<div class="cell-sources pick-menu" role="menu">${categoryRows(doc,c.id,'data-pick-choice')}</div>`:''}</div>
-    <div class="pick-summary"><span>${esc(c.note&&!c.edited?c.note:describe(c.filters))}</span><button type="button" class="link-button" data-edit-category="${esc(c.id)}">Настроить</button></div>
-    <div class="pick-field"><span>Кто на снимке</span>${segmented('data-pick-who','who',whoOptions(section),p.who||'')}</div>${note}${stats(key)}</div>`;}
+  function newCategory(){const t=target(),id='c-'+Math.random().toString(36).slice(2,8);openCategory=id;menuOpen=false;saveStudio(s=>{s.items.push({id,name:'Новая категория'});});if(t)hooks.commit(()=>{t.obj.source='class';t.obj.pick={...(upgrade(t.obj.pick)||{}),category:id};});hooks.rules();requestAnimationFrame(()=>{const input=document.querySelector('.category-item.open [data-cat-name]');input?.scrollIntoView({block:'nearest'});input?.select();});}
+  /* Who must be on the photo: the hero exists only on personal spreads; elsewhere the album owner may be asked for. [id, label, full name] */
+  function whoOptions(section){return section.kind==='repeat'?[['hero','Герой','С героем разворота'],['','Любой','Любой']]:[['','Любой','Любой'],['owner','Владелец','С владельцем альбома']];}
+  const pencil='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.6 2.9 13.1 5.4M3 13l.6-3.1 7.9-7.9a1.1 1.1 0 0 1 1.6 0l.9.9a1.1 1.1 0 0 1 0 1.6L6.1 12.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  /* Body of «what is in the frame» for an automatic general-photo slot (layer or collage cell): label → control rows like the
+     other inspector sections — category (pictogram dropdown with an edit button beside it) and who is on the photo. */
+  function panel(pick,key,section){const doc=hooks.doc(),p=upgrade(pick)||{category:'any'},c=category(doc,p.category),tip=p.who==='hero'&&HERO_FALLBACK[c.id]?infoTip(HERO_FALLBACK[c.id]):'';
+    if(menuOpen)requestAnimationFrame(placeMenu);
+    return `<div class="pick-section pick-rows"><div class="pick-row"><span class="pick-label">Категория</span><div class="pick-picker"><button type="button" class="pick-trigger" data-pick-menu aria-haspopup="menu" aria-expanded="${menuOpen}" title="${esc(describe(c.filters))}">${pictogram(c)}<span>${esc(c.name)}</span>${caret}</button>${menuOpen?`<div class="cell-sources pick-menu" role="menu">${categoryRows(doc,c.id,'data-pick-choice',true)}</div>`:''}</div><button type="button" class="icon-toggle pick-edit" data-edit-category="${esc(c.id)}" title="Настроить категорию «${esc(c.name)}»" aria-label="Настроить категорию «${esc(c.name)}»">${pencil}</button></div>
+    <div class="pick-row"><span class="pick-label">Кто в кадре${tip}</span><div class="segments pick-who" role="group" aria-label="Кто в кадре">${whoOptions(section).map(([id,text,full])=>{const on=(p.who||'')===id;return `<button type="button" data-pick-who="who" data-value="${id}" class="${on?'active':''}" aria-pressed="${on}" title="${full}">${text}</button>`;}).join('')}</div></div></div>`;}
+  const infoTip=text=>`<span class="info-tip" tabindex="0" role="img" aria-label="${esc(text)}" data-tip="${esc(text)}">i</span>`;
+  /* The inspector menu stays in view: it opens up when there is more room above and scrolls on its own. */
+  function placeMenu(){const menu=document.querySelector('#inspector .pick-rows .pick-menu');if(!menu)return;const box=document.getElementById('inspector').getBoundingClientRect(),trigger=menu.previousElementSibling.getBoundingClientRect(),
+      below=Math.min(box.bottom,innerHeight)-trigger.bottom-12,above=trigger.top-Math.max(box.top,0)-12,up=below<Math.min(menu.scrollHeight,360)&&above>below;
+    menu.classList.toggle('up',up);menu.style.maxHeight=Math.max(140,Math.min(360,up?above:below))+'px';
+    const on=menu.querySelector('.on');if(on)menu.scrollTop=on.offsetTop-(menu.clientHeight-on.offsetHeight)/2;}
+  /* A category pictured for menus and the category list: built-ins by what they show, the photographer's own as a tag. */
+  const PIC='#b58fd0',PIC_SOFT='#d9c6e8',n1=v=>+v.toFixed(1);
+  function bust(x,base,s,fill=PIC){const r=s*.28,w=s*.42;return `<circle cx="${n1(x)}" cy="${n1(base-s+r)}" r="${n1(r)}" fill="${fill}"/><path d="M${n1(x-w)} ${n1(base)}a${n1(w)} ${n1(s*.4)} 0 0 1 ${n1(2*w)} 0z" fill="${fill}"/>`;}
+  const busts=(n,x0,x1,base,s,fill)=>Array.from({length:n},(_,i)=>bust(n===1?(x0+x1)/2:x0+i*(x1-x0)/(n-1),base,s,fill)).join('');
+  const PICTOGRAMS={
+    any:busts(3,8,22,19,9,PIC_SOFT)+bust(15,20,11,PIC_SOFT),
+    class:busts(5,6,24,13.5,6)+busts(6,4.5,25.5,20.5,6.5),
+    subgroup:busts(4,6,24,19.5,8),
+    few:busts(2,10.5,19.5,20.5,11),
+    solo:bust(15,21.5,16),
+    candid:bust(10,21,11)+bust(19.5,18.5,8)+`<path d="M23.5 5.5l3-1.8M24.5 9h3" stroke="${PIC}" stroke-width="1.2" stroke-linecap="round"/>`,
+    wide:`<circle cx="23" cy="6" r="2.2" fill="${PIC_SOFT}"/><path d="M2 15.5h26" stroke="${PIC_SOFT}" stroke-width="1.2"/>`+busts(3,10,18,18.5,4),
+    empty:`<circle cx="22" cy="6.5" r="2.4" fill="${PIC_SOFT}"/><path d="M2.5 19.5l7-8 4.5 4.5 3.5-3 10 6.5z" fill="${PIC}"/>`,
+  };
+  const TAG=`<path d="M8 6.5h8l5.5 4.5-5.5 4.5H8z" fill="none" stroke="${PIC}" stroke-width="1.4" stroke-linejoin="round"/><circle cx="11" cy="11" r="1.3" fill="${PIC}"/>`;
+  function pictogram(c,cls='cat-pic'){return `<svg class="${cls}" viewBox="0 0 30 22" aria-hidden="true"><rect x=".5" y=".5" width="29" height="21" rx="4" fill="#f5effa"/>${c.builtin?PICTOGRAMS[c.id]||'':TAG}</svg>`;}
   /* Editor of one category inside the album settings. */
   function categoryEditor(c){const f=c.filters,reset=c.builtin&&c.edited?`<button type="button" data-cat-reset="${esc(c.id)}">Вернуть как было</button>`:'';
     return `<div class="category-editor"><label>Название<input data-cat-name="${esc(c.id)}" maxlength="40" value="${esc(c.name)}"></label>
@@ -72,43 +106,40 @@ window.MasterPhotos=(()=>{
     ['mixShoots','Личные развороты вперемешку','На развороте ученика — кадры с разных съёмок.',svg(74,23,spread(0,[[3,3,10,15,'a'],[18,3,9,7,'b'],[18,11,9,7,'c']])+`<g transform="translate(0 1)">${figure(8.5,17,10)}</g>`+SHOOTS)],
     ['rhythm','Чередовать крупность','Крупный кадр рядом с общими, а не все одинаковые.',svg(74,23,spread(0,[[3,3,11,15,'photo'],[17,3,5,5,'photo'],[23,3,5,5,'photo'],[17,9,11,9,'photo']])+`<g transform="translate(0 1)">${figure(8.5,19,12)}${figure(19.5,8,3)}${figure(25.5,8,3)}${row(3,19.5,26.5,18,3.5)}</g>`)],
     ['chronology','Общие развороты по съёмкам','Съёмки идут друг за другом, кадры разворота — из одной.',svg(74,23,['a','b','c'].map((f,i)=>spread(i*25,[[2,3,7,14,f],[12,3,6,6,f],[12,11,6,6,f]],20,20)).join(''))]];
-  /* A category pictured: how many people, how large and whether they stand in a row or freely. */
-  function categoryIcon(f){const people=f.people?.[0],scale=f.scale?.[0],candid=f.style==='candid',j=candid?1.6:0;let body;
-    if(people==='none'||scale==='detail')body='<path d="M3 19l7-7 5 4 4-3 8 6z" fill="#cbb4dc"/><circle cx="22" cy="7" r="2.6" fill="#e2cdb0"/>';
-    else if(scale==='close')body=figure(15,26,22);
-    else if(scale==='wide')body=`<path d="M1 15.5h28" stroke="#ddd0e7"/>${row(people==='solo'?1:people==='few'?2:4,people==='solo'?15:9,21,18,4,j*.5)}`;
-    else{const n={solo:1,few:3,subgroup:5,class:7}[people]||3,size=scale==='medium'?{1:15,3:11}[n]||8:{1:13,3:9,5:7}[n]||5.5;
-      body=people==='class'?row(7,5,25,13,5.2,j)+row(6,7,23,20,5.4,j):people?row(n,n===1?15:5,n===1?15:25,people==='solo'&&scale==='medium'?24:20,size,j):row(3,8,22,20,8,1.6).replace(/#b9a2cb/g,'#d6c8e1');}
-    return svg(30,22,`<rect x=".5" y=".5" width="29" height="21" rx="3" fill="#f7f2fb" stroke="#e6dbef"/>${body}`,'category-icon');}
-  function categoriesPanel(doc){const list=categories(doc);if(openCategory&&!list.some(c=>c.id===openCategory))openCategory=null;
-    return `<section class="album-section" id="photo-categories"><h3>Категории снимков</h3><p class="section-note category-lead">Из них выбирают, что поставить в кадр. Изменения действуют во всём макете.</p><div class="category-list">${list.map(c=>{const open=openCategory===c.id;return `<div class="category-item${open?' open':''}"><button type="button" class="category-row" data-cat-open="${esc(c.id)}" aria-expanded="${open}">${categoryIcon(c.filters)}<span><strong>${esc(c.name)}${c.edited?' <i>изменена</i>':''}${c.builtin?'':' <i>своя</i>'}</strong>${describe(c.filters).toLowerCase()===c.name.toLowerCase()?'':`<small>${esc(describe(c.filters))}</small>`}</span>${caret}</button>${c.id==='any'?'':`<button type="button" class="category-delete" data-cat-delete="${esc(c.id)}" title="Удалить категорию «${esc(c.name)}»" aria-label="Удалить категорию «${esc(c.name)}»"><img src="/static/assets/editor/trash.svg" alt=""></button>`}${open?categoryEditor(c):''}</div>`;}).join('')}</div><button type="button" class="wide" data-cat-add>+ Новая категория</button>${doc.removedCategories?.length?`<button type="button" class="link-button" data-cat-restore>Вернуть удалённые встроенные (${doc.removedCategories.length})</button>`:''}</section>`;}
+  /* The studio's categories in the album settings: built-ins, then the photographer's own under a small caption. */
+  function categoriesPanel(){const list=categories();if(openCategory&&!list.some(c=>c.id===openCategory))openCategory=null;
+    const item=c=>{const open=openCategory===c.id;return `<div class="category-item${open?' open':''}"><button type="button" class="category-row" data-cat-open="${esc(c.id)}" aria-expanded="${open}">${pictogram(c,'category-icon')}<span><strong>${esc(c.name)}${c.edited?' <i>изменена</i>':''}</strong>${describe(c.filters).toLowerCase()===c.name.toLowerCase()?'':`<small>${esc(describe(c.filters))}</small>`}</span>${caret}</button>${c.id==='any'?'':`<button type="button" class="category-delete" data-cat-delete="${esc(c.id)}" title="Удалить категорию «${esc(c.name)}»" aria-label="Удалить категорию «${esc(c.name)}»"><img src="/static/assets/editor/trash.svg" alt=""></button>`}${open?categoryEditor(c):''}</div>`;},
+      own=list.filter(c=>!c.builtin);
+    return `<section class="album-section" id="photo-categories"><h3>Категории снимков ${infoTip('Общие для всех дизайнов и комплектаций.')}</h3><div class="category-list">${list.filter(c=>c.builtin).map(item).join('')}</div>${own.length?`<p class="category-group">Мои</p><div class="category-list">${own.map(item).join('')}</div>`:''}<button type="button" class="wide" data-cat-add>+ Новая категория</button>${studio.removed.length?`<button type="button" class="link-button" data-cat-restore>Вернуть удалённые стандартные (${studio.removed.length})</button>`:''}</section>`;}
   function rulesPanel(doc){const r={...RULES,...(doc.photoRules||{})};
     return `<section class="album-section"><h3>Повторы снимков</h3><div class="rule-choices">${REUSE.map(([id,title,help,sketch])=>{const on=r.reuse===id;return `<button type="button" class="layout-choice${on?' active':''}" data-photo-set="reuse" data-value="${id}" aria-pressed="${on}"><span class="rule-sketch">${sketch}</span><strong>${title}</strong><small>${help}</small></button>`;}).join('')}</div></section>
     <section class="album-section"><h3>Расстановка снимков</h3><div class="rule-toggles">${TOGGLES.map(([key,title,help,sketch])=>{const on=!!r[key];return `<button type="button" class="rule-toggle" role="switch" data-photo-toggle="${key}" aria-checked="${on}"><span class="rule-sketch">${sketch}</span><span class="rule-toggle-text"><strong>${title}</strong><small>${help}</small></span><i class="switch" aria-hidden="true"></i></button>`;}).join('')}</div></section>`;}
   function target(){const t=hooks.target();return t&&t.obj?t:null;}
   function setPick(mutator){const t=target();if(!t)return;hooks.commit(()=>{const pick={...(upgrade(t.obj.pick)||{category:'any'})};mutator(pick);if(!pick.who)delete pick.who;t.obj.pick=pick;});}
-  /* Change a category: built-ins are stored as edits in doc.photoCategories, the master's own are edited in place. */
-  function editCategory(id,mutator){hooks.commit(()=>{const doc=hooks.doc(),own=doc.photoCategories=[...(doc.photoCategories||[])];let item=own.find(c=>c.id===id);if(!item){const base=categories(doc).find(c=>c.id===id);if(!base)return;item={id,name:base.name,...JSON.parse(JSON.stringify(base.filters))};own.push(item);}mutator(item);for(const k of FILTERS)if(item[k]==null||(Array.isArray(item[k])&&!item[k].length))delete item[k];});}
-  /* Slots still pointing at a removed category take any photo. */
-  /* A removed built-in is remembered in doc.removedCategories so it can be brought back. */
-  function dropCategory(id){hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=(doc.photoCategories||[]).filter(c=>c.id!==id);if(!doc.photoCategories.length)delete doc.photoCategories;if(BUILTIN.some(([b])=>b===id))doc.removedCategories=[...(doc.removedCategories||[]),id];const fix=item=>{if(item?.pick?.category===id)item.pick={...item.pick,category:'any'};},walk=c=>c.split?c.cells.forEach(walk):fix(c);for(const s of doc.sections||[])for(const sp of s.spreads||[])for(const p of sp.pages||[])for(const l of p.layers||[]){if(l.type==='photo')fix(l);if(l.type==='collage'){fix(l);(l.rows||[]).forEach(r=>r.forEach(walk));}}});}
+  /* Change a category: built-ins are stored as edits in the studio list, own ones are edited in place. */
+  function editCategory(id,mutator){saveStudio(s=>{let item=s.items.find(c=>c.id===id);if(!item){const base=categories().find(c=>c.id===id);if(!base)return;item={id,name:base.name,...JSON.parse(JSON.stringify(base.filters))};s.items.push(item);}mutator(item);});}
+  /* Slots in any design still pointing at a removed category take any photo; a removed built-in can be brought back. */
+  function dropCategory(id){saveStudio(s=>{s.items=s.items.filter(c=>c.id!==id);if(BUILTIN.some(([b])=>b===id))s.removed=[...s.removed,id];});}
   function setRule(key,value){hooks.commit(()=>{const doc=hooks.doc(),rules={...RULES,...(doc.photoRules||{}),[key]:value};doc.photoRules=rules;});}
-  function click(e){const ruleSet=e.target.closest('[data-photo-set]');if(ruleSet){setRule(ruleSet.dataset.photoSet,ruleSet.dataset.value);return true;}const toggle=e.target.closest('[data-photo-toggle]');if(toggle){const key=toggle.dataset.photoToggle;setRule(key,!{...RULES,...(hooks.doc().photoRules||{})}[key]);return true;}if(e.target.closest('[data-pick-menu]')){menuOpen=!menuOpen;hooks.inspector();return true;}const choice=e.target.closest('[data-pick-choice]');if(choice){menuOpen=false;setPick(pick=>{pick.category=choice.dataset.pickChoice;});return true;}if(e.target.closest('[data-new-category]')){newCategory();return true;}const who=e.target.closest('[data-pick-who]');if(who){setPick(pick=>{pick.who=who.dataset.value||undefined;});return true;}
+  function click(e){const ruleSet=e.target.closest('[data-photo-set]');if(ruleSet){setRule(ruleSet.dataset.photoSet,ruleSet.dataset.value);return true;}const toggle=e.target.closest('[data-photo-toggle]');if(toggle){const key=toggle.dataset.photoToggle;setRule(key,!{...RULES,...(hooks.doc().photoRules||{})}[key]);return true;}if(e.target.closest('[data-pick-menu]')){menuOpen=!menuOpen;hooks.inspector();placeMenu();return true;}const choice=e.target.closest('[data-pick-choice]');if(choice){menuOpen=false;setPick(pick=>{pick.category=choice.dataset.pickChoice;});return true;}if(e.target.closest('[data-new-category]')){newCategory();return true;}const who=e.target.closest('[data-pick-who]');if(who){setPick(pick=>{pick.who=who.dataset.value||undefined;});return true;}
     const edit=e.target.closest('[data-edit-category]');if(edit){openCategory=edit.dataset.editCategory;hooks.rules();requestAnimationFrame(()=>document.querySelector('.category-item.open')?.scrollIntoView({block:'nearest'}));return true;}
     const open=e.target.closest('[data-cat-open]');if(open){openCategory=openCategory===open.dataset.catOpen?null:open.dataset.catOpen;hooks.inspector();return true;}
     const chip=e.target.closest('[data-cat-chip]');if(chip){const key=chip.dataset.catChip,value=chip.dataset.value;editCategory(openCategory,item=>{const list=new Set(item[key]||[]);list.has(value)?list.delete(value):list.add(value);item[key]=[...list];});return true;}
     const set=e.target.closest('[data-cat-set]');if(set){editCategory(openCategory,item=>{item[set.dataset.catSet]=set.dataset.value||null;});return true;}
-    const reset=e.target.closest('[data-cat-reset]');if(reset){const id=reset.dataset.catReset;hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=(doc.photoCategories||[]).filter(c=>c.id!==id);if(!doc.photoCategories.length)delete doc.photoCategories;});return true;}
-    const del=e.target.closest('[data-cat-delete]');if(del){dropCategory(del.dataset.catDelete);openCategory=null;return true;}
-    if(e.target.closest('[data-cat-restore]')){hooks.commit(()=>{delete hooks.doc().removedCategories;});return true;}
-    if(e.target.closest('[data-cat-add]')){const id='c-'+Math.random().toString(36).slice(2,8);openCategory=id;hooks.commit(()=>{const doc=hooks.doc();doc.photoCategories=[...(doc.photoCategories||[]),{id,name:'Новая категория'}];});return true;}
+    const reset=e.target.closest('[data-cat-reset]');if(reset){const id=reset.dataset.catReset;saveStudio(s=>{s.items=s.items.filter(c=>c.id!==id);});return true;}
+    const del=e.target.closest('[data-cat-delete]');if(del){openCategory=null;dropCategory(del.dataset.catDelete);return true;}
+    if(e.target.closest('[data-cat-restore]')){saveStudio(s=>{s.removed=[];});return true;}
+    if(e.target.closest('[data-cat-add]')){const id='c-'+Math.random().toString(36).slice(2,8);openCategory=id;saveStudio(s=>{s.items.push({id,name:'Новая категория'});});requestAnimationFrame(()=>{const input=document.querySelector('.category-item.open [data-cat-name]');input?.scrollIntoView({block:'nearest'});input?.select();});return true;}
     return false;}
   function change(e){const el=e.target;if(el.matches('[data-pick-category]')){setPick(pick=>{pick.category=el.value;});return true;}
     if(el.dataset.catName){const name=el.value.trim().slice(0,40);if(name)editCategory(el.dataset.catName,item=>{item.name=name;});else el.value=category(hooks.doc(),el.dataset.catName).name;return true;}
     return false;}
   function strip(doc){return JSON.parse(JSON.stringify(doc,(k,v)=>k==='dataUrl'?undefined:v));}
   /* Ask the server what the draft would pick on the test shoot; re-render when it answers. */
-  function refresh(doc,view){const payload=JSON.stringify({document:strip(doc),students:view.students,teachers:view.teachers,owner:view.owner});if(payload===sent)return;sent=payload;clearTimeout(timer);const mine=++version;timer=setTimeout(async()=>{try{const r=await fetch('/api/master-templates/photo-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:payload});const value=await r.json();if(mine!==version)return;if(!r.ok)throw Error(typeof value.detail==='string'?value.detail:'Превью подбора недоступно');data=value;failed='';}catch(error){if(mine!==version)return;failed=error.message||'Превью подбора недоступно';}hooks?.updated();},350);}
+  function refresh(doc,view){lastView=view;const payload=JSON.stringify({document:strip(doc),students:view.students,teachers:view.teachers,owner:view.owner});if(payload===sent)return;sent=payload;clearTimeout(timer);const mine=++version;timer=setTimeout(async()=>{try{const r=await fetch('/api/master-templates/photo-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:payload});const value=await r.json();if(mine!==version)return;if(!r.ok)throw Error(typeof value.detail==='string'?value.detail:'Превью подбора недоступно');data=value;failed='';}catch(error){if(mine!==version)return;failed=error.message||'Превью подбора недоступно';}keepFocus(()=>hooks?.updated());},350);}
+  /* Re-rendering the album settings must not take the caret out of a category name being typed. */
+  function keepFocus(render){const el=document.activeElement,id=el?.dataset?.catName,start=el?.selectionStart,end=el?.selectionEnd,value=el?.value;render();
+    if(!id)return;const input=document.querySelector(`[data-cat-name="${CSS.escape(id)}"]`);if(!input||input===el)return;input.value=value;input.focus();input.setSelectionRange(start,end);}
   const svgCache=new Map();
   function scene(slot){const key=slot.photo+':'+slot.persons.map(p=>p.owner?1:0).join('');if(svgCache.has(key))return svgCache.get(key);const [w,h]=slot.size.map(v=>v/10),people=[...slot.persons].sort((a,b)=>(a.box[1]+a.box[3])-(b.box[1]+b.box[3]));
     let body='';const n=v=>v.toFixed(1);for(const p of people){const [x,y,bw,bh]=p.box,fill=p.owner?'#a77cc4':'#b7b3ab',skin=p.owner?'#dcc6e8':'#d8cfc5',f=p.face;
@@ -121,7 +152,7 @@ window.MasterPhotos=(()=>{
   function slot(sectionId,pageIndex,slotId){return data?.slots?.[`${sectionId}:${pageIndex}/${slotId}`]||null;}
   const ready=()=>!!data&&!failed;
   function image(sectionId,pageIndex,slotId){const slot=data?.slots?.[`${sectionId}:${pageIndex}/${slotId}`];if(!slot?.photo)return null;return {src:scene(slot),crop:slot.crop};}
-  function bind(value){hooks=value;}
+  function bind(value){hooks=value;loadStudio();}
   document.addEventListener('pointerdown',e=>{if(menuOpen&&!e.target.closest('.pick-picker')){menuOpen=false;hooks?.inspector();}},true);
   document.addEventListener('keydown',e=>{if(menuOpen&&e.key==='Escape'){e.stopImmediatePropagation();menuOpen=false;hooks?.inspector();}},true);
   return {bind,panel,rulesPanel,categoriesPanel,click,change,refresh,image,slot,ready,categories,category,describe,migrate,upgrade,categoryRows,newCategory};
