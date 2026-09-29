@@ -4,8 +4,8 @@
    A block is fixed (every spread once), a list (vignettes of students or teachers) or personal (its spreads repeat per person).
    Spreads of a list block have roles: intro and outro appear once, repeat spreads cycle while people remain,
    and the last spread replaces a repeat spread that the list would fill only partly.
-   A list may be split into parts with other blocks between them: a part stops after list.limit spreads, and the block
-   whose list.continues names it takes the people from where it stopped. */
+   A list or personal block may be split into parts with other blocks between them: a part stops after `limit` spreads,
+   and the block whose `continues` names it takes the people from where it stopped. */
 (function(root){
   const ROLES=['intro','repeat','last','outro'];
   const PEOPLE=['all','others','owner','off'];
@@ -21,7 +21,7 @@
      n — people in the list, cap — cards that fit the tightest vignette of the block.
      Result: {spreads:[{spread,role,pages:[{page,part}]}], counts:[cards per part], taken, issues:[codes]}.
      part is the index into counts, or null for a page without a vignette or a vignette left empty.
-     taken — how many of the n people the block placed: fewer than n only when list.limit stops it; the pages are then
+     taken — how many of the n people the block placed: fewer than n only when section.limit stops it; the pages are then
      filled as evenly as if the whole list ran on, and the rest is left to the block that continues the list. */
   function listPlan(section,n,cap){
     const list={...LIST_DEFAULT,...(section.list||{})},min=Math.max(1,Number(list.min)||1),spreads=section.spreads||[],issues=[];
@@ -37,7 +37,7 @@
     preferred=Math.max(1,preferred);
     let pages=n?Math.max(Math.ceil(n/cap),Math.min(preferred,Math.max(1,Math.floor(n/min)))):1;
     pages=Math.max(pages,fixed);
-    const whole=pages,limit=Math.max(0,Math.round(Number(list.limit))||0);
+    const whole=pages,limit=partLimit(section);
     if(n&&limit&&cycleHasGrid){
       let room=fixed;for(let i=0;i<limit-intro.length-outro.length;i++)room+=gridPages(repeat[i%repeat.length]);
       pages=Math.min(pages,Math.max(room,fixed,1));
@@ -70,18 +70,24 @@
     return {spreads,counts,taken,issues};
   }
 
-  /* Keep the parts of split lists consistent: a continuation follows an existing list block of the same people,
-     one continuation per block, and a limit stays only on a block that is continued. Returns true on a change. */
+  const partLimit=section=>Math.max(0,Math.round(Number(section.limit))||0);
+  /* How many of n people a part of a split personal block takes: whole people, as many as fit in its spreads. */
+  function personalTake(section,n){const limit=partLimit(section),per=Math.max(1,(section.spreads||[]).length);return limit?Math.min(n,Math.max(1,Math.floor(limit/per))):n;}
+  /* Only lists and personal blocks for many people can be split. */
+  const splittable=s=>!s.cover&&(s.kind==='flow'||s.kind==='repeat'&&['all','others'].includes(s.people||'all'));
+  /* Keep split blocks consistent: a continuation follows a block of the same kind and the same people, one continuation
+     per block, and only a continued block keeps a limit. Returns true when the document changed. */
   function linkParts(doc){
-    let changed=false;const lists=(doc.sections||[]).filter(s=>!s.cover&&s.kind==='flow'),taken=new Set();
-    for(const s of doc.sections||[]){
-      const list=s.list;if(!list||!('continues' in list))continue;
-      const from=lists.find(x=>x.id===list.continues);
-      if(s.kind!=='flow'||!from||from===s||taken.has(from.id)){delete list.continues;changed=true;continue;}
+    let changed=false;const sections=doc.sections||[],taken=new Set();
+    for(const s of sections){
+      if(!('continues' in s))continue;
+      const from=sections.find(x=>x.id===s.continues);
+      if(!splittable(s)||!from||from===s||from.kind!==s.kind||!splittable(from)||taken.has(from.id)){delete s.continues;changed=true;continue;}
       taken.add(from.id);
-      if(from.list&&list.source!==from.list.source){list.source=from.list.source;changed=true;}
+      if(s.kind==='flow'&&s.list?.source!==(from.list?.source||'students')){s.list={...(s.list||{}),source:from.list?.source||'students'};changed=true;}
+      if(s.kind==='repeat'&&(s.people||'all')!==(from.people||'all')){s.people=from.people||'all';changed=true;}
     }
-    for(const s of doc.sections||[])if(s.list&&'limit' in s.list&&(s.kind!=='flow'||!taken.has(s.id))){delete s.list.limit;changed=true;}
+    for(const s of sections)if('limit' in s&&!taken.has(s.id)){delete s.limit;changed=true;}
     return changed;
   }
 
@@ -125,5 +131,5 @@
     return true;
   }
 
-  root.MasterPlan={ROLES,PEOPLE,LIST_DEFAULT,roleOf,hasGrid,gridPages,distribute,listPlan,linkParts,people,upgrade};
+  root.MasterPlan={ROLES,PEOPLE,LIST_DEFAULT,roleOf,hasGrid,gridPages,distribute,listPlan,personalTake,splittable,linkParts,people,upgrade};
 })(typeof window!=='undefined'?window:globalThis);

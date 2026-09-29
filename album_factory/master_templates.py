@@ -198,22 +198,25 @@ def validate(document):
         if v2 and not section.get('cover'):
             if section['kind'] == 'flow':
                 block_list = section.get('list')
-                check(isinstance(block_list, dict) and set(block_list) <= {'source', 'min', 'max', 'strictMin', 'excludeLead', 'limit', 'continues'}, 'Нужны настройки списка блока')
+                check(isinstance(block_list, dict) and set(block_list) <= {'source', 'min', 'max', 'strictMin', 'excludeLead'}, 'Нужны настройки списка блока')
                 check(block_list.get('source') in {'students', 'teachers'}, 'Неверный список блока')
                 check(number(block_list.get('min'), 1, 100) and number(block_list.get('max'), 1, 100) and block_list['min'] <= block_list['max'], 'Неверные границы карточек на странице')
                 check(all(isinstance(block_list.get(k, False), bool) for k in ('strictMin', 'excludeLead')), 'Неверные настройки списка блока')
                 check(sum(s.get('role') == 'last' for s in spreads if isinstance(s, dict)) <= 1, 'В блоке может быть один последний неполный разворот')
-                # A split list: the continuation names another list block of the same people; only a continued block has a limit.
-                # Order is not checked here: a continuation dragged above its start is reported when the album is built.
-                if 'continues' in block_list:
-                    start = next((s for s in sections if s is not section and isinstance(s, dict) and s.get('id') == block_list['continues']), None)
-                    check(start is not None and start.get('kind') == 'flow' and (start.get('list') or {}).get('source') == block_list['source'], 'Продолжение списка ссылается на неверный блок')
-                    check(sum(isinstance(s, dict) and (s.get('list') or {}).get('continues') == block_list['continues'] for s in sections) == 1, 'У блока может быть одно продолжение списка')
-                if 'limit' in block_list:
-                    check(isinstance(block_list['limit'], int) and not isinstance(block_list['limit'], bool) and 1 <= block_list['limit'] <= 100, 'Неверное число разворотов части списка')
-                    check(any(isinstance(s, dict) and (s.get('list') or {}).get('continues') == section.get('id') for s in sections), 'Ограничение разворотов нужно только блоку с продолжением')
             if section['kind'] == 'repeat':
                 check(section.get('people', 'all') in {'all', 'others', 'owner', 'off'}, 'Неверный выбор, для кого личные развороты')
+            # A split block: the continuation names another block of the same kind and people; only a continued block has a limit.
+            # Order is not checked here: a continuation dragged above its start is reported when the album is built.
+            if 'continues' in section:
+                start = next((s for s in sections if s is not section and isinstance(s, dict) and s.get('id') == section['continues']), None)
+                same = start is not None and start.get('kind') == section['kind'] and (
+                    section['kind'] == 'flow' and (start.get('list') or {}).get('source') == (block_list or {}).get('source')
+                    or section['kind'] == 'repeat' and start.get('people', 'all') == section.get('people', 'all') in {'all', 'others'})
+                check(same, 'Продолжение ссылается на неверный блок')
+                check(sum(isinstance(s, dict) and s.get('continues') == section['continues'] for s in sections) == 1, 'У блока может быть одно продолжение')
+            if 'limit' in section:
+                check(isinstance(section['limit'], int) and not isinstance(section['limit'], bool) and 1 <= section['limit'] <= 100, 'Неверное число разворотов части')
+                check(any(isinstance(s, dict) and s.get('continues') == section.get('id') for s in sections), 'Ограничение разворотов нужно только блоку с продолжением')
         grid_sources = set()
         for spread in spreads:
             check(isinstance(spread, dict), 'Неверный разворот'); identity(spread)

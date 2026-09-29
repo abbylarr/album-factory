@@ -116,11 +116,10 @@ def split_master(limit=1):
     """Students split into two parts with a general block between them."""
     doc = master()
     first = doc['sections'][2]
-    first['list']['limit'] = limit
+    first['limit'] = limit
     rest = deepcopy(first)
-    rest.update(id='students2', name='Класс, продолжение')
-    rest['list'] = {**first['list'], 'continues': 'students'}
-    del rest['list']['limit']
+    rest.update(id='students2', name='Класс, продолжение', continues='students')
+    del rest['limit']
     for spread in rest['spreads']:
         spread['id'] += 'b'
         for p in spread['pages']:
@@ -129,6 +128,19 @@ def split_master(limit=1):
                 layer['id'] += 'b'
     general = {'id': 'general', 'name': 'Общие', 'kind': 'fixed', 'spreads': [{'id': 'gen', 'pages': [page('genl'), page('genr')]}]}
     doc['sections'][3:3] = [general, rest]
+    return doc
+
+
+def split_personal(limit=2):
+    """Personal spreads of the classmates: the first part, general spreads, then the rest of the class."""
+    doc = master()
+    others = doc['sections'][4]
+    others['limit'] = limit
+    rest = deepcopy(others)
+    rest.update(id='others2', name='Одноклассники, продолжение', continues='others')
+    del rest['limit']
+    rest['spreads'] = [{'id': 'o2', 'pages': [page('o2l', [photo('o2p', 'item')]), page('o2r', [dict(others['spreads'][0]['pages'][1]['layers'][0], id='who2')])]}]
+    doc['sections'] += [{'id': 'general', 'name': 'Общие', 'kind': 'fixed', 'spreads': [{'id': 'gen', 'pages': [page('genl'), page('genr')]}]}, rest]
     return doc
 
 
@@ -164,6 +176,16 @@ class SplitListTests(unittest.TestCase):
         self.assertEqual(names(result, 'student:s0', 'students2'), [])
         self.assertEqual(len(names(result, 'student:s0', 'students')), 20)
         self.assertTrue(any(i['key'] == 'students2' and i['level'] == 'error' for i in result['issues']))
+
+
+    def test_personal_spreads_continue_after_general_ones(self):
+        result = self.build(split_personal(), students=6)
+        spreads = result['variant_spreads']['student:s2']
+        order = [spreads[k]['section'] for k in result['variants'][2]['sequence']]
+        shown = lambda key: [e['text'] for k in result['variants'][2]['sequence'] for e in spreads[k]['elements'] if e['key'].split('/')[-1] == key]
+        self.assertEqual(shown('who'), ['Ученик 0', 'Ученик 1'])
+        self.assertEqual(shown('who2'), ['Ученик 3', 'Ученик 4', 'Ученик 5'])
+        self.assertLess(order.index('general'), order.index('others2'))
 
 
 class FlexibleCollageTests(unittest.TestCase):
@@ -215,6 +237,7 @@ class ValidationTests(unittest.TestCase):
     def test_v2_documents_are_accepted_and_checked(self):
         self.assertEqual(self.post(master()).status_code, 201)
         self.assertEqual(self.post(split_master()).status_code, 201)
+        self.assertEqual(self.post(split_personal()).status_code, 201)
         bad = []
         doc = master(); doc['sections'][2]['spreads'][0]['role'] = 'middle'; bad.append(doc)
         doc = master(); doc['sections'][2]['list']['min'] = 20; bad.append(doc)
@@ -223,10 +246,11 @@ class ValidationTests(unittest.TestCase):
         doc = master(); doc['layout'] = 'magazine'; bad.append(doc)
         doc = master(); doc['sections'][3]['spreads'][0]['pages'][1]['layers'] = [flex('fx', 3, 2)]; bad.append(doc)
         doc = master(); del doc['sections'][2]['list']; bad.append(doc)
-        doc = master(); doc['sections'][2]['list']['limit'] = 2; bad.append(doc)
-        doc = split_master(); doc['sections'][4]['list']['continues'] = 'teachers'; bad.append(doc)
-        doc = split_master(); doc['sections'][4]['list']['continues'] = 'nowhere'; bad.append(doc)
-        doc = split_master(); doc['sections'][2]['list']['limit'] = 0; bad.append(doc)
+        doc = master(); doc['sections'][2]['limit'] = 2; bad.append(doc)
+        doc = split_master(); doc['sections'][4]['continues'] = 'teachers'; bad.append(doc)
+        doc = split_master(); doc['sections'][4]['continues'] = 'nowhere'; bad.append(doc)
+        doc = split_master(); doc['sections'][2]['limit'] = 0; bad.append(doc)
+        doc = split_personal(); doc['sections'][-1]['people'] = 'all'; bad.append(doc)
         doc = split_master(); doc['sections'].append({**deepcopy(doc['sections'][4]), 'id': 'students3'}); bad.append(doc)
         for doc in bad:
             self.assertEqual(self.post(doc).status_code, 422)

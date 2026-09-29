@@ -4,7 +4,7 @@ import math
 import re
 from itertools import permutations
 from .layout_engine import canonical_hash
-from .master_plan import ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people
+from .master_plan import ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people, personal_take
 from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, categories_of, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
 from . import auto_text
@@ -237,18 +237,21 @@ def blocks_pages(section, snapshot, owner, issue, lists=None):
     pages = {p['id']: p for s in section['spreads'] for p in s['pages']}
     if section.get('cover') or section['kind'] == 'fixed':
         return [(p, None, None, 0) for s in section['spreads'] for p in s['pages']]
-    if section['kind'] == 'repeat':
-        by_id = {s['id']: s for s in snapshot['students']}
-        ids = block_people(section, [s['id'] for s in snapshot['students']], owner['id'] if owner else None)
-        return [(p, by_id[i], None, 0) for i in ids for s in section['spreads'] for p in s['pages']]
-    settings = section['list']
-    start, source = 0, settings.get('continues')
+    start, source = 0, section.get('continues')
     if source:
         if source not in lists:
             issue(PLAN_ISSUES['parts-order'][0], section['id'], PLAN_ISSUES['parts-order'][1])
             return []
         records, start = lists[source]
-    else:
+    if section['kind'] == 'repeat':
+        by_id = {s['id']: s for s in snapshot['students']}
+        if not source:
+            records = block_people(section, [s['id'] for s in snapshot['students']], owner['id'] if owner else None)
+        ids = records[start:start + personal_take(section, len(records) - start)]
+        lists[section['id']] = (records, start + len(ids))
+        return [(p, by_id[i], None, 0) for i in ids for s in section['spreads'] for p in s['pages']]
+    settings = section['list']
+    if not source:
         records = snapshot[settings['source']][:]
         if settings['source'] == 'teachers' and settings.get('excludeLead') and any(
                 l['type'] == 'photo' and not l.get('hidden') and l['source'] == 'lead' for p in pages.values() for l in p['layers']):

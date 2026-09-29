@@ -4,8 +4,8 @@ Mirrors web/master-plan-core.js, which the editor uses for its preview; tests/te
 them equal. A block is fixed (every spread once), a list (vignettes of students or teachers) or personal (its
 spreads repeat per person). Spreads of a list block have roles: intro and outro appear once, repeat spreads cycle
 while people remain, and the last spread replaces a repeat spread the list would fill only partly.
-A list may be split into parts with other blocks between them: a part stops after ``list.limit`` spreads, and the
-block whose ``list.continues`` names it takes the people from where it stopped.
+A list or personal block may be split into parts with other blocks between them: a part stops after ``limit``
+spreads, and the block whose ``continues`` names it takes the people from where it stopped.
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def list_plan(section, n, cap):
     pages = max(math.ceil(n / cap), min(preferred, max(1, n // minimum))) if n else 1
     pages = max(pages, fixed)
     whole = pages
-    limit = max(0, math.floor(float(settings.get('limit') or 0) + 0.5))
+    limit = part_limit(section)
     if n and limit and cycle_has_grid:
         room = fixed
         for i in range(limit - len(intro) - len(outro)):
@@ -116,6 +116,16 @@ def _finish(sequence, counts, issues, taken):
             part += 1
         spreads.append({'spread': spread['id'], 'role': role_of(spread), 'pages': pages})
     return {'spreads': spreads, 'counts': counts, 'taken': taken, 'issues': issues}
+
+
+def part_limit(section):
+    return max(0, math.floor(float(section.get('limit') or 0) + 0.5))  # Math.round in the editor
+
+
+def personal_take(section, n):
+    """How many of n people a part of a split personal block takes: whole people, as many as fit in its spreads."""
+    limit, per = part_limit(section), max(1, len(section.get('spreads') or []))
+    return min(n, max(1, limit // per)) if limit else n
 
 
 def people(section, students, owner):
