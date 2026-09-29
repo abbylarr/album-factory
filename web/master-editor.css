@@ -5896,3 +5896,113 @@ button.block-issue:focus-visible {
   transform: skewX(-13deg);
   font-style: normal;
 }
+/* categories lane */
+.pick-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pick-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+.pick-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #85818b;
+  white-space: nowrap;
+}
+.pick-rows .pick-picker {
+  margin: 0;
+  min-width: 0;
+}
+.pick-rows .pick-trigger {
+  height: 32px;
+  padding: 0 8px 0 4px;
+  border-radius: 8px;
+}
+.pick-rows .pick-trigger > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick-rows .pick-trigger .cat-pic {
+  width: 32px;
+  height: 24px;
+}
+.pick-edit {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+}
+.pick-edit:hover {
+  background: #f3eafa;
+  color: #7712b3;
+}
+.pick-edit svg {
+  width: 15px;
+  height: 15px;
+}
+.pick-row > .pick-who {
+  grid-column: 2 / -1;
+  margin: 0;
+}
+.pick-who button {
+  height: 26px;
+  padding: 0 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pick-label .info-tip::after {
+  left: -60px;
+  transform: none;
+}
+.cat-pic {
+  display: block;
+  flex: none;
+  width: 30px;
+  height: 22px;
+}
+.cell-sources .menu-row.cat-row {
+  min-height: 32px;
+}
+.cell-sources .menu-divider {
+  width: 100%;
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid #f0ecf2;
+}
+.cell-sources .menu-divider + .menu-label {
+  margin-top: 4px;
+}
+.pick-rows .cell-sources.pick-menu {
+  left: auto;
+  right: -38px;
+  width: 236px;
+  overscroll-behavior: contain;
+}
+.category-group {
+  margin: 14px 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #a09aa4;
+}
+#photo-categories h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

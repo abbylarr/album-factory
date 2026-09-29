@@ -14,7 +14,8 @@ from . import general_meta as gm
 PEOPLE = ('none', 'solo', 'few', 'subgroup', 'class')
 FIELDS = ('people', 'include', 'scale', 'tags', 'style', 'quality')
 FILTERS = ('people', 'scale', 'tags', 'style', 'quality')
-# Built-in categories. The designer may override filters and names per master (``photoCategories``).
+# Built-in categories. The studio may edit, remove or add to them: one list for all its designs and packages,
+# frozen into each edition as ``photoCategories`` (see ``categories_of``).
 CATEGORIES = {
     'any': {'name': 'Любое', 'filters': {}},
     'class': {'name': 'Весь класс', 'filters': {'people': ['class'], 'style': 'posed'}},
@@ -67,11 +68,14 @@ def people_of(entry):
     return 'solo' if count == 1 else 'few' if count <= 3 else 'subgroup'
 
 
-def categories_of(master):
-    """Built-in categories with the master's edits applied and its removed ones left out, then its own categories."""
-    removed = set((master or {}).get('removedCategories') or ())
+def categories_of(settings):
+    """Built-in categories with the studio's edits applied and its removed ones left out, then its own categories.
+
+    ``settings`` is the studio list ``{'items': [{id, name, filters…}], 'removed': [built-in ids]}``.
+    """
+    removed = set((settings or {}).get('removed') or ())
     result = {key: {**value, 'filters': dict(value['filters'])} for key, value in CATEGORIES.items() if key not in removed}
-    for item in (master or {}).get('photoCategories') or []:
+    for item in (settings or {}).get('items') or []:
         base = result.get(item['id'], {})
         result[item['id']] = {**base, 'name': item.get('name') or base.get('name', ''),
                               'filters': {k: item.get(k) for k in FILTERS if item.get(k)}}
