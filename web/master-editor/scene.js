@@ -708,8 +708,9 @@ function animateZoom(target, point = hostCenter()) {
     start = performance.now(),
     duration = 140;
   if (Math.abs(to - from) < 1e-6) return;
+  if (document.hidden) return zoomAt(to, point);
   const frame = now => {
-    const t = Math.min(1, (now - start) / duration),
+    const t = Math.min(1, Math.max(0, now - start) / duration),
       eased = 1 - Math.pow(1 - t, 3);
     zoomAt(from * Math.pow(to / from, eased), point);
     if (t < 1) zoomAnimation = requestAnimationFrame(frame);

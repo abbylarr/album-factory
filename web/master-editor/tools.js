@@ -622,27 +622,38 @@ function property(key, value) {
     }
   });
 }
+/* One object aligns to the printed (trimmed) page it sits on — on the cover also the spine; several align to each other. */
 function align(which) {
   commit(() => {
-    const list = chosen();
-    if (!list.length) return;
-    let minX = 0,
-      minY = 0,
-      maxX = pageWidth(),
-      maxY = pageHeight();
-    if (list.length > 1) {
-      minX = Math.min(...list.map(l => l.box.x));
-      minY = Math.min(...list.map(l => l.box.y));
-      maxX = Math.max(...list.map(l => l.box.x + l.box.w));
-      maxY = Math.max(...list.map(l => l.box.y + l.box.h));
-    }
-    for (const l of list) {
-      if (which === 'left') l.box.x = minX;
-      if (which === 'cx') l.box.x = (minX + maxX - l.box.w) / 2;
-      if (which === 'right') l.box.x = maxX - l.box.w;
-      if (which === 'top') l.box.y = minY;
-      if (which === 'cy') l.box.y = (minY + maxY - l.box.h) / 2;
-      if (which === 'bottom') l.box.y = maxY - l.box.h;
+    const boxes = chosen()
+      .filter(l => !l.locked)
+      .map(l => {
+        const x = layerOffset(l, layerSide(l)) + l.box.x,
+          w = layerW(l);
+        return { l, x, y: l.box.y, w, h: l.box.h };
+      });
+    if (!boxes.length) return;
+    const area =
+      boxes.length > 1
+        ? {
+            left: Math.min(...boxes.map(b => b.x)),
+            top: Math.min(...boxes.map(b => b.y)),
+            right: Math.max(...boxes.map(b => b.x + b.w)),
+            bottom: Math.max(...boxes.map(b => b.y + b.h)),
+          }
+        : pageRectAt(boxes[0].x + boxes[0].w / 2, !!section().cover);
+    for (const b of boxes) {
+      let x = b.x,
+        y = b.y;
+      if (which === 'left') x = area.left;
+      if (which === 'cx') x = (area.left + area.right - b.w) / 2;
+      if (which === 'right') x = area.right - b.w;
+      if (which === 'top') y = area.top;
+      if (which === 'cy') y = (area.top + area.bottom - b.h) / 2;
+      if (which === 'bottom') y = area.bottom - b.h;
+      b.l.box.x = round(b.l.box.x + x - b.x);
+      b.l.box.y = round(y);
+      settle(b.l);
     }
   });
 }
