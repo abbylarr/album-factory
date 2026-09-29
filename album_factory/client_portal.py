@@ -2,6 +2,7 @@
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import json
 import secrets
 
 from . import mvp, order_stages
@@ -30,6 +31,23 @@ class Selection(BaseModel):
     quote: str = Field(default='', max_length=300)
 
 
+class NameFix(BaseModel):
+    person_id: str
+    first_name: str = Field(min_length=1, max_length=50)
+    last_name: str = Field(min_length=1, max_length=50)
+    comment: str = Field(default='', max_length=1000)
+
+
+class SpreadFix(BaseModel):
+    variant: str | None = None
+    index: int = Field(ge=0)
+    comment: str = Field(min_length=1, max_length=1000)
+
+
+class PhotosLink(BaseModel):
+    url: str = Field(default='', max_length=500)
+
+
 def init(con):
     con.executescript('''
     CREATE TABLE IF NOT EXISTS client_links (
@@ -39,7 +57,47 @@ def init(con):
       person_id TEXT PRIMARY KEY REFERENCES persons(id) ON DELETE CASCADE,
       photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
       first_name TEXT NOT NULL, last_name TEXT NOT NULL, quote TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS layout_corrections (
+      id TEXT PRIMARY KEY, order_id TEXT NOT NULL, revision TEXT NOT NULL, kind TEXT NOT NULL,
+      person_id TEXT, old_name TEXT NOT NULL DEFAULT '', new_name TEXT NOT NULL DEFAULT '',
+      variant TEXT NOT NULL DEFAULT '', spread_key TEXT NOT NULL DEFAULT '', spread_label TEXT NOT NULL DEFAULT '',
+      comment TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS client_extras (
+      order_id TEXT PRIMARY KEY, photos_url TEXT NOT NULL DEFAULT '');
     ''')
+
+
+def forget(con, order_id):
+    con.execute('DELETE FROM layout_corrections WHERE order_id=?', (order_id,))
+    con.execute('DELETE FROM client_extras WHERE order_id=?', (order_id,))
+
+
+def open_corrections(con, order_id):
+    """Requests the class sent for the currently published layout and the photographer has not closed."""
+    return [dict(r) for r in con.execute('''SELECT c.id,c.kind,c.person_id,c.old_name,c.new_name,c.variant,c.spread_label,
+        c.comment,c.created_at FROM layout_corrections c JOIN publications p ON p.order_id=c.order_id AND p.revision=c.revision
+        WHERE c.order_id=? AND c.status='open' ORDER BY c.created_at,c.id''', (order_id,))]
+
+
+def open_counts(con):
+    return dict(con.execute('''SELECT c.order_id, COUNT(*) FROM layout_corrections c
+        JOIN publications p ON p.order_id=c.order_id AND p.revision=c.revision
+        WHERE c.status='open' GROUP BY c.order_id''').fetchall())
+
+
+def client_stage(con, order):
+    """What the class sees: selection → waiting for layout → approval → print → delivery → done."""
+    stage = order['stage']
+    published = con.execute('SELECT 1 FROM publications WHERE order_id=?', (order['id'],)).fetchone() is not None
+    if stage in ('new', 'photos', 'forms'):
+        return 'selection'
+    if stage == 'layout':
+        return 'updating' if published else 'layout'
+    if stage == 'approval':
+        approved = con.execute('''SELECT 1 FROM approvals a JOIN publications p ON p.order_id=a.order_id
+            WHERE a.order_id=? AND a.approved_at>=p.published_at''', (order['id'],)).fetchone()
+        return 'approved' if approved else 'approval'
+    return stage
 
 
 def progress_by_order(con, order_id=None):
@@ -143,9 +201,15 @@ def install(app, s):
                 person['submitted'] = bool(person['submitted'])
             photos = [dict(r) for r in con.execute("SELECT id,person_id FROM photos WHERE order_id=? AND person_id IS NOT NULL AND status='ready' ORDER BY created_at,id", (order['id'],))]
             published = con.execute("SELECT 1 FROM publications WHERE order_id=?", (order['id'],)).fetchone()
+            extras = con.execute('SELECT photos_url FROM client_extras WHERE order_id=?', (order['id'],)).fetchone()
+            delivery = con.execute('SELECT mode,carrier,address FROM deliveries WHERE order_id=?', (order['id'],)).fetchone()
             return {'school': order['school'], 'class_name': order['class_name'], 'persons': people, 'photos': photos,
                     'completed': sum(bool(p['photo_id']) for p in people), 'quote_limit': mvp.quote_limit(con, order['id']),
-                    'layout_published': published is not None, 'stage': 'selection'}
+                    'layout_published': published is not None, 'stage': client_stage(con, order),
+                    'manager': mvp.has_level(con, request, order['id'], 'manage'),
+                    'photos_url': extras['photos_url'] if extras else '',
+                    'delivery': dict(delivery) if delivery and delivery['mode'] else None,
+                    'corrections': open_corrections(con, order['id'])}
 
     @app.put('/client-api/{token}/persons/{person_id}')
     def select(token: str, person_id: str, payload: Selection, request: Request):
@@ -182,3 +246,115 @@ def install(app, s):
             if not con.execute("SELECT id FROM photos WHERE id=? AND order_id=? AND person_id IS NOT NULL AND status='ready'", (photo_id, order['id'])).fetchone():
                 raise HTTPException(404, 'Фотография не найдена')
         return s.media(photo_id, variant)
+
+    def published_view(con, order_id):
+        row = con.execute('SELECT revision, document FROM publications WHERE order_id=?', (order_id,)).fetchone()
+        if row is None:
+            raise HTTPException(409, 'Макет ещё не опубликован')
+        return row['revision'], mvp.client_layout_view(json.loads(row['document']))
+
+    def require_review(con, order):
+        if client_stage(con, order) != 'approval':
+            raise HTTPException(409, 'Сейчас макет нельзя изменить: он не на согласовании')
+
+    @app.post('/client-api/{token}/corrections/name', status_code=201)
+    def fix_name(token: str, payload: NameFix, request: Request):
+        first, last = payload.first_name.strip(), payload.last_name.strip()
+        if not first or not last:
+            raise HTTPException(422, 'Укажите имя и фамилию')
+        with s.db() as con:
+            con.execute('BEGIN IMMEDIATE')
+            order = order_for(con, token)
+            mvp.require_level(con, request, order['id'], 'manage')
+            require_review(con, order)
+            revision, _view = published_view(con, order['id'])
+            person = con.execute('''SELECT p.id, COALESCE(NULLIF(trim(c.first_name||' '||c.last_name),''), p.name) AS name
+                FROM persons p LEFT JOIN client_selections c ON c.person_id=p.id WHERE p.id=? AND p.order_id=?''',
+                (payload.person_id, order['id'])).fetchone()
+            if person is None:
+                raise HTTPException(404, 'Участник не найден')
+            new_name = first + ' ' + last
+            if new_name == person['name'] and not payload.comment.strip():
+                raise HTTPException(422, 'Имя не изменилось')
+            # The corrected name is kept so the next layout build already uses it.
+            con.execute('UPDATE client_selections SET first_name=?, last_name=? WHERE person_id=?', (first, last, person['id']))
+            con.execute('UPDATE persons SET name=? WHERE id=?', (new_name, person['id']))
+            fix_id = s.uid()
+            con.execute('''INSERT INTO layout_corrections (id,order_id,revision,kind,person_id,old_name,new_name,comment,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?)''', (fix_id, order['id'], revision, 'name', person['id'], person['name'] or '',
+                new_name, payload.comment.strip(), s.now()))
+        return {'id': fix_id}
+
+    @app.post('/client-api/{token}/corrections/spread', status_code=201)
+    def fix_spread(token: str, payload: SpreadFix, request: Request):
+        comment = payload.comment.strip()
+        if not comment:
+            raise HTTPException(422, 'Опишите, что нужно исправить')
+        with s.db() as con:
+            con.execute('BEGIN IMMEDIATE')
+            order = order_for(con, token)
+            mvp.require_level(con, request, order['id'], 'manage')
+            require_review(con, order)
+            revision, view = published_view(con, order['id'])
+            variant = next((v for v in view['variants'] if v['owner'] == payload.variant), None)
+            if variant is None or payload.index >= len(variant['spreads']):
+                raise HTTPException(404, 'Разворот не найден')
+            spread = variant['spreads'][payload.index]
+            fix_id = s.uid()
+            con.execute('''INSERT INTO layout_corrections (id,order_id,revision,kind,variant,spread_key,spread_label,comment,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?)''', (fix_id, order['id'], revision, 'spread', variant['name'], str(spread.get('key') or ''),
+                f"Разворот {payload.index + 1} из {len(variant['spreads'])}", comment, s.now()))
+        return {'id': fix_id}
+
+    @app.delete('/client-api/{token}/corrections/{fix_id}')
+    def withdraw(token: str, fix_id: str, request: Request):
+        with s.db() as con:
+            order = order_for(con, token)
+            mvp.require_level(con, request, order['id'], 'manage')
+            gone = con.execute("DELETE FROM layout_corrections WHERE id=? AND order_id=? AND status='open'", (fix_id, order['id'])).rowcount
+            if not gone:
+                raise HTTPException(404, 'Правка не найдена')
+        return {'ok': True}
+
+    @app.post('/client-api/{token}/manage/logout')
+    def leave_manage(token: str, request: Request):
+        from fastapi.responses import JSONResponse
+        cookie = request.cookies.get('album_manage')
+        with s.db() as con:
+            order = order_for(con, token)
+            if cookie:
+                con.execute('DELETE FROM class_sessions WHERE token_hash=? AND order_id=?', (mvp.token_hash(cookie), order['id']))
+        response = JSONResponse({'ok': True})
+        response.delete_cookie('album_manage', path='/')
+        return response
+
+    @app.get('/api/orders/{order_id}/corrections')
+    def corrections(order_id: str):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            return open_corrections(con, order_id)
+
+    @app.post('/api/orders/{order_id}/corrections/{fix_id}/resolve')
+    def resolve(order_id: str, fix_id: str):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            if not con.execute("UPDATE layout_corrections SET status='resolved' WHERE id=? AND order_id=?", (fix_id, order_id)).rowcount:
+                raise HTTPException(404, 'Правка не найдена')
+        return {'ok': True}
+
+    @app.put('/api/orders/{order_id}/photos-link')
+    def photos_link(order_id: str, payload: PhotosLink):
+        url = payload.url.strip()
+        if url and not url.startswith(('https://', 'http://')):
+            raise HTTPException(422, 'Ссылка должна начинаться с https://')
+        with s.db() as con:
+            s.require_order(con, order_id)
+            con.execute('INSERT INTO client_extras VALUES (?,?) ON CONFLICT(order_id) DO UPDATE SET photos_url=excluded.photos_url', (order_id, url))
+        return {'url': url}
+
+    @app.get('/api/orders/{order_id}/photos-link')
+    def current_photos_link(order_id: str):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            row = con.execute('SELECT photos_url FROM client_extras WHERE order_id=?', (order_id,)).fetchone()
+        return {'url': row['photos_url'] if row else ''}
