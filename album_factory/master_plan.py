@@ -4,6 +4,8 @@ Mirrors web/master-plan-core.js, which the editor uses for its preview; tests/te
 them equal. A block is fixed (every spread once), a list (vignettes of students or teachers) or personal (its
 spreads repeat per person). Spreads of a list block have roles: intro and outro appear once, repeat spreads cycle
 while people remain, and the last spread replaces a repeat spread the list would fill only partly.
+A list may be split into parts with other blocks between them: a part stops after ``list.limit`` spreads, and the
+block whose ``list.continues`` names it takes the people from where it stopped.
 """
 from __future__ import annotations
 
@@ -45,9 +47,9 @@ def list_plan(section, n, cap):
     intro, repeat, outro = pick('intro'), pick('repeat'), pick('outro')
     last = next(iter(pick('last')), None)
     if not any(grid_pages(s) for s in spreads):
-        return _finish([(s, 0) for s in spreads], [], ['no-grid'])
+        return _finish([(s, 0) for s in spreads], [], ['no-grid'], 0)
     if not cap:
-        return _finish([(s, 0) for s in intro + repeat[:1] + outro], [], ['no-fit'])
+        return _finish([(s, 0) for s in intro + repeat[:1] + outro], [], ['no-fit'], 0)
     fixed = sum(grid_pages(s) for s in intro + outro)
     cycle_has_grid = any(grid_pages(s) for s in repeat)
     target = max(1, math.floor(float(section.get('target') or len(spreads)) + 0.5))  # Math.round in the editor
@@ -58,6 +60,14 @@ def list_plan(section, n, cap):
     preferred = max(1, preferred)
     pages = max(math.ceil(n / cap), min(preferred, max(1, n // minimum))) if n else 1
     pages = max(pages, fixed)
+    whole = pages
+    limit = max(0, math.floor(float(settings.get('limit') or 0) + 0.5))
+    if n and limit and cycle_has_grid:
+        room = fixed
+        for i in range(limit - len(intro) - len(outro)):
+            room += grid_pages(repeat[i % len(repeat)])
+        pages = min(pages, max(room, fixed, 1))
+    cut = pages < whole
     middle, rest, turn = [], pages - fixed, 0
     while rest > 0:
         if not cycle_has_grid:
@@ -85,15 +95,15 @@ def list_plan(section, n, cap):
             middle.append((spread, rest))
             issues.append('half')
         break
-    counts = distribute(n, max(pages, 1)) if n else [0]
+    counts = [0] if not n else distribute(n, whole)[:pages] if cut else distribute(n, max(pages, 1))
     if n and any(c < minimum for c in counts):
         issues.append('below-min')
     if n and any(c > cap for c in counts):
         issues.append('overflow')
-    return _finish([(s, grid_pages(s)) for s in intro] + middle + [(s, grid_pages(s)) for s in outro], counts, issues)
+    return _finish([(s, grid_pages(s)) for s in intro] + middle + [(s, grid_pages(s)) for s in outro], counts, issues, sum(counts))
 
 
-def _finish(sequence, counts, issues):
+def _finish(sequence, counts, issues, taken):
     part, spreads = 0, []
     for spread, take in sequence:
         used, pages = 0, []
@@ -105,7 +115,7 @@ def _finish(sequence, counts, issues):
             pages.append({'page': page['id'], 'part': part})
             part += 1
         spreads.append({'spread': spread['id'], 'role': role_of(spread), 'pages': pages})
-    return {'spreads': spreads, 'counts': counts, 'issues': issues}
+    return {'spreads': spreads, 'counts': counts, 'taken': taken, 'issues': issues}
 
 
 def people(section, students, owner):
@@ -127,4 +137,5 @@ ISSUES = {
     'half': ('warning', 'Список закончился на середине разворота — добавьте шаблон «Последний неполный»'),
     'below-min': ('warning', 'Карточек на странице меньше заданного минимума'),
     'overflow': ('error', 'Карточки не помещаются на страницу'),
+    'parts-order': ('error', 'Продолжение списка стоит раньше его начала'),
 }

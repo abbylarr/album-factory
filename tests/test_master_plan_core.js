@@ -37,3 +37,22 @@ assert.deepEqual(plan.spreads.map(s=>s.role),['intro','repeat']);
 assert.deepEqual(plan.counts,[7,7,6]);
 assert.deepEqual(plan.spreads.flatMap(s=>s.pages.map(p=>p.part)),[null,0,1,2]);
 console.log('Upgraded teachers flow: OK');
+
+/* Split lists: a continuation follows a list block of the same people; a limit stays only on a continued block. */
+const split={sections:[
+  {id:'cover',cover:true,kind:'fixed',spreads:[]},
+  {id:'a',kind:'flow',list:{source:'students',min:4,max:12,limit:3},spreads:[]},
+  {id:'g',kind:'fixed',spreads:[]},
+  {id:'b',kind:'flow',list:{source:'teachers',min:4,max:12,continues:'a'},spreads:[]},
+  {id:'c',kind:'flow',list:{source:'students',min:4,max:12,continues:'a'},spreads:[]},
+  {id:'d',kind:'flow',list:{source:'students',min:4,max:12,limit:2},spreads:[]}]};
+assert.equal(P.linkParts(split),true);
+assert.equal(split.sections[3].list.source,'students','the continuation lists the same people');
+assert(!('continues' in split.sections[4].list),'one continuation per block');
+assert.equal(split.sections[1].list.limit,3);
+assert(!('limit' in split.sections[5].list),'no limit without a continuation');
+assert.equal(P.linkParts(split),false);
+split.sections.splice(1,1);
+assert.equal(P.linkParts(split),true);
+assert(!('continues' in split.sections[2].list),'a continuation of a removed block becomes a whole list');
+console.log('Split list parts: OK');

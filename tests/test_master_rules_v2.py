@@ -112,6 +112,60 @@ class BlockRulesTests(unittest.TestCase):
         self.assertFalse(any('blank' in s for s in plain['variant_spreads']['student:s0'].values()))
 
 
+def split_master(limit=1):
+    """Students split into two parts with a general block between them."""
+    doc = master()
+    first = doc['sections'][2]
+    first['list']['limit'] = limit
+    rest = deepcopy(first)
+    rest.update(id='students2', name='Класс, продолжение')
+    rest['list'] = {**first['list'], 'continues': 'students'}
+    del rest['list']['limit']
+    for spread in rest['spreads']:
+        spread['id'] += 'b'
+        for p in spread['pages']:
+            p['id'] += 'b'
+            for layer in p['layers']:
+                layer['id'] += 'b'
+    general = {'id': 'general', 'name': 'Общие', 'kind': 'fixed', 'spreads': [{'id': 'gen', 'pages': [page('genl'), page('genr')]}]}
+    doc['sections'][3:3] = [general, rest]
+    return doc
+
+
+class SplitListTests(unittest.TestCase):
+    def build(self, doc, **counts):
+        return generate({'id': 'v2', 'version': 1, 'master': doc}, snapshot(**counts), measurer())
+
+    def test_parts_continue_the_list_without_repeats(self):
+        for n in (8, 30, 54, 80):
+            result = self.build(split_master(), students=n)
+            first, rest = names(result, 'student:s0', 'students'), names(result, 'student:s0', 'students2')
+            self.assertEqual(first + rest, [f'Ученик {i}' for i in range(n)], n)
+            order = [spread['section'] for spread in (result['variant_spreads']['student:s0'][k] for k in result['variants'][0]['sequence'])]
+            self.assertLess(order.index('general'), order.index('students2') if 'students2' in order else len(order))
+            # The first part stops after one spread: two vignette pages at most.
+            self.assertLessEqual(sum(1 for s in result['variant_spreads']['student:s0'].values() if s['section'] == 'students'), 1)
+
+    def test_pages_stay_even_across_parts(self):
+        # 54 students, twelve per page: five pages of about eleven; the first part takes the first two pages.
+        result = self.build(split_master(), students=54)
+        self.assertEqual(len(names(result, 'student:s0', 'students')), 22)
+        self.assertEqual(len(names(result, 'student:s0', 'students2')), 32)
+
+    def test_a_short_list_leaves_the_continuation_out(self):
+        result = self.build(split_master(limit=3), students=10)
+        self.assertEqual(len(names(result, 'student:s0', 'students')), 10)
+        self.assertEqual([p['spreads'] for p in result['plan'] if p['section'] == 'students2'], [0])
+
+    def test_a_continuation_above_its_start_is_reported(self):
+        doc = split_master()
+        doc['sections'].insert(2, doc['sections'].pop(4))
+        result = self.build(doc, students=30)
+        self.assertEqual(names(result, 'student:s0', 'students2'), [])
+        self.assertEqual(len(names(result, 'student:s0', 'students')), 20)
+        self.assertTrue(any(i['key'] == 'students2' and i['level'] == 'error' for i in result['issues']))
+
+
 class FlexibleCollageTests(unittest.TestCase):
     def doc(self, pick=None, low=1, high=4):
         doc = master()
@@ -160,6 +214,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_v2_documents_are_accepted_and_checked(self):
         self.assertEqual(self.post(master()).status_code, 201)
+        self.assertEqual(self.post(split_master()).status_code, 201)
         bad = []
         doc = master(); doc['sections'][2]['spreads'][0]['role'] = 'middle'; bad.append(doc)
         doc = master(); doc['sections'][2]['list']['min'] = 20; bad.append(doc)
@@ -168,6 +223,11 @@ class ValidationTests(unittest.TestCase):
         doc = master(); doc['layout'] = 'magazine'; bad.append(doc)
         doc = master(); doc['sections'][3]['spreads'][0]['pages'][1]['layers'] = [flex('fx', 3, 2)]; bad.append(doc)
         doc = master(); del doc['sections'][2]['list']; bad.append(doc)
+        doc = master(); doc['sections'][2]['list']['limit'] = 2; bad.append(doc)
+        doc = split_master(); doc['sections'][4]['list']['continues'] = 'teachers'; bad.append(doc)
+        doc = split_master(); doc['sections'][4]['list']['continues'] = 'nowhere'; bad.append(doc)
+        doc = split_master(); doc['sections'][2]['list']['limit'] = 0; bad.append(doc)
+        doc = split_master(); doc['sections'].append({**deepcopy(doc['sections'][4]), 'id': 'students3'}); bad.append(doc)
         for doc in bad:
             self.assertEqual(self.post(doc).status_code, 422)
         legacy = master(); del legacy['rulesVersion']

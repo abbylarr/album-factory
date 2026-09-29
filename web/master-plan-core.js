@@ -3,7 +3,9 @@
 
    A block is fixed (every spread once), a list (vignettes of students or teachers) or personal (its spreads repeat per person).
    Spreads of a list block have roles: intro and outro appear once, repeat spreads cycle while people remain,
-   and the last spread replaces a repeat spread that the list would fill only partly. */
+   and the last spread replaces a repeat spread that the list would fill only partly.
+   A list may be split into parts with other blocks between them: a part stops after list.limit spreads, and the block
+   whose list.continues names it takes the people from where it stopped. */
 (function(root){
   const ROLES=['intro','repeat','last','outro'];
   const PEOPLE=['all','others','owner','off'];
@@ -17,15 +19,17 @@
 
   /* Spreads of a list block and which part of the list each page shows.
      n — people in the list, cap — cards that fit the tightest vignette of the block.
-     Result: {spreads:[{spread,role,pages:[{page,part}]}], counts:[cards per part], issues:[codes]}.
-     part is the index into counts, or null for a page without a vignette or a vignette left empty. */
+     Result: {spreads:[{spread,role,pages:[{page,part}]}], counts:[cards per part], taken, issues:[codes]}.
+     part is the index into counts, or null for a page without a vignette or a vignette left empty.
+     taken — how many of the n people the block placed: fewer than n only when list.limit stops it; the pages are then
+     filled as evenly as if the whole list ran on, and the rest is left to the block that continues the list. */
   function listPlan(section,n,cap){
     const list={...LIST_DEFAULT,...(section.list||{})},min=Math.max(1,Number(list.min)||1),spreads=section.spreads||[],issues=[];
     const once=spread=>({spread,take:gridPages(spread)});
     const pick=role=>spreads.filter(s=>roleOf(s)===role);
     const intro=pick('intro'),repeat=pick('repeat'),outro=pick('outro'),last=pick('last')[0]||null;
-    if(!spreads.some(s=>gridPages(s)))return finish(spreads.map(s=>({spread:s,take:0})),[],['no-grid']);
-    if(!cap)return finish([...intro,...repeat.slice(0,1),...outro].map(s=>({spread:s,take:0})),[],['no-fit']);
+    if(!spreads.some(s=>gridPages(s)))return finish(spreads.map(s=>({spread:s,take:0})),[],['no-grid'],0);
+    if(!cap)return finish([...intro,...repeat.slice(0,1),...outro].map(s=>({spread:s,take:0})),[],['no-fit'],0);
     const fixed=[...intro,...outro].reduce((sum,s)=>sum+gridPages(s),0),cycleHasGrid=repeat.some(s=>gridPages(s));
     /* Pages the designer aims for: the grid pages of a block with `target` spreads. */
     const target=Math.max(1,Math.round(Number(section.target)||spreads.length));
@@ -33,6 +37,12 @@
     preferred=Math.max(1,preferred);
     let pages=n?Math.max(Math.ceil(n/cap),Math.min(preferred,Math.max(1,Math.floor(n/min)))):1;
     pages=Math.max(pages,fixed);
+    const whole=pages,limit=Math.max(0,Math.round(Number(list.limit))||0);
+    if(n&&limit&&cycleHasGrid){
+      let room=fixed;for(let i=0;i<limit-intro.length-outro.length;i++)room+=gridPages(repeat[i%repeat.length]);
+      pages=Math.min(pages,Math.max(room,fixed,1));
+    }
+    const cut=pages<whole;
     const middle=[];let rest=pages-fixed,turn=0;
     while(rest>0){
       if(!cycleHasGrid){
@@ -49,15 +59,30 @@
       else{middle.push({spread,take:rest});issues.push('half');}
       break;
     }
-    const counts=n?distribute(n,Math.max(pages,1)):[0];
+    const counts=!n?[0]:cut?distribute(n,whole).slice(0,pages):distribute(n,Math.max(pages,1));
     if(n&&counts.some(c=>c<min))issues.push('below-min');
     if(n&&counts.some(c=>c>cap))issues.push('overflow');
-    return finish([...intro.map(once),...middle,...outro.map(once)],counts,issues);
+    return finish([...intro.map(once),...middle,...outro.map(once)],counts,issues,counts.reduce((a,b)=>a+b,0));
   }
-  function finish(sequence,counts,issues){
+  function finish(sequence,counts,issues,taken){
     let part=0;
     const spreads=sequence.map(({spread,take})=>{let used=0;return {spread:spread.id,role:roleOf(spread),pages:spread.pages.map(page=>{if(!hasGrid(page)||used>=take||part>=counts.length)return {page:page.id,part:null};used++;return {page:page.id,part:part++};})};});
-    return {spreads,counts,issues};
+    return {spreads,counts,taken,issues};
+  }
+
+  /* Keep the parts of split lists consistent: a continuation follows an existing list block of the same people,
+     one continuation per block, and a limit stays only on a block that is continued. Returns true on a change. */
+  function linkParts(doc){
+    let changed=false;const lists=(doc.sections||[]).filter(s=>!s.cover&&s.kind==='flow'),taken=new Set();
+    for(const s of doc.sections||[]){
+      const list=s.list;if(!list||!('continues' in list))continue;
+      const from=lists.find(x=>x.id===list.continues);
+      if(s.kind!=='flow'||!from||from===s||taken.has(from.id)){delete list.continues;changed=true;continue;}
+      taken.add(from.id);
+      if(from.list&&list.source!==from.list.source){list.source=from.list.source;changed=true;}
+    }
+    for(const s of doc.sections||[])if(s.list&&'limit' in s.list&&(s.kind!=='flow'||!taken.has(s.id))){delete s.list.limit;changed=true;}
+    return changed;
   }
 
   /* Whose personal spreads a block shows in the album of `owner` (ids in list order). */
@@ -100,5 +125,5 @@
     return true;
   }
 
-  root.MasterPlan={ROLES,PEOPLE,LIST_DEFAULT,roleOf,hasGrid,gridPages,distribute,listPlan,people,upgrade};
+  root.MasterPlan={ROLES,PEOPLE,LIST_DEFAULT,roleOf,hasGrid,gridPages,distribute,listPlan,linkParts,people,upgrade};
 })(typeof window!=='undefined'?window:globalThis);
