@@ -31,6 +31,7 @@ function spreadFor(d,owner,key){if(!key)return null;return String(key).startsWit
 const variant=()=>doc()?.variants.find(v=>v.owner===P.owner);
 const currentSpread=()=>spreadFor(doc(),P.owner,variant()?.sequence[P.spread]);
 const photoMeta=id=>P.photoIndex?.get(id);
+const photoSource=(meta,id,variant)=>meta?.url||`/media/${encodeURIComponent(id)}/${variant}${meta?.version?'?v='+encodeURIComponent(meta.version):''}`;
 const selectedElement=()=>currentSpread()?.elements.find(e=>e.key===P.selected);
 const interactive=e=>e.type==='photo'||e.type==='text';
 const personOf=owner=>String(owner||'').replace(/^(student|teacher):/,'');
@@ -140,7 +141,7 @@ function fontFamily(key){
 }
 function photoImage(e,live,thumb){
   const meta=photoMeta(e.photo),crop=live||e.crop;if(!meta||!crop)return '';
-  const src=meta.url||`/media/${encodeURIComponent(e.photo)}/${thumb?'thumb':'full'}`;
+  const src=photoSource(meta,e.photo,thumb?'thumb':'full');
   return `<img src="${esc(src)}" alt="" draggable="false" style="width:${meta.width/crop[2]*100}%;height:${meta.height/crop[3]*100}%;left:${-crop[0]/crop[2]*100}%;top:${-crop[1]/crop[3]*100}%">`;
 }
 function spreadMarkup(spread,d,{live=false,thumb=false}={}){
@@ -186,7 +187,7 @@ function renderCanvas(){
     const e=spread.elements.find(item=>item.key===P.crop.key),meta=e&&photoMeta(e.photo);
     const cover=spread.section==='cover'||String(spread.key).startsWith('cover[');
     if(e&&meta){const [bx,by,bw,bh]=e.box,[cx,cy,cw,ch]=P.crop.crop,[W,H]=cover?spread.size_mm||d.cover_size_mm||d.spread_size_mm:d.spread_size_mm,sx=bw/cw,sy=bh/ch;
-      ghost=`<img class="crop-ghost" alt="" src="${esc(meta.url||`/media/${encodeURIComponent(e.photo)}/full`)}" style="left:${(bx-cx*sx)/W*100}%;top:${(by-cy*sy)/H*100}%;width:${meta.width*sx/W*100}%;height:${meta.height*sy/H*100}%">`;}
+      ghost=`<img class="crop-ghost" alt="" src="${esc(photoSource(meta,e.photo,'full'))}" style="left:${(bx-cx*sx)/W*100}%;top:${(by-cy*sy)/H*100}%;width:${meta.width*sx/W*100}%;height:${meta.height*sy/H*100}%">`;}
   }
   inner.innerHTML=spreadMarkup(spread,d,{live:true});
   if(ghost)inner.querySelector('.proof-spread').insertAdjacentHTML('afterbegin',ghost);
@@ -249,7 +250,7 @@ function renderPeople(){
       const extra=v.sequence.length-usual;
       const badges=[extra?`<b class="badge spreads" title="Разворотов ${extra>0?'больше':'меньше'}, чем у остальных">${extra>0?'+':'−'}${Math.abs(extra)} р.</b>`:'',s.ownErrors?`<b class="badge error" title="Личные ошибки варианта">${s.ownErrors}</b>`:'',s.ownWarnings?`<b class="badge warning" title="Личные предупреждения варианта">${s.ownWarnings}</b>`:'',P.mode==='work'&&changed.has(v.owner)&&status.publication?'<b class="badge changed" title="Изменён после публикации">●</b>':''].join('');
       const state=P.mode!=='work'?'':review?.current?'<span class="check done" title="Проверен">✓</span>':review?'<span class="check stale" title="Изменён после проверки">!</span>':'<span class="check" aria-hidden="true"></span>';
-      return `<button type="button" class="person-row${v.owner===P.owner?' active':''}" data-owner="${esc(v.owner)}" aria-current="${v.owner===P.owner}">${portrait&&photoMeta(portrait)?`<img class="avatar" src="${esc(photoMeta(portrait).url||`/media/${encodeURIComponent(portrait)}/thumb`)}" alt="" loading="lazy">`:`<span class="avatar">${esc(initials(v.name))}</span>`}<span class="person-name"><span>${esc(v.name||'Общий вариант')}</span><small>${v.kind==='teacher'?'Учитель':review&&!review.current?'Изменён после проверки':review?'Проверен':'Ученик'}</small></span>${badges}${state}</button>`;}).join('')||'<p class="muted small-note">Никого не найдено.</p>'}</div>`;
+      return `<button type="button" class="person-row${v.owner===P.owner?' active':''}" data-owner="${esc(v.owner)}" aria-current="${v.owner===P.owner}">${portrait&&photoMeta(portrait)?`<img class="avatar" src="${esc(photoSource(photoMeta(portrait),portrait,'thumb'))}" alt="" loading="lazy">`:`<span class="avatar">${esc(initials(v.name))}</span>`}<span class="person-name"><span>${esc(v.name||'Общий вариант')}</span><small>${v.kind==='teacher'?'Учитель':review&&!review.current?'Изменён после проверки':review?'Проверен':'Ученик'}</small></span>${badges}${state}</button>`;}).join('')||'<p class="muted small-note">Никого не найдено.</p>'}</div>`;
   const search=$('#people-search');if(search)search.oninput=e=>{P.query=e.target.value;renderPeople();const again=$('#people-search');again.focus();again.setSelectionRange(again.value.length,again.value.length);};
 }
 function renderSpreads(){
@@ -361,7 +362,7 @@ function renderDrawer(){
     ${e?scopeControl(e):''}
     <div class="drawer-tabs" role="tablist">${tabs.map(([key,label])=>`<button type="button" role="tab" data-photo-tab="${esc(key)}" aria-selected="${P.photoTab===key}" class="${P.photoTab===key?'active':''}">${esc(label)}</button>`).join('')}</div>
     ${P.photoTab==='person'&&people.length?`<label class="drawer-person">Все фото с человеком<select id="photo-person">${people.map(p=>`<option value="${esc(p.id)}" ${p.id===person?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>`:''}
-    <div class="drawer-grid">${P.uploads.filter(u=>!u.done).map(u=>`<div class="drawer-tile pending"><span>${u.error?esc(u.error):'Загружаем…'}</span><small>${esc(u.name)}</small></div>`).join('')}${list.map(p=>`<button type="button" class="drawer-tile${e&&p.id===e.photo?' selected':''}" data-photo="${esc(p.id)}" draggable="true" title="${esc(p.filename)}" aria-label="Поставить ${esc(p.filename)}"><img src="${esc(p.url||`/media/${encodeURIComponent(p.id)}/thumb`)}" alt="" loading="lazy" draggable="false">${suits.has(p.id)&&P.photoTab!=='fit'?'<em>Подходит</em>':''}${used.has(p.id)&&!(e&&p.id===e.photo)?'<i>В альбоме</i>':''}</button>`).join('')}</div>
+    <div class="drawer-grid">${P.uploads.filter(u=>!u.done).map(u=>`<div class="drawer-tile pending"><span>${u.error?esc(u.error):'Загружаем…'}</span><small>${esc(u.name)}</small></div>`).join('')}${list.map(p=>`<button type="button" class="drawer-tile${e&&p.id===e.photo?' selected':''}" data-photo="${esc(p.id)}" draggable="true" title="${esc(p.filename)}" aria-label="Поставить ${esc(p.filename)}"><img src="${esc(photoSource(p,p.id,'thumb'))}" alt="" loading="lazy" draggable="false">${suits.has(p.id)&&P.photoTab!=='fit'?'<em>Подходит</em>':''}${used.has(p.id)&&!(e&&p.id===e.photo)?'<i>В альбоме</i>':''}</button>`).join('')}</div>
     ${list.length||P.uploads.some(u=>!u.done)?'':`<div class="drawer-empty"><h3>Здесь пока нет снимков</h3><p>${P.photoTab==='person'?'Этого человека не нашли на фото заказа. Выберите съёмку или загрузите снимок.':'Загрузите снимки кнопкой «Добавить».'}</p></div>`}
     <p class="drawer-note">${shootTab?'«Добавить» загрузит снимки в эту съёмку.':'«Добавить» загрузит снимки в общую съёмку заказа.'}</p>`;
 }

@@ -1,5 +1,4 @@
 """Durable retouch workflow; camera originals and photo identities never change."""
-from io import BytesIO
 from pathlib import Path
 import asyncio
 import json
@@ -71,7 +70,7 @@ def update_layout(con, s, order_id, photo_id, version, size):
     if not row:
         return
     snapshot, document = json.loads(row['snapshot']), json.loads(row['document'])
-    old = snapshot['photos'].get(photo_id, {})
+    old = dict(snapshot['photos'].get(photo_id, {}))
     if photo_id in snapshot['photos']:
         snapshot['photos'][photo_id].update(width=size[0], height=size[1], version=version)
     # Preserve all layout edits and crops while invalidating previews and reviews.
