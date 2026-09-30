@@ -19,8 +19,8 @@ globalThis.Retouch=(()=>{
     zone.ondragover=e=>{e.preventDefault();e.stopPropagation();zone.classList.add('dragging');};zone.ondragleave=e=>{e.stopPropagation();zone.classList.remove('dragging');};
     zone.ondrop=e=>{e.preventDefault();e.stopPropagation();zone.classList.remove('dragging');upload([...e.dataTransfer.files]);};
   }
-  async function upload(files){if(busy||!files.length)return;const order=state.order.id,shoot=scope();busy=true;report=[];reportOrder=order;redraw();
-    try{for(const file of files){let result;try{result=await api(`/orders/${order}/retouched?filename=${encodeURIComponent(file.name)}${shoot?'&shoot_id='+encodeURIComponent(shoot):''}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});}catch(error){result={status:'error',filename:file.name,message:error.message};}report.push(result);}if(state.order?.id===order){await refreshOrder();toast('Обработанные загружены — результат под списком файлов');}}
+  async function upload(files){if(busy||!files.length)return;const order=state.order.id,shoot=scope();busy=true;const results=[];report=results;reportOrder=order;redraw();
+    try{for(const file of files){let result;try{result=await api(`/orders/${order}/retouched?filename=${encodeURIComponent(file.name)}${shoot?'&shoot_id='+encodeURIComponent(shoot):''}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});}catch(error){result={status:'error',filename:file.name,message:error.message};}results.push(result);}if(state.order?.id===order){await refreshOrder();toast('Обработанные загружены — результат под списком файлов');}}
     finally{busy=false;if(state.order?.id===order)redraw();}
   }
   function openFiles(){const names=list().map(p=>p.filename.replace(/\.[^.]+$/,'')).join(' ');$('#action-content').innerHTML=`<div class="dialog-heading"><h2>Список файлов · ${list().length}</h2><button class="close" data-close="action-dialog" aria-label="Закрыть">×</button></div><p>Lightroom Classic: фильтр «Текст → Имя файла → Содержит». Имена без расширения подходят и для RAW.</p><textarea class="retouch-names" readonly aria-label="Имена файлов">${esc(names)}</textarea><div class="dialog-actions"><button class="primary" data-retouch="copy">Скопировать</button></div>`;$('#action-dialog').showModal();}
@@ -34,5 +34,6 @@ globalThis.Retouch=(()=>{
   }
   document.addEventListener('click',async e=>{const filter=e.target.closest('[data-retouch-person]');if(filter){personFilter=filter.dataset.retouchPerson;state.selected.clear();renderGroups();return;}const b=e.target.closest('[data-retouch]');if(!b)return;const action=b.dataset.retouch;
     if(action==='todo'){todoOnly=!todoOnly;state.selected.clear();redraw();}if(action==='hide'){report=null;redraw();}if(action==='upload')$('[data-retouch-files]')?.click();if(action==='list')openFiles();if(action==='archive')openArchive();if(action==='wait'){$('#action-dialog').close();showChosen();}if(action==='open')showChosen();if(action==='copy'){try{await navigator.clipboard.writeText($('.retouch-names').value);toast('Имена файлов скопированы');}catch{$('.retouch-names').select();toast('Выделены имена — нажмите Ctrl+C или ⌘C');}}});
-  return {chosen,list,url,badge,tools,personTools,personVisible,bind,plate,publish};
+  function reset(){todoOnly=false;personFilter='all';report=null;}
+  return {chosen,list,url,badge,tools,personTools,personVisible,bind,plate,publish,reset};
 })();
