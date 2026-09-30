@@ -61,7 +61,7 @@ function renderInspector() {
         'Страница',
         `<div class="field-grid"><button data-side="0" class="${view.side === 0 ? 'active' : ''}">${cover ? 'Оборотная' : 'Левая'}</button><button data-side="1" class="${view.side === 1 ? 'active' : ''}">${cover ? 'Лицевая' : 'Правая'}</button></div>${colorControl('Фон', 'page.background', page()?.background || '#ffffff')}`,
       ) +
-      (cover ? spinePanel() : '');
+      (cover ? spinePanel() : '') + layersPanel();
   }
   const inspector = $('#inspector'),
     scrollTop = inspector.scrollTop,

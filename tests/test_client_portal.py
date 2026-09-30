@@ -181,12 +181,16 @@ class LayoutCorrectionTests(unittest.TestCase):
         self.client.post(base + '/manage/logout')
         self.assertFalse(self.client.get(base).json()['manager'])
 
-    def test_photos_link(self):
-        url = f'/api/orders/{self.order}/photos-link'
-        self.assertEqual(self.client.put(url, json={'url': 'javascript:alert(1)'}).status_code, 422)
-        self.assertEqual(self.client.put(url, json={'url': 'https://disk.yandex.ru/d/abc'}).status_code, 200)
-        self.assertEqual(self.client.get(url).json()['url'], 'https://disk.yandex.ru/d/abc')
-        data = self.client.post(f'/api/orders/{self.order}/client-link').json()
-        token = data['url'].rsplit('/', 1)[1]
-        self.client.post('/client-api/' + token + '/enter', json={'pin': data['entry_pin']})
-        self.assertEqual(self.client.get('/client-api/' + token).json()['photos_url'], 'https://disk.yandex.ru/d/abc')
+    def test_sent_marks(self):
+        base = f'/api/orders/{self.order}'
+        self.assertEqual(self.client.post(base + '/client-sent/class').status_code, 409)
+        self.client.post(base + '/client-link')
+        self.assertEqual(self.client.post(base + '/client-sent/other').status_code, 404)
+        first = self.client.post(base + '/client-sent/class').json()['sent']['class']
+        self.assertEqual(self.client.post(base + '/client-sent/class').json()['sent']['class'], first)
+        self.assertEqual(set(self.client.get(base + '/client-link').json()['sent']), {'class'})
+        self.assertEqual(self.client.post(base + '/client-codes/reset').json()['sent'], {})
+
+    def test_people_progress_lists_everyone(self):
+        people = self.client.get(f'/api/orders/{self.order}').json()['client_people']
+        self.assertTrue(all(set(p) == {'id', 'done', 'name', 'photo_id'} for p in people))

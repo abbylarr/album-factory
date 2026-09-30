@@ -11,7 +11,8 @@ from pathlib import Path
 
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing import Literal
 
 from . import jobs, order_stages
 from .layout_engine import LayoutError, capacity_matrix, field_limits, validate_edition
@@ -83,6 +84,8 @@ def init(con):
     CREATE TABLE IF NOT EXISTS authorizations (
       order_id TEXT PRIMARY KEY, revision TEXT NOT NULL, responsibility INTEGER NOT NULL DEFAULT 0,
       authorized_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS production_snapshots (
+      order_id TEXT PRIMARY KEY, document TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS photo_frames (
       photo_id TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL);
     """)
@@ -183,7 +186,7 @@ def photo_visible(con, photo_id):
 
 def forget(con, order_id):
     for table in ("order_membership", "order_terms", "order_pins", "order_codes", "pin_attempts", "allocations", "deliveries",
-                  "publications", "approvals", "authorizations"):
+                  "publications", "approvals", "authorizations", "production_snapshots"):
         con.execute(f"DELETE FROM {table} WHERE order_id=?", (order_id,))
     con.execute("DELETE FROM class_sessions WHERE order_id=?", (order_id,))
     from . import client_portal
@@ -232,6 +235,9 @@ def issue_pins(con, order_id):
 def _check_pin(con, order_id, kind, pin):
     if not pin or len(pin) != 4 or not pin.isdigit():
         raise HTTPException(422, "Нужен четырёхзначный код")
+    # Serialize the read/increment across concurrent requests. Failed attempts
+    # must survive the HTTPException that rolls back the caller's transaction.
+    con.execute("BEGIN IMMEDIATE")
     attempt = con.execute("SELECT fails, locked_until FROM pin_attempts WHERE order_id=? AND kind=?", (order_id, kind)).fetchone()
     if attempt and attempt["locked_until"] and attempt["locked_until"] > _now():
         raise HTTPException(429, "Слишком много попыток. Подождите и попробуйте снова")
@@ -240,11 +246,12 @@ def _check_pin(con, order_id, kind, pin):
         raise HTTPException(409, "Код для этого заказа ещё не создан")
     salt, hashed = (pins["entry_salt"], pins["entry_hash"]) if kind == "entry" else (pins["manage_salt"], pins["manage_hash"])
     if not secrets.compare_digest(digest(salt, pin), hashed):
-        fails = (attempt["fails"] if attempt else 0) + 1
+        fails = (attempt["fails"] if attempt and not attempt["locked_until"] else 0) + 1
         locked = "" if fails < 8 else (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
         con.execute("""INSERT INTO pin_attempts VALUES (?,?,?,?)
                        ON CONFLICT(order_id, kind) DO UPDATE SET fails=excluded.fails, locked_until=excluded.locked_until""",
                     (order_id, kind, fails, locked))
+        con.commit()
         raise HTTPException(401, "Неверный код входа" if kind == "entry" else "Неверный код управления")
     con.execute("DELETE FROM pin_attempts WHERE order_id=? AND kind=?", (order_id, kind))
 
@@ -322,6 +329,12 @@ def _delivery(con, order_id):
 
 
 def summary_body(con, order, public=True):
+    frozen = con.execute("SELECT document FROM production_snapshots WHERE order_id=?", (order["id"],)).fetchone()
+    if frozen:
+        body = json.loads(frozen["document"])
+        if public:
+            body.pop("offer_price", None)
+        return body
     terms = con.execute("SELECT * FROM order_terms WHERE order_id=?", (order["id"],)).fetchone()
     rows = _allocation_rows(con, order["id"])
     paid_assigned = sum(row["paid"] for row in rows)
@@ -364,6 +377,28 @@ def publication_photo_ids(document):
     for group in (document.get("variant_spreads") or {}).values():
         walk(group)
     return found
+
+
+def missing_layout_photos(document, data_root):
+    return sorted(photo_id for photo_id in publication_photo_ids(document)
+                  if not (Path(data_root) / "photos" / f"{photo_id}.jpg").is_file())
+
+
+def production_snapshot(con, order):
+    """Freeze the quantities and delivery once; exports never reread live rows.
+
+    Older authorized pilot orders are captured on their first export. A corrupt
+    old split is rejected rather than silently becoming a production snapshot.
+    """
+    row = con.execute("SELECT document FROM production_snapshots WHERE order_id=?", (order["id"],)).fetchone()
+    if row:
+        return json.loads(row["document"])
+    body = summary_body(con, dict(order), public=False)
+    if body["remainder"] or sum(item["gift"] for item in body["allocations"]) != body["gift"]:
+        raise HTTPException(409, "Проверьте распределение платных и подарочных экземпляров перед печатью")
+    con.execute("INSERT INTO production_snapshots VALUES (?,?)", (order["id"], json.dumps(body, ensure_ascii=False)))
+    con.execute("UPDATE order_terms SET allocations_custom=1 WHERE order_id=?", (order["id"],))
+    return body
 
 
 def _public_spread(spread, sizes):
@@ -450,10 +485,31 @@ class PinInput(BaseModel):
     pin: str
 
 
+class AllocationInput(BaseModel):
+    key: str = Field(min_length=1, max_length=100, strict=True)
+    paid: int = Field(default=0, ge=0, le=1000, strict=True)
+    gift: int = Field(default=0, ge=0, le=1000, strict=True)
+
+
+class DeliveryInput(BaseModel):
+    mode: Literal["personal", "shipping"]
+    carrier: str = Field(default="", max_length=100, strict=True)
+    address: str = Field(default="", max_length=1000, strict=True)
+    recipient: str = Field(default="", max_length=100, strict=True)
+    phone: str = Field(default="", max_length=40, strict=True)
+
+
 class SummaryInput(BaseModel):
-    allocations: list[dict]
-    paid_total: int = Field(ge=0, le=1000)
-    delivery: dict
+    allocations: list[AllocationInput] = Field(max_length=1001)
+    paid_total: int = Field(ge=0, le=1000, strict=True)
+    delivery: DeliveryInput
+
+    @model_validator(mode="after")
+    def unique_recipients(self):
+        keys = [item.key for item in self.allocations]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Получатель указан несколько раз")
+        return self
 
 
 class ApproveInput(BaseModel):
@@ -594,6 +650,7 @@ def install(app, s):
     @app.post("/api/orders/{order_id}/layout/publish")
     def publish_layout(order_id: str):
         with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
             s.require_order(con, order_id)
             layout = con.execute("SELECT document FROM order_layouts WHERE order_id=?", (order_id,)).fetchone()
             if layout is None:
@@ -601,6 +658,8 @@ def install(app, s):
             document = json.loads(layout["document"])
             if any(issue.get("level") == "error" for issue in document.get("issues") or []):
                 raise HTTPException(409, "Исправьте ошибки макета перед публикацией")
+            if missing_layout_photos(document, s.DATA):
+                raise HTTPException(409, "Фотографии макета недоступны. Обновите макет перед публикацией")
             revision = str(document.get("revision") or hashlib.sha256(layout["document"].encode()).hexdigest()[:12])
             con.execute("INSERT INTO publications VALUES (?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET revision=excluded.revision, document=excluded.document, published_at=excluded.published_at",
                         (order_id, revision, layout["document"], s.now()))
@@ -615,16 +674,20 @@ def install(app, s):
     @app.post("/api/orders/{order_id}/production")
     def authorize(order_id: str, payload: ProductionInput):
         with s.db() as con:
-            s.require_order(con, order_id)
-            publication = con.execute("SELECT revision FROM publications WHERE order_id=?", (order_id,)).fetchone()
+            con.execute("BEGIN IMMEDIATE")
+            order = s.require_order(con, order_id)
+            publication = con.execute("SELECT revision,document FROM publications WHERE order_id=?", (order_id,)).fetchone()
             approval = con.execute("SELECT snapshot FROM approvals WHERE order_id=? ORDER BY approved_at DESC LIMIT 1", (order_id,)).fetchone()
             if publication is None:
                 raise HTTPException(409, "Сначала опубликуйте макет")
+            if missing_layout_photos(json.loads(publication["document"]), s.DATA):
+                raise HTTPException(409, "Фотографии опубликованного макета недоступны")
             approved_revision = json.loads(approval["snapshot"])["revision"] if approval else None
             if approved_revision != publication["revision"] and not payload.responsibility:
                 raise HTTPException(409, "Ожидается повторное согласование")
             if approval is None and not payload.responsibility:
                 raise HTTPException(409, "Сначала нужно согласование класса")
+            production_snapshot(con, order)
             existing = con.execute("SELECT revision FROM authorizations WHERE order_id=?", (order_id,)).fetchone()
             if existing and existing["revision"] == publication["revision"]:
                 return {"authorized": True}
@@ -641,13 +704,19 @@ def install(app, s):
     @app.get("/api/orders/{order_id}/export")
     def export_bundle(order_id: str):
         with s.db() as con:
-            s.require_order(con, order_id)
+            con.execute("BEGIN IMMEDIATE")
+            order = s.require_order(con, order_id)
             if con.execute("SELECT 1 FROM authorizations WHERE order_id=?", (order_id,)).fetchone() is None:
                 raise HTTPException(409, "Производство ещё не разрешено")
-            path = _manifest_path(s, order_id)
-            if not path.is_file():
-                _write_export(s, order_id)
-            return json.loads(path.read_text())
+            snapshot = production_snapshot(con, order)
+        path = _manifest_path(s, order_id)
+        try:
+            manifest = json.loads(path.read_text())
+        except (OSError, ValueError):
+            manifest = None
+        if not isinstance(manifest, dict) or manifest.get("production_hash") != snapshot["hash"]:
+            manifest = _write_export(s, order_id, snapshot)
+        return manifest
 
     @app.post("/client-api/{token}/enter")
     def enter(token: str, payload: PinInput):
@@ -666,6 +735,8 @@ def install(app, s):
             if row is None:
                 raise HTTPException(409, "Макет ещё не опубликован")
             document = json.loads(row["document"])
+            if missing_layout_photos(document, s.DATA):
+                raise HTTPException(409, "Фотографии опубликованного макета недоступны. Сообщите фотографу")
             sizes = {}
             for photo_id in publication_photo_ids(document):
                 path = Path(s.DATA) / "photos" / f"{photo_id}.jpg"
@@ -715,23 +786,26 @@ def install(app, s):
     @app.put("/client-api/{token}/summary")
     def save_summary(token: str, payload: SummaryInput, request: Request):
         with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
             order = _order_by_token(con, token)
-            require_level(con, request, order["id"], "entry")
+            require_level(con, request, order["id"], "manage")
+            if order["stage"] in order_stages.STAGES[5:] or con.execute(
+                    "SELECT 1 FROM authorizations WHERE order_id=?", (order["id"],)).fetchone():
+                raise HTTPException(409, "Заказ уже отправлен в печать. Тираж и получение зафиксированы")
             terms = _terms(con, order["id"])
-            mode = payload.delivery.get("mode")
+            mode = payload.delivery.mode
             allowed = {"personal", "shipping"} if terms["delivery_modes"] == "both" else {terms["delivery_modes"]}
             if mode not in allowed:
                 raise HTTPException(422, "Этот способ получения фотограф не использует")
-            carrier = "" if mode == "personal" else str(payload.delivery.get("carrier") or "").strip()
-            address = "" if mode == "personal" else str(payload.delivery.get("address") or "").strip()
+            carrier = "" if mode == "personal" else payload.delivery.carrier.strip()
+            address = "" if mode == "personal" else payload.delivery.address.strip()
             if mode == "shipping" and not address:
                 raise HTTPException(422, "Укажите адрес или пункт выдачи")
             paid = 0
             rows = []
+            ensure_allocations(con, order["id"])
             for item in payload.allocations:
-                key, label_paid, gift = str(item.get("key") or ""), int(item.get("paid") or 0), int(item.get("gift") or 0)
-                if label_paid < 0 or gift < 0:
-                    raise HTTPException(422, "Количество не может быть отрицательным")
+                key, label_paid, gift = item.key, item.paid, item.gift
                 known = con.execute("SELECT label FROM allocations WHERE order_id=? AND recipient_key=?", (order["id"], key)).fetchone()
                 if known is None:
                     raise HTTPException(422, "Неизвестный получатель")
@@ -739,13 +813,15 @@ def install(app, s):
                 paid += label_paid
             if paid != payload.paid_total:
                 raise HTTPException(422, "Сумма по получателям не сходится с платным тиражом")
+            if sum(row[4] for row in rows) != terms["gift_copies"]:
+                raise HTTPException(422, "Сумма подарочных экземпляров не сходится с количеством подарков фотографа")
             con.execute("DELETE FROM allocations WHERE order_id=?", (order["id"],))
             con.executemany("INSERT INTO allocations VALUES (?,?,?,?,?)", rows)
             con.execute("""INSERT INTO deliveries VALUES (?,?,?,?,?,?)
                 ON CONFLICT(order_id) DO UPDATE SET mode=excluded.mode, carrier=excluded.carrier, address=excluded.address,
                 recipient=excluded.recipient, phone=excluded.phone""", (
-                order["id"], mode, carrier, address, str(payload.delivery.get("recipient") or "").strip(),
-                str(payload.delivery.get("phone") or "").strip()))
+                order["id"], mode, carrier, address, payload.delivery.recipient.strip(),
+                payload.delivery.phone.strip()))
             con.execute("UPDATE order_terms SET current_paid=?, allocations_custom=1 WHERE order_id=?", (payload.paid_total, order["id"]))
             return summary_body(con, dict(order), public=True)
 
@@ -805,10 +881,11 @@ def _manifest_path(server, order_id):
     return Path(server.DATA) / "exports" / order_id / "manifest.json"
 
 
-def _write_export(server, order_id):
-    with server.db() as con:
-        rows = [dict(row) for row in con.execute(
-            "SELECT recipient_key, label, paid, gift FROM allocations WHERE order_id=?", (order_id,))]
+def _write_export(server, order_id, snapshot=None):
+    if snapshot is None:
+        with server.db() as con:
+            snapshot = production_snapshot(con, server.require_order(con, order_id))
+    rows = snapshot["allocations"]
     files = []
     folder = Path(server.DATA) / "exports" / order_id
     folder.mkdir(parents=True, exist_ok=True)
@@ -816,10 +893,13 @@ def _write_export(server, order_id):
         copies = row["paid"] + row["gift"]
         if copies <= 0:
             continue
-        safe = "".join(ch if ch.isalnum() or ch in " ._-" else "_" for ch in row["label"]).strip() or row["recipient_key"]
+        safe = "".join(ch if ch.isalnum() or ch in " ._-" else "_" for ch in row["label"]).strip() or row["key"]
         name = f"{safe}.pdf"
         (folder / name).write_bytes(PDF)
         files.append({"name": name, "copies_paid": row["paid"], "copies_gift": row["gift"]})
-    manifest = {"files": files, "total": sum(item["copies_paid"] + item["copies_gift"] for item in files)}
-    (folder / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False))
+    manifest = {"files": files, "total": sum(item["copies_paid"] + item["copies_gift"] for item in files),
+                "production_hash": snapshot["hash"], "revision": snapshot["revision"]}
+    temporary = folder / ("manifest-" + secrets.token_hex(8) + ".part")
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False))
+    temporary.replace(folder / "manifest.json")
     return manifest

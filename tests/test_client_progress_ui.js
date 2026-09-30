@@ -1,7 +1,7 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const source=fs.readFileSync('web/v2.js','utf8');
-const names=['needsReview','stats','cardStatus','clientProgress'];
-const context=vm.createContext({esc:s=>String(s),stageLabel:k=>k});
+const names=['needsReview','stats','stageStatus','cardStatus','clientProgress'];
+const context=vm.createContext({esc:s=>String(s),stageLabel:k=>k,daysIn:o=>o.days||0,STALE_DAYS:14,count:(n,one,few,many)=>`${n} ${many}`});
 for(const n of names)vm.runInContext(source.split('\n').find(l=>l.startsWith('function '+n+'(')),context);
 const o={id:'x',stage:'forms',photo_count:100,pending:0,review_count:3,client_progress:{enabled:true,status:'in_progress',label:'Клиенты заполняют',completed:7,total:16,remaining:9}};
 context.o=o;
@@ -15,9 +15,9 @@ assert.equal(vm.runInContext('cardStatus(o).kind',context),'done');
 assert.equal(vm.runInContext('cardStatus(o).action[0]',context),'make-layout');
 assert.equal(vm.runInContext('cardStatus(o).tab',context),'client');
 o.stage='photos';o.pending=40;
-assert.equal(vm.runInContext('cardStatus(o).text',context),'Обработка 60%');
+assert.equal(vm.runInContext('cardStatus(o).text',context),'Обработано 60 из 100');
 o.pending=0;
-assert.equal(vm.runInContext('cardStatus(o).text',context),'Проверить 3 фото');
+assert.equal(vm.runInContext('cardStatus(o).text',context),'3 фото на проверку');
 assert.equal(vm.runInContext('cardStatus(o).tab',context),'review');
 o.review_count=0;
 assert.equal(vm.runInContext('cardStatus(o).action[0]',context),'send-forms');
@@ -26,3 +26,15 @@ assert.equal(vm.runInContext('cardStatus(o).text',context),'Согласован
 o.stage='delivery';
 assert.equal(vm.runInContext('cardStatus(o).text',context),'В доставке');
 console.log('Order card status by stage: OK');
+
+// Two weeks of silence after the forms or the layout went to the class: remind them.
+Object.assign(o,{stage:'forms',approved:false,client_progress:{enabled:true,status:'in_progress',completed:2,total:16},days:13});
+assert.equal(vm.runInContext('cardStatus(o).stale',context),undefined);
+o.days=14;
+assert.equal(vm.runInContext('cardStatus(o).stale',context),true);
+assert.equal(vm.runInContext('cardStatus(o).note',context),'Стоит напомнить · 14 дней');
+Object.assign(o,{stage:'approval',corrections_open:0});
+assert.equal(vm.runInContext('cardStatus(o).stale',context),true);
+Object.assign(o,{stage:'print'});
+assert.equal(vm.runInContext('cardStatus(o).stale',context),undefined,'the printer is not the class');
+console.log('Quiet class after two weeks: OK');

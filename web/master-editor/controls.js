@@ -49,7 +49,7 @@ function renderNavigation() {
     ? 'Оборотная сторона · лицевая сторона'
     : preview
       ? `Альбом · ${view.spread + 1} из ${count}`
-      : `Шаблон ${view.spread + 1} из ${count}` +
+      : `Разворот блока ${view.spread + 1} из ${count}` +
         (sec.kind === 'flow' ? ` · ${ROLE_NAMES[MasterPlan.roleOf(sec.spreads[view.spread])]}` : '');
   $('#spread-select').innerHTML = Array.from(
     { length: count },
@@ -74,14 +74,15 @@ function spinePanel() {
   const cover = coverSection();
   if (!cover || !(coverSpine() > 0)) return '';
   const volume = doc.sheetThickness
-      ? `<div class="safety-summary spine-rows"><div>Книга на<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${v.spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.${infoTip('Только чтобы посмотреть обложку на тонкой и толстой книге. В заказе корешок посчитается по числу разворотов.')}</div></div>`
+      ? `<div class="safety-summary spine-rows"><div>Тестовый объём<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${editorVolume().spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.${infoTip('Только чтобы посмотреть обложку на тонкой и толстой книге. В заказе корешок посчитается по числу разворотов.')}</div></div>`
       : '',
+    source = view.coverSource ? `${esc(view.coverSource.label)}${view.coverSource.document !== JSON.stringify(doc) ? ' · объём устарел, обновите предпросмотр' : ''}` : view.coverSpreads ? 'Задан вручную' : 'По разворотам блоков',
     paint = cover.spineColor
       ? `<div class="spine-color">${colorControl('Цвет корешка', 'cover.spineColor', cover.spineColor)}<button type="button" class="link-button" data-spine-color="off" title="Корешок снова продолжает фон страниц">Как у страниц</button></div>`
       : `<button type="button" class="wide-button" data-spine-color="on">Покрасить корешок</button>`;
   return block(
     'Корешок',
-    `${volume}${paint}<button type="button" class="wide-button" data-spine-text>Текст на корешке</button>`,
+    `${volume}${doc.sheetThickness ? `<p class="section-note">${source}<br>Корешок на холсте: ${coverSpine()} мм<br>В заказе рассчитывается для каждого альбома.</p>` : ''}${paint}<button type="button" class="wide-button" data-spine-text>Текст на корешке</button>`,
   );
 }
 /* A text along the spine, reading bottom to top as on Russian books; it shrinks to fit the spine width. */
@@ -98,6 +99,7 @@ function addSpineText() {
       id: uid(),
       type: 'text',
       name: 'Текст на корешке',
+      spineContent: true,
       opacity: 100,
       angle: -90,
       pin: 'spine',
@@ -523,4 +525,15 @@ function liveProperty(key, value) {
     if (style) paintLinkedText(style);
   });
   canvas.requestRenderAll();
+}
+
+function layersPanel() {
+  if (preview) return '';
+  const sec = section(), spread = sec.spreads[view.spread],
+    layers = spreadStack(spread), painted = sec.cover && sec.spineColor && spineGap() > 0,
+    spineText = l => painted && isSpineContent(l),
+    names = {text:'Текст',photo:'Фото',rect:'Фигура',ellipse:'Круг',line:'Линия',grid:'Виньетка',collage:'Коллаж',svg:'SVG'},
+    row = l => `<button type="button" class="layer-row" data-layer-select="${esc(l.id)}"><span>${esc(l.name || (l.type === 'text' ? l.text : names[l.type]) || 'Объект')}</span><small>${names[l.type] || ''}${l.hidden ? ' · скрыт' : ''}${l.locked ? ' · закреплён' : ''}</small></button>`,
+    system = label => `<div class="layer-system">${label}</div>`;
+  return block('Слои', `<p class="section-note">Верхние объекты — первыми. Порядок меняется правой кнопкой на объекте.</p><div class="layer-list">${layers.filter(spineText).reverse().map(row).join('')}${painted ? system('Заливка корешка') : ''}${layers.filter(l => !spineText(l)).reverse().map(row).join('')}${system('Фон страниц')}</div>`);
 }

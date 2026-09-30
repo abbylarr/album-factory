@@ -95,6 +95,7 @@ class MvpTests(unittest.TestCase):
         entry.post(f"/client-api/{token}/enter", json={"pin": pins["entry_pin"]})
         blocked = entry.post(f"/client-api/{token}/approve", json={"hash": summary["hash"]})
         self.assertEqual(blocked.status_code, 401)
+        self.client.post(f"/client-api/{token}/manage", json={"pin": pins["manage_pin"]})
         summary = self.client.put(f"/client-api/{token}/summary", json={
             "allocations": [{**row, "paid": 2 if row["key"] == "p00" else row["paid"]} for row in summary["allocations"]],
             "paid_total": 20,

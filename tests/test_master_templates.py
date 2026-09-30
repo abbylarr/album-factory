@@ -562,6 +562,38 @@ class MasterTests(unittest.TestCase):
         inner=self.cover_book(1.2);inner['sections'][1]['spineColor']='#6a2c91'
         self.assertEqual(self.client.post('/api/master-templates',json={'document':inner}).status_code,422)
 
+    def test_painted_spine_covers_crossing_artwork_but_not_spine_text(self):
+        shape={'id':'crossing','type':'rect','pin':'spine','z':999,
+               'box':{'x':-20,'y':40,'w':60,'h':60},'fill':'#cccccc'}
+        text={'id':'spine-title','type':'text','pin':'spine','z':0,
+              'box':{'x':-3,'y':20,'w':6,'h':20},'text':'А','font':'Arial',
+              'fontSize':8,'color':'#ffffff','angle':-90,'align':'center'}
+        crossing_text={**text,'id':'crossing-text','angle':0,'z':9999}
+        wrap={'id':'wrap-art','type':'rect','pin':'wrap','z':1000,
+              'box':{'x':0,'y':0,'w':440,'h':300},'fill':'#dddddd'}
+        for thickness in (None, 1.2, 5):
+            with self.subTest(thickness=thickness):
+                doc=self.cover_book(thickness, [text, shape, wrap, crossing_text])
+                doc['sections'][0]['spineColor']='#000000'
+                elements=self.compile_cover(doc)['covers']['student:1']['elements']
+                keys=[e['key'].rsplit('/',1)[-1] for e in elements]
+                self.assertLess(keys.index('crossing-text'), keys.index('spine'))
+                self.assertLess(keys.index('crossing'), keys.index('spine'))
+                self.assertLess(keys.index('wrap-art'), keys.index('spine'))
+                self.assertLess(keys.index('spine'), keys.index('spine-title'))
+                self.assertTrue(all(i < keys.index('spine') for i,k in enumerate(keys) if k=='background'))
+        # Explicit spine content works independently of its rotation.
+        doc=self.cover_book(None, [{**text,'spineContent':True,'angle':0}, shape])
+        doc['sections'][0]['spineColor']='#000000'
+        keys=[e['key'].rsplit('/',1)[-1] for e in self.compile_cover(doc)['covers']['student:1']['elements']]
+        self.assertLess(keys.index('spine'), keys.index('spine-title'))
+        # With page backgrounds the artwork retains its usual z order.
+        doc=self.cover_book(None, [text, shape, wrap])
+        keys=[e['key'].rsplit('/',1)[-1] for e in self.compile_cover(doc)['covers']['student:1']['elements']]
+        self.assertNotIn('spine', keys)
+        self.assertLess(keys.index('spine-title'), keys.index('crossing'))
+        self.assertLess(keys.index('crossing'), keys.index('wrap-art'))
+
     def test_cover_layers_keep_to_the_spine(self):
         rect=lambda i,x,w,pin=None:{'id':i,'type':'rect','box':{'x':x,'y':10,'w':w,'h':20},'fill':'#ffffff',**({'pin':pin} if pin else {})}
         doc=self.cover_book(2,[rect('back',10,50),rect('title',-4,8,'spine'),rect('wrap',0,440,'wrap')])

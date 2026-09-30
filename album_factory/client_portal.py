@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import json
 import secrets
+from datetime import datetime, timezone
 
 from . import mvp, order_stages, school_catalog
 
@@ -44,10 +45,6 @@ class SpreadFix(BaseModel):
     comment: str = Field(min_length=1, max_length=1000)
 
 
-class PhotosLink(BaseModel):
-    url: str = Field(default='', max_length=500)
-
-
 def init(con):
     con.executescript('''
     CREATE TABLE IF NOT EXISTS client_links (
@@ -62,14 +59,34 @@ def init(con):
       person_id TEXT, old_name TEXT NOT NULL DEFAULT '', new_name TEXT NOT NULL DEFAULT '',
       variant TEXT NOT NULL DEFAULT '', spread_key TEXT NOT NULL DEFAULT '', spread_label TEXT NOT NULL DEFAULT '',
       comment TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS client_extras (
-      order_id TEXT PRIMARY KEY, photos_url TEXT NOT NULL DEFAULT '');
+    CREATE TABLE IF NOT EXISTS client_sends (
+      order_id TEXT NOT NULL, kind TEXT NOT NULL, sent_at TEXT NOT NULL, PRIMARY KEY (order_id, kind));
     ''')
 
 
 def forget(con, order_id):
     con.execute('DELETE FROM layout_corrections WHERE order_id=?', (order_id,))
-    con.execute('DELETE FROM client_extras WHERE order_id=?', (order_id,))
+    con.execute('DELETE FROM client_sends WHERE order_id=?', (order_id,))
+
+
+def reconcile_selections(con, order_id=None):
+    """Release a removed/reassigned portrait and its form lock atomically.
+
+    Also repairs stale locks from older databases, whose selection_state table
+    did not have foreign keys. Valid submitted forms are left untouched.
+    """
+    scope = "AND p.order_id=?" if order_id is not None else ""
+    args = (order_id,) if order_id is not None else ()
+    con.execute(f"""DELETE FROM client_selections WHERE person_id IN (
+        SELECT c.person_id FROM client_selections c JOIN persons p ON p.id=c.person_id
+        WHERE NOT EXISTS (SELECT 1 FROM photos f WHERE f.id=c.photo_id
+            AND f.person_id=c.person_id AND f.order_id=p.order_id AND f.status='ready') {scope})""", args)
+    # Orphan person locks are safe to remove globally, including deleted orders.
+    con.execute("DELETE FROM selection_state WHERE person_id NOT IN (SELECT id FROM persons)")
+    con.execute(f"""DELETE FROM selection_state WHERE person_id IN (
+        SELECT l.person_id FROM selection_state l JOIN persons p ON p.id=l.person_id
+        WHERE NOT EXISTS (SELECT 1 FROM client_selections c
+            WHERE c.person_id=l.person_id AND c.photo_id=l.photo_id) {scope})""", args)
 
 
 def open_corrections(con, order_id):
@@ -123,6 +140,21 @@ def progress_by_order(con, order_id=None):
     return result
 
 
+def people_progress(con, order_id):
+    """Every person of the class: who has filled the form (name shown) and a portrait to recognise them by."""
+    rows = con.execute('''SELECT p.id, s.first_name, s.last_name,
+        (SELECT f.id FROM photos f WHERE f.id=s.photo_id AND f.person_id=p.id AND f.status='ready') AS chosen,
+        (SELECT f.id FROM photos f WHERE f.person_id=p.id AND f.status='ready' ORDER BY f.uncertain, f.created_at, f.id LIMIT 1) AS best
+        FROM persons p LEFT JOIN client_selections s ON s.person_id=p.id
+        WHERE p.order_id=? ORDER BY p.created_at, p.id''', (order_id,)).fetchall()
+    people = []
+    for r in rows:
+        name = f"{(r['first_name'] or '').strip()} {(r['last_name'] or '').strip()}".strip()
+        done = bool(r['chosen'] and (r['first_name'] or '').strip() and (r['last_name'] or '').strip())
+        people.append({'id': r['id'], 'done': done, 'name': name if done else '', 'photo_id': r['chosen'] or r['best']})
+    return people
+
+
 def install(app, s):
     def order_for(con, token):
         row = con.execute('SELECT o.* FROM orders o JOIN client_links l ON l.order_id=o.id WHERE l.token=?', (token,)).fetchone()
@@ -133,8 +165,9 @@ def install(app, s):
     def access(con, order_id, token):
         entry, manage = mvp.stored_pins(con, order_id)
         issued = con.execute('SELECT 1 FROM order_pins WHERE order_id=?', (order_id,)).fetchone() is not None
+        sent = dict(con.execute('SELECT kind, sent_at FROM client_sends WHERE order_id=?', (order_id,)).fetchall())
         return {'url': '/client/' + token if token else None, 'entry_pin': entry, 'manage_pin': manage,
-                'pins_set': issued, 'pins_lost': issued and entry is None}
+                'pins_set': issued, 'pins_lost': issued and entry is None, 'sent': sent}
 
     @app.post('/api/orders/{order_id}/client-link')
     def link(order_id: str):
@@ -161,6 +194,19 @@ def install(app, s):
             if row is None:
                 raise HTTPException(409, 'Сначала отправьте анкеты классу')
             mvp.reset_pins(con, order_id)
+            con.execute('DELETE FROM client_sends WHERE order_id=?', (order_id,))
+            return access(con, order_id, row[0])
+
+    @app.post('/api/orders/{order_id}/client-sent/{kind}')
+    def mark_sent(order_id: str, kind: str):
+        if kind not in DEFAULT_TEMPLATES:
+            raise HTTPException(404, 'Неизвестное сообщение')
+        with s.db() as con:
+            s.require_order(con, order_id)
+            row = con.execute('SELECT token FROM client_links WHERE order_id=?', (order_id,)).fetchone()
+            if row is None:
+                raise HTTPException(409, 'Сначала отправьте анкеты классу')
+            con.execute('INSERT OR IGNORE INTO client_sends VALUES (?,?,?)', (order_id, kind, datetime.now(timezone.utc).isoformat(timespec='seconds')))
             return access(con, order_id, row[0])
 
     @app.get('/api/message-templates')
@@ -201,13 +247,11 @@ def install(app, s):
                 person['submitted'] = bool(person['submitted'])
             photos = [dict(r) for r in con.execute("SELECT id,person_id FROM photos WHERE order_id=? AND person_id IS NOT NULL AND status='ready' ORDER BY created_at,id", (order['id'],))]
             published = con.execute("SELECT 1 FROM publications WHERE order_id=?", (order['id'],)).fetchone()
-            extras = con.execute('SELECT photos_url FROM client_extras WHERE order_id=?', (order['id'],)).fetchone()
             delivery = con.execute('SELECT mode,carrier,address FROM deliveries WHERE order_id=?', (order['id'],)).fetchone()
             return {'school': order['school'], 'class_name': order['class_name'], 'persons': people, 'photos': photos,
                     'completed': sum(bool(p['photo_id']) for p in people), 'quote_limit': mvp.quote_limit(con, order['id']),
                     'layout_published': published is not None, 'stage': client_stage(con, order),
                     'manager': mvp.has_level(con, request, order['id'], 'manage'),
-                    'photos_url': extras['photos_url'] if extras else '',
                     'delivery': dict(delivery) if delivery and delivery['mode'] else None,
                     'corrections': open_corrections(con, order['id']),
                     'teachers': school_catalog.client_summary(con, order['id'])}
@@ -342,20 +386,3 @@ def install(app, s):
             if not con.execute("UPDATE layout_corrections SET status='resolved' WHERE id=? AND order_id=?", (fix_id, order_id)).rowcount:
                 raise HTTPException(404, 'Правка не найдена')
         return {'ok': True}
-
-    @app.put('/api/orders/{order_id}/photos-link')
-    def photos_link(order_id: str, payload: PhotosLink):
-        url = payload.url.strip()
-        if url and not url.startswith(('https://', 'http://')):
-            raise HTTPException(422, 'Ссылка должна начинаться с https://')
-        with s.db() as con:
-            s.require_order(con, order_id)
-            con.execute('INSERT INTO client_extras VALUES (?,?) ON CONFLICT(order_id) DO UPDATE SET photos_url=excluded.photos_url', (order_id, url))
-        return {'url': url}
-
-    @app.get('/api/orders/{order_id}/photos-link')
-    def current_photos_link(order_id: str):
-        with s.db() as con:
-            s.require_order(con, order_id)
-            row = con.execute('SELECT photos_url FROM client_extras WHERE order_id=?', (order_id,)).fetchone()
-        return {'url': row['photos_url'] if row else ''}

@@ -273,12 +273,19 @@ $('#inspector').onchange = async e => {
       return notify('Выберите PNG, JPEG или WebP до 1 МБ', true);
     const target = selectedLayer();
     if (!target) return;
+    const targetId = target.id, targetDocument = doc, cellId = el.id === 'cell-upload' ? focusCell : null;
+    if (el.id === 'cell-upload' && !cellId) return;
     const reader = new FileReader();
-    reader.onload = () =>
-      commit(() => {
-        const item = el.id === 'cell-upload' ? focusedLeaf(target) : target;
-        if (item) CollageCore.setSource(item, 'custom', { dataUrl: reader.result });
-      });
+    reader.onload = () => {
+      if (preview || doc !== targetDocument) return notify('Макет изменился. Выберите файл заново.', true);
+      const live = allLayers().find(l => l.id === targetId);
+      const item = cellId && live ? locateCell(live, cellId)?.cell : live;
+      if (!live || !item || item.split || (cellId && live.flex))
+        return notify('Исходный кадр удалён или изменён. Выберите файл заново.', true);
+      commit(() => CollageCore.setSource(item, 'custom', { dataUrl: reader.result }));
+      el.value = '';
+    };
+    reader.onerror = () => notify('Не удалось прочитать изображение', true);
     reader.readAsDataURL(file);
     return;
   }
@@ -347,6 +354,15 @@ function endScrub(e) {
 document.addEventListener('pointerup', endScrub);
 document.addEventListener('pointercancel', endScrub);
 $('#inspector').onclick = e => {
+  const layerButton = e.target.closest('[data-layer-select]');
+  if (layerButton) {
+    const id = layerButton.dataset.layerSelect;
+    const sp = section().spreads[view.spread];
+    view.side = Math.max(0, sp.pages.findIndex(p => p.layers.some(l => l.id === id)));
+    selected = [id]; focusCell = null;
+    renderInspector(); renderScene();
+    return;
+  }
   if (MasterPhotos.click(e)) return;
   const spineColor = e.target.closest('[data-spine-color]');
   if (spineColor) {
@@ -363,6 +379,7 @@ $('#inspector').onclick = e => {
   const volumeBtn = e.target.closest('[data-cover-volume]');
   if (volumeBtn) {
     const step = volumeBtn.dataset.coverVolume;
+    view.coverSource = null;
     view.coverSpreads = step === 'auto' ? null : clamp(editorVolume().spreads + Number(step), 1, 200);
     renderInspector();
     renderScene();
@@ -665,6 +682,24 @@ $('#preview-toggle').onclick = () =>
       return serverId;
     },
     sectionName: id => doc.sections.find(s => s.id === id)?.name,
+    inspectCover: (spreads, label) => {
+      view.coverSpreads = spreads;
+      view.coverSource = {label: 'Из предпросмотра: ' + label, document: JSON.stringify(doc)};
+      view.section = coverSection().id; view.spread = 0; selected = [];
+      render();
+    },
+    revealIssue: key => {
+      const parts = String(key).split('/');
+      for (const sec of doc.sections) for (let n = 0; n < sec.spreads.length; n++)
+        for (let side = 0; side < 2; side++) {
+          const layer = sec.spreads[n].pages[side].layers.find(l => parts.includes(l.id));
+          if (!layer) continue;
+          view.section = sec.id; view.spread = n; view.side = side; selected = [layer.id];
+          render(); return true;
+        }
+      notify('Ошибка относится к данным класса; проверьте фотографии и анкеты.', true);
+      return false;
+    },
   });
 $('#retry-save').onclick = () => save().catch(() => {});
 window.addEventListener('offline', () => {
@@ -845,26 +880,25 @@ $('#recover').onclick = async () => {
   }
 };
 $('#export-png').onclick = () => {
-  const active = canvas.getActiveObject();
+  const active = canvas.getActiveObject(), transform = canvas.viewportTransform.slice(),
+    helpers = canvas.getObjects().filter(o => o.excludeFromExport),
+    visibility = helpers.map(o => o.visible);
   changing = true;
-  canvas.discardActiveObject();
-  const transform = canvas.viewportTransform.slice();
-  canvas.setViewportTransform([2, 0, 0, 2, 0, 0]);
-  download(
-    canvas.toDataURL({
-      format: 'png',
-      left: 0,
-      top: 0,
-      width: 4 * pageWidth(),
-      height: 2 * pageHeight(),
-      multiplier: 2,
-    }),
-    'spread.png',
-  );
-  canvas.setViewportTransform(transform);
-  if (active) canvas.setActiveObject(active);
-  changing = false;
-  canvas.requestRenderAll();
+  try {
+    canvas.discardActiveObject();
+    helpers.forEach(o => o.set('visible', false));
+    canvas.setViewportTransform([2, 0, 0, 2, 0, 0]);
+    download(canvas.toDataURL({format: 'png', left: 0, top: 0,
+      width: 2 * sheetWidth(), height: 2 * pageHeight(), multiplier: 2}), 'spread-preview.png');
+  } catch (error) {
+    notify('Не удалось выгрузить PNG: ' + error.message, true);
+  } finally {
+    helpers.forEach((o, i) => o.set('visible', visibility[i]));
+    canvas.setViewportTransform(transform);
+    if (active) canvas.setActiveObject(active);
+    changing = false;
+    canvas.requestRenderAll();
+  }
 };
 document.addEventListener('keydown', e => {
   const editing =

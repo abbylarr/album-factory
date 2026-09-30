@@ -446,6 +446,9 @@ def install(app, s):
                                if any(l['type'] != 'grid' and not l.get('hidden') for page in spread['pages'] for l in page['layers'])]
         layout['fonts'] = [{'id': f.get('id'), 'name': f.get('name'), 'dataUrl': f.get('dataUrl')}
                            for f in master.get('fonts') or [] if f.get('id') and f.get('dataUrl')]
+        from .mvp import missing_layout_photos
+        for photo_id in missing_layout_photos(layout['document'], s.DATA):
+            layout['document'].setdefault('issues', []).append({'level': 'error', 'message': 'Фотография недоступна: ' + photo_id})
         layout['status'] = layout_status(con, order_id, layout['document'])
         return layout
 
@@ -629,6 +632,9 @@ def install(app, s):
             layout = read_layout(con, order_id)
             edition = order_edition(con, order_id, s.ROOT)
         document = layout['document']
+        from .mvp import missing_layout_photos
+        if missing_layout_photos(document, s.DATA):
+            raise HTTPException(409, 'Фотографии макета недоступны. Обновите макет перед экспортом')
         if owner not in {v['owner'] for v in document['variants']}:
             raise HTTPException(404, 'Вариант не найден')
         if any(i['level'] == 'error' for i in document['issues']):
@@ -652,6 +658,9 @@ def install(app, s):
             layout = read_layout(con, order_id)
             edition = order_edition(con, order_id, s.ROOT)
         document = layout['document']
+        from .mvp import missing_layout_photos
+        if missing_layout_photos(document, s.DATA):
+            raise HTTPException(409, 'Фотографии макета недоступны. Обновите макет перед экспортом')
         variant = next((v for v in document['variants'] if v['owner'] == owner), None)
         if variant is None:
             raise HTTPException(404, 'Вариант не найден')

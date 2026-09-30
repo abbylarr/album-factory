@@ -437,7 +437,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         # pages paired from different spreads keep the left page under the right one.
         ids = [p['id'] for p, *_ in pair if p is not None]
         one_spread = bool(ids) and any(all(i in {p['id'] for p in sp['pages']} for i in ids) for sp in section.get('spreads', []))
-        stack = {}; current = [(-1, -1, -1)]
+        stack = {}; current = [(0, -1, -1, -1)]
         def add(e, inherit_effects=True, slot=None, late=None):
             e.update(appearance if inherit_effects else {key: appearance[key] for key in ('angle', 'rotation_center')})
             e.setdefault('hidden',False)
@@ -491,7 +491,9 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         for side,(page, *_) in enumerate(pair):
             if page is not None and (section['id'], index + side) not in blanks:
                 add({'key':f'{spread_key}/{side}/background','type':'rect','box':[side*(page_width+gap/2),0,page_width+gap/2,page_height],'fill':page['background']})
-        if gap > 0 and section.get('spineColor'):
+        painted_spine = gap > 0 and bool(section.get('spineColor'))
+        if painted_spine:
+            current[0] = (2, -1, -1, -1)
             add({'key':f'{spread_key}/spine','type':'rect','box':[page_width,0,gap,page_height],'fill':section['spineColor']})
         for side,(page, item, records, layout_count) in enumerate(pair):
             if (section['id'], index + side) in blanks:
@@ -504,7 +506,12 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
             for position, layer in enumerate(page['layers']):
                 if layer.get('hidden'): continue
                 z = layer.get('z') if one_spread and isinstance(layer.get('z'), (int, float)) else math.inf
-                current[0] = (z, side, position)
+                # Spine-pinned shapes can be ordinary artwork crossing the fold.
+                # Designated text and legacy rotated spine titles go above its paint.
+                spine_text = layer['type'] == 'text' and layer.get('pin') == 'spine' and (
+                    layer.get('spineContent') is True or 'spineContent' not in layer and abs(layer.get('angle', 0)) == 90)
+                band = 3 if painted_spine and spine_text else 1
+                current[0] = (band, z, side, position)
                 if layer['type'] == 'grid' and v2 and section.get('list'):
                     layer = {**layer, 'source': section['list']['source']}
                 if layer.get('type') == 'text' and layer.get('styleId') in styles:
@@ -624,7 +631,7 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                     add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d')})
                 else:
                     add({**common,'type':layer['type'],'fill':layer['fill']})
-        elements.sort(key=lambda e: stack.get(id(e), (-1, -1, -1)))
+        elements.sort(key=lambda e: stack.get(id(e), (0, -1, -1, -1)))
         spread={'key':spread_key,'section':'cover' if section.get('cover') else section['id'],'elements':elements}
         if blank_sides:
             spread['blank'] = blank_sides

@@ -6323,3 +6323,20 @@ button.block-issue:focus-visible {
   background: #f3eafa;
   color: #7712b3;
 }
+
+.layer-list { display: grid; gap: 3px; }
+.layer-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 8px; text-align: left; background: #f6f5f8; }
+.layer-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-row small, .layer-system { color: var(--muted); font-size: 10px; }
+.layer-system { padding: 7px 8px; border-top: 1px solid var(--line); }
+.recovery-actions { display: grid; gap: 8px; margin-top: 16px; }
+#recovery-dialog { max-width: 480px; }
+.cp-issue-focus { position: absolute; outline: 3px solid #e34949; background: #e3494915; pointer-events: none; z-index: 100; }
+.cp-issues button { text-align: left; padding: 5px 8px; font-size: 11px; }
+.cp-issue-context { padding: 8px 12px; background: #fff1f1; border-radius: 8px; }
+
+.cp-album.has-context { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.cp-nav { flex-wrap: wrap; }
+.cp-nav [data-cp="inspect-cover"] { width: auto; height: auto; font-size: 11px; padding: 7px 10px; }
+.cp-issue-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cp-issue-context button { padding: 6px 9px; }

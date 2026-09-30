@@ -43,6 +43,8 @@ let doc = MasterDefaults.create(),
   selected = [],
   zoomMode = 'fit',
   clipboard = null,
+  clipboardGeometry = null,
+  recoveryPending = null,
   pan = null,
   space = false,
   packageMode = 'new',
@@ -188,7 +190,7 @@ function updateSaveState() {
 }
 function scheduleAutosave(delay = 900) {
   clearTimeout(saveTimer);
-  if (!ready || !dirty || !navigator.onLine) return;
+  if (!ready || !dirty || !navigator.onLine || recoveryPending) return;
   saveTimer = setTimeout(() => save().catch(() => {}), delay);
 }
 function markDirty() {
@@ -196,7 +198,7 @@ function markDirty() {
   saveError = '';
   updateSaveState();
   try {
-    localStorage.setItem('af-package-' + serverId, JSON.stringify({ document: doc, revision }));
+    if (!recoveryPending) localStorage.setItem('af-package-' + serverId, JSON.stringify({ document: doc, revision }));
   } catch (e) {
     notify('Локальная копия не поместилась. Подключитесь и дождитесь сохранения на сервере.', true);
   }
@@ -273,6 +275,15 @@ function spreadStack(spread) {
     .sort((a, b) => (a.l.z ?? Infinity) - (b.l.z ?? Infinity) || a.side - b.side || a.i - b.i)
     .map(e => e.l);
 }
+function isSpineContent(layer) {
+  return layer.type === 'text' && layer.pin === 'spine' &&
+    (layer.spineContent === true || (layer.spineContent == null && Math.abs(layer.angle || 0) === 90));
+}
+function stackGroups(spread, sec = section()) {
+  const order = spreadStack(spread);
+  return sec.cover && sec.spineColor
+    ? [order.filter(l => !isSpineContent(l)), order.filter(isSpineContent)] : [order];
+}
 /* Number the spread in the given order and keep each page's list in that order; true when anything moved. */
 function restack(spread, order = spreadStack(spread)) {
   let changed = false;
@@ -320,6 +331,7 @@ function redo() {
 }
 function save() {
   if (!ready) return Promise.reject(Error('Дождитесь загрузки макета'));
+  if (recoveryPending) return Promise.reject(Error('Сначала выберите, что делать с несохранённой копией'));
   if (savePromise) return savePromise;
   clearTimeout(saveTimer);
   savePromise = (async () => {
@@ -371,6 +383,7 @@ async function load(id) {
     doc = data.document;
     serverId = data.id;
     revision = data.revision;
+    recoveryPending = preserveRecovery(id, doc);
     packageMeta = data.package;
     if (packageMeta) design = await api('/designs/' + packageMeta.design_id);
     dirty = ensureCover();
@@ -381,12 +394,15 @@ async function load(id) {
     view.section = doc.sections[0].id;
     view.spread = 0;
     view.side = 0;
+    view.coverSpreads = null;
+    view.coverSource = null;
     ready = true;
     historyURL();
     updateSaveState();
     if (dirty) markDirty();
     renderHeader();
     render();
+    if (recoveryPending) showRecovery();
   } catch (e) {
     notify(e.message, true);
   } finally {
@@ -430,4 +446,69 @@ function freshIds(value) {
   };
   walk(copy);
   return copy;
+}
+
+/* Keep the old unsaved document separately before the first new edit can replace it. */
+function preserveRecovery(id, serverDocument) {
+  try {
+    const key = 'af-recovery-' + id;
+    let stored = localStorage.getItem(key);
+    if (!stored) {
+      stored = localStorage.getItem('af-package-' + id);
+      if (!stored) return null;
+      const parsed = JSON.parse(stored);
+      if (JSON.stringify(parsed.document) === JSON.stringify(serverDocument)) return null;
+      localStorage.setItem(key, stored);
+    }
+    return JSON.parse(stored);
+  } catch (error) {
+    // Never overwrite the working copy if archiving failed (e.g. storage is full).
+    const stored = localStorage.getItem('af-package-' + id);
+    if (stored) return JSON.parse(stored);
+    notify('Не удалось прочитать локальную копию: ' + error.message, true);
+    return null;
+  }
+}
+function showRecovery() {
+  let modal = $('#recovery-dialog');
+  if (!modal) {
+    modal = document.createElement('dialog');
+    modal.id = 'recovery-dialog';
+    modal.setAttribute('aria-label', 'Восстановление несохранённых изменений');
+    modal.innerHTML = `<div class="album-dialog-inner"><h2>Есть несохранённые изменения</h2><p>На сервере открыта другая версия. Выберите, какую продолжить.</p><p class="recovery-message"></p><div class="recovery-actions"><button type="button" data-recovery="restore" class="primary">Восстановить локальную копию</button><button type="button" data-recovery="download">Скачать копию</button><button type="button" data-recovery="server">Оставить серверную и удалить локальную копию</button></div></div>`;
+    modal.addEventListener('cancel', e => e.preventDefault());
+    modal.addEventListener('click', async e => {
+      const action = e.target.closest('[data-recovery]')?.dataset.recovery;
+      if (!action || !recoveryPending) return;
+      if (action === 'download') {
+        const url = URL.createObjectURL(new Blob([JSON.stringify(recoveryPending.document, null, 2)], {type: 'application/json'}));
+        download(url, 'unsaved-master.json');
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+      try {
+        const backup = recoveryPending;
+        if (action === 'restore') {
+          await api('/master-templates/validate', 'POST', {document: backup.document});
+          const conflict = backup.revision != null && backup.revision !== revision;
+          recoveryPending = null;
+          revision = backup.revision ?? revision;
+          commit(() => { doc = clone(backup.document); selected = []; view.section = doc.sections[0].id; view.spread = 0; });
+          if (conflict) notify('Серверная версия изменилась. Копия восстановлена, но сохранение потребует разрешить конфликт. Скачайте её для переноса правок.', true);
+        } else {
+          recoveryPending = null;
+          localStorage.removeItem('af-package-' + serverId);
+          scheduleAutosave();
+        }
+        localStorage.removeItem('af-recovery-' + serverId);
+        modal.close();
+      } catch (error) {
+        modal.querySelector('.recovery-message').textContent = error.message;
+      }
+    });
+    document.body.append(modal);
+  }
+  modal.querySelector('.recovery-message').textContent = recoveryPending.revision !== revision
+    ? 'За это время серверная версия могла измениться. При восстановлении защита от конфликтов сохранится.' : '';
+  modal.showModal();
 }

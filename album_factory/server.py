@@ -82,6 +82,8 @@ def init_db():
         init_layout_workspace(con)
         from .mvp import init as init_mvp
         init_mvp(con)
+        from .client_portal import reconcile_selections
+        reconcile_selections(con)
         from .school_catalog import init as init_school_catalog
         init_school_catalog(con)
         # Backfill fingerprints for portraits selected before upload history existed.
@@ -460,8 +462,9 @@ def get_order(order_id: str):
         order["photos"] = [dict(row) for row in con.execute("SELECT p.id,p.shoot_id,s.kind AS shoot_type,p.filename,p.status,p.person_id,p.uncertain,p.error,a.algorithm AS analysis_version,a.source AS assignment_source FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id LEFT JOIN photo_analysis a ON a.photo_id=p.id WHERE p.order_id=? ORDER BY p.created_at,p.id", (order_id,))]
         order["shoots"] = [dict(r) for r in con.execute("SELECT id,title,kind,shot_on FROM shoots WHERE order_id=? ORDER BY created_at,id", (order_id,))]
         order["persons"] = [dict(row) for row in con.execute("SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id", (order_id,))]
-        from .client_portal import progress_by_order
+        from .client_portal import progress_by_order, people_progress
         order["client_progress"] = progress_by_order(con, order_id)[order_id]
+        order["client_people"] = people_progress(con, order_id)
         from .client_portal import open_corrections
         order["corrections"] = open_corrections(con, order_id)
         order["corrections_open"] = len(order["corrections"])
@@ -563,6 +566,8 @@ def move_to_shoot(order_id: str, shoot_id: str, payload: ShootPhotos):
         con.execute(f"UPDATE photos SET shoot_id=?,person_id=NULL,uncertain=0,embedding=NULL,status='pending',error='' WHERE order_id=? AND id IN ({marks})", [shoot_id, order_id, *ids])
         con.execute(f"DELETE FROM photo_analysis WHERE photo_id IN ({marks})", ids)
         con.execute("DELETE FROM persons WHERE order_id=? AND id NOT IN (SELECT person_id FROM photos WHERE person_id IS NOT NULL)", (order_id,))
+        from .client_portal import reconcile_selections
+        reconcile_selections(con, order_id)
     executor.submit(process_pending)
     return {"moved": len(ids)}
 
@@ -661,6 +666,7 @@ class PersonInput(BaseModel):
 @app.patch("/api/orders/{order_id}/persons/{person_id}")
 def rename_person(order_id: str, person_id: str, payload: PersonInput):
     with db() as con:
+        require_order(con, order_id)
         result = con.execute("UPDATE persons SET name=? WHERE id=? AND order_id=?", (payload.name.strip(), person_id, order_id))
         if result.rowcount != 1:
             raise HTTPException(404, "Персона не найдена")
@@ -696,6 +702,8 @@ def move_photos(order_id: str, payload: MoveInput):
         con.execute(f"UPDATE photos SET person_id=?,status='ready',uncertain=0,error='' WHERE order_id=? AND id IN ({placeholders})", [person_id, order_id, *ids])
         con.execute(f"UPDATE photo_analysis SET source='manual',anchors='[]' WHERE photo_id IN ({placeholders})", ids)
         con.execute("DELETE FROM persons WHERE order_id=? AND id NOT IN (SELECT person_id FROM photos WHERE person_id IS NOT NULL)", (order_id,))
+        from .client_portal import reconcile_selections
+        reconcile_selections(con, order_id)
     return {"person_id": person_id}
 
 
@@ -731,12 +739,19 @@ def person_suggestions(order_id: str, payload: PhotoIds):
             "note": "Сходство и порядок кадров — подсказки, а не подтверждение личности."}
 
 
-def remove_photo_rows(con, order_id, ids):
+def remove_photo_rows(con, order_id, ids, deleting_order=False):
+    if not deleting_order:
+        from .mvp import publication_photo_ids
+        publication = con.execute("SELECT document FROM publications WHERE order_id=?", (order_id,)).fetchone()
+        if publication and set(ids) & publication_photo_ids(json.loads(publication['document'])):
+            raise HTTPException(409, "Фотографии используются в опубликованном макете. Уберите их из макета и опубликуйте новую редакцию перед удалением")
     placeholders = ",".join("?" for _ in ids)
     con.execute(f"DELETE FROM order_covers WHERE photo_id IN ({placeholders})", ids)
     con.execute(f"DELETE FROM processing_times WHERE photo_id IN ({placeholders})", ids)
     con.execute(f"DELETE FROM photos WHERE order_id=? AND id IN ({placeholders})", [order_id, *ids])
     con.execute("DELETE FROM persons WHERE order_id=? AND id NOT IN (SELECT person_id FROM photos WHERE person_id IS NOT NULL)", (order_id,))
+    from .client_portal import reconcile_selections
+    reconcile_selections(con, order_id)
 
 
 def remove_photo_files(ids):
@@ -769,7 +784,7 @@ def delete_order(order_id: str):
         require_order(con, order_id)
         ids = [r[0] for r in con.execute("SELECT id FROM photos WHERE order_id=?", (order_id,))]
         if ids:
-            remove_photo_rows(con, order_id, ids)
+            remove_photo_rows(con, order_id, ids, deleting_order=True)
         con.execute("DELETE FROM persons WHERE order_id=?", (order_id,))
         con.execute("DELETE FROM order_covers WHERE order_id=?", (order_id,))
         con.execute("DELETE FROM shoots WHERE order_id=?", (order_id,))

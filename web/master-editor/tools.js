@@ -455,19 +455,27 @@ function resizeDesign(cover, newW, newH) {
   const [oldW, oldH] = cover
     ? coverSection().pageSize || doc.pageSize || [210, 280]
     : doc.pageSize || [210, 280];
-  for (const layer of cover
-    ? coverSection().spreads.flatMap(sp => sp.pages.flatMap(p => p.layers))
-    : doc.sections
-        .filter(s => !s.cover)
-        .flatMap(s => s.spreads.flatMap(sp => sp.pages.flatMap(p => p.layers)))) {
+  const sections = cover ? [coverSection()] : doc.sections.filter(s => !s.cover);
+  for (const {layer, side} of sections.flatMap(s => s.spreads.flatMap(sp => sp.pages.flatMap((p, side) => p.layers.map(layer => ({layer, side})))))) {
     const b = layer.box,
       edge = v => Math.floor(v * 10 + 1e-6) / 10,
       right = edge(((b.x + b.w) * newW) / oldW),
       bottom = edge(((b.y + b.h) * newH) / oldH);
     b.x = round((b.x * newW) / oldW);
     b.y = round((b.y * newH) / oldH);
-    b.w = round(right - b.x);
-    b.h = round(bottom - b.y);
+    b.w = Math.max(0.1, round(right - b.x));
+    b.h = Math.max(0.1, round(bottom - b.y));
+    const limit = 2 * Math.max(newW, newH);
+    b.w = Math.min(b.w, limit); b.h = Math.min(b.h, limit);
+    if (layer.type === 'grid') {
+      b.w = Math.min(b.w, newW); b.h = Math.min(b.h, newH);
+      b.x = clamp(b.x, 0, newW - b.w); b.y = clamp(b.y, 0, newH - b.h);
+    } else {
+      const left = layer.pin === 'spine' ? -2 * newW : layer.pin === 'wrap' ? 0 : -side * newW,
+        right = layer.pin === 'spine' ? 2 * newW : layer.pin === 'wrap' ? 2 * newW : (2 - side) * newW;
+      b.x = clamp(b.x, left - b.w + .1, right - .1);
+      b.y = clamp(b.y, -b.h + .1, newH - .1);
+    }
   }
   if (cover) coverSection().pageSize = [newW, newH];
   else doc.pageSize = [newW, newH];
@@ -703,9 +711,8 @@ function action(type) {
       }
     if (['forward', 'backward', 'front', 'back'].includes(type))
       for (const sp of sec.spreads) {
-        const order = spreadStack(sp),
-          mine = l => selected.includes(l.id);
-        if (order.some(mine)) restack(sp, restackOrder(order, mine, type));
+        const groups = stackGroups(sp, sec), mine = l => selected.includes(l.id);
+        if (groups.some(order => order.some(mine))) restack(sp, groups.flatMap(order => restackOrder(order, mine, type)));
       }
     if (type === 'delete') selected = [];
   });
@@ -727,6 +734,11 @@ function copyLayers() {
   const list = chosen();
   if (!list.length) return;
   clipboard = clone(list);
+  clipboardGeometry = list.map(l => {
+    const side = section().spreads[view.spread].pages.findIndex(p => p.layers.includes(l));
+    return { x: layerOffset(l, side) + l.box.x, w: layerW(l),
+      pageWidth: pageWidth(), gap: spineGap(), cover: !!section().cover };
+  });
 }
 function pasteLayers() {
   if (preview || !clipboard?.length) return;
@@ -735,7 +747,25 @@ function pasteLayers() {
   const copies = clipboard
     .filter(l => l.type !== 'grid' || !p.layers.some(i => i.type === 'grid'))
     .map(l => {
-      const copy = clone(l);
+      const copy = clone(l), origin = clipboardGeometry?.[clipboard.indexOf(l)];
+      if (origin && (origin.cover !== !!section().cover || copy.pin === 'wrap' && view.side !== 0)) {
+        delete copy.pin;
+        delete copy.spineContent;
+        const sheetX = origin.cover && !section().cover && origin.x >= origin.pageWidth + origin.gap
+          ? origin.x - origin.gap : origin.x;
+        copy.box.w = Math.max(.1, Math.min(origin.w, maxLayerSize()));
+        copy.box.h = Math.max(.1, Math.min(copy.box.h, maxLayerSize()));
+        copy.box.x = round(clamp(sheetX - (section().cover ? sideX(view.side) : view.side * pageWidth()),
+          -view.side * pageWidth(), (2 - view.side) * pageWidth() - Math.min(copy.box.w, pageWidth())));
+        copy.box.y = round(clamp(copy.box.y, 0, Math.max(0, pageHeight() - copy.box.h)));
+      }
+      if (!section().cover) { delete copy.pin; delete copy.spineContent; }
+      if (copy.type === 'grid') {
+        copy.box.w = Math.min(copy.box.w, pageWidth());
+        copy.box.h = Math.min(copy.box.h, pageHeight());
+        copy.box.x = clamp(copy.box.x, 0, pageWidth() - copy.box.w);
+        copy.box.y = clamp(copy.box.y, 0, pageHeight() - copy.box.h);
+      }
       copy.id = uid();
       delete copy.z;
       if (copy.type === 'collage') reidentifyCollage(copy);
@@ -772,17 +802,14 @@ function shortcutLabel(key) {
   return (/Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+') + key;
 }
 function orderEnabled(kind) {
-  return section().spreads.some(sp => {
-    const order = spreadStack(sp),
-      idx = [];
-    order.forEach((l, i) => {
-      if (selected.includes(l.id)) idx.push(i);
-    });
+  return section().spreads.some(sp => stackGroups(sp).some(order => {
+    const idx = [];
+    order.forEach((l, i) => { if (selected.includes(l.id)) idx.push(i); });
     if (!idx.length) return false;
     const atTop = idx.every((i, n) => i === order.length - idx.length + n),
       atBottom = idx.every((i, n) => i === n);
     return kind === 'up' || kind === 'front' ? !atTop : !atBottom;
-  });
+  }));
 }
 function closeObjectMenu() {
   const menu = $('#object-menu');
@@ -843,8 +870,8 @@ function openObjectMenu(e, target) {
       has,
     ) +
     '<hr>' +
-    objectMenuRow('forward', 'Вверх', 'up', '', has && orderEnabled('up')) +
-    objectMenuRow('backward', 'Вниз', 'down', '', has && orderEnabled('down')) +
+    objectMenuRow('forward', 'На слой выше', 'up', '', has && orderEnabled('up')) +
+    objectMenuRow('backward', 'На слой ниже', 'down', '', has && orderEnabled('down')) +
     objectMenuRow('front', 'На передний план', 'front', '', has && orderEnabled('front')) +
     objectMenuRow('back', 'На задний план', 'back', '', has && orderEnabled('back')) +
     '<hr>' +

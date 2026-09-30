@@ -46,7 +46,6 @@ function stageCards(){const st=order.stage,total=order.persons.length,done=order
   else if(st==='approval')Object.assign(layout,{state:'active',tone:'blue',title:'Согласование макета',text:fixes?`Вы отправили правки: ${fixes}. Фотограф исправит макет и пришлёт новую версию.`:'Проверьте макет перед тем, как мы приступим к печати. Убедитесь, что имена написаны правильно, а фотографии — верные.',href:'#layout'});
   else Object.assign(layout,{state:'done',title:'Макет согласован',text:'Посмотреть согласованную версию',href:'#layout'});
   cards.push(layout);
-  if(order.photos_url&&st!=='selection')cards.push({key:'photos',state:'extra',title:'Скачать фотографии',text:'Все фотографии, использованные в макете, доступны по этой ссылке.',href:order.photos_url,external:true,icon:'download'});
   const d=order.delivery,where=d?(d.mode==='personal'?'Получение лично у фотографа.':`Отправка${d.carrier?' · '+d.carrier:''}${d.address?' · '+d.address:''}`):'';
   const delivery={key:'delivery',icon:'truck',title:'Доставка'};
   if(['selection','layout','updating','approval'].includes(st))Object.assign(delivery,{state:'next',text:'Будет доступно после согласования макета.'});

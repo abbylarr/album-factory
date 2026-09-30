@@ -229,6 +229,9 @@ def validate(document):
                     # (its width excludes the spine).
                     pin = layer.get('pin')
                     check(pin is None or section.get('cover') and (pin == 'spine' and kind != 'grid' or pin == 'wrap' and side == 0 and kind in {'photo', 'rect', 'ellipse', 'line', 'svg'}), 'Неверная привязка к корешку')
+                    if 'spineContent' in layer:
+                        check(isinstance(layer['spineContent'], bool), 'Неверное содержимое корешка')
+                        check(not layer['spineContent'] or section.get('cover') and kind == 'text' and pin == 'spine', 'Содержимое корешка должно быть текстом на корешке')
                     left, right = (0, page_width) if kind == 'grid' else (-2 * page_width, 2 * page_width) if pin == 'spine' else (0, 2 * page_width) if pin == 'wrap' else (-side * page_width, (2 - side) * page_width)
                     limit = 2 * max(page_width, page_height)
                     check(isinstance(b, dict) and number(b.get('x'), left - limit, right) and number(b.get('y'), -limit, page_height) and all(number(b.get(k), .1, limit) for k in ('w', 'h')), 'Неверные размеры слоя')
@@ -389,6 +392,11 @@ class DesignInput(BaseModel):
     package_name: str = Field(default='Основная', min_length=1, max_length=80)
     price: int = Field(default=0, ge=0, le=1_000_000)
     document: dict
+
+
+class IdmlInput(BaseModel):
+    file: str = Field(max_length=60_000_000)
+    fonts: list[dict] = Field(default_factory=list, max_length=12)
 
 
 class PackageInput(BaseModel):
@@ -664,6 +672,26 @@ def install(app, s):
     def designs():
         with s.db() as con:
             return [design_result(con,r) for r in con.execute('SELECT * FROM designs WHERE studio_id=? ORDER BY created_at DESC', (_studio(),))]
+
+    @app.post('/api/master-templates/import-idml')
+    def import_idml(payload: IdmlInput):
+        """InDesign IDML (+ TTF/OTF fonts) → a master document draft and a report; nothing is saved yet."""
+        from .idml_import import ImportError_, import_idml as convert
+        try:
+            raw = base64.b64decode(payload.file.split(',', 1)[-1], validate=True)
+        except ValueError as exc:
+            raise HTTPException(422, 'Не удалось прочитать файл IDML') from exc
+        fonts = []
+        for font in payload.fonts:
+            data = str(font.get('dataUrl', ''))
+            if data.startswith(('data:font/ttf;base64,', 'data:font/otf;base64,')) and len(data) <= 2_100_000:
+                fonts.append({'name': str(font.get('name', ''))[:60], 'dataUrl': data})
+        try:
+            document, report = convert(raw, fonts)
+        except ImportError_ as exc:
+            raise HTTPException(422, str(exc)) from exc
+        validate(document)
+        return {'document': document, 'report': report}
 
     @app.post('/api/designs', status_code=201)
     def create_design(payload: DesignInput):

@@ -369,7 +369,8 @@ async function renderScene() {
           },
       );
   const objects = [],
-    backs = [];
+    backs = [],
+    spineFills = [];
   for (let side = 0; side < 2; side++) {
     const g = pages?.[side],
       p = planner.getTemplatePage(g?.templateId),
@@ -389,7 +390,7 @@ async function renderScene() {
       }),
     );
     if (side === 1 && sec.cover && sec.spineColor && spineGap() > 0)
-      backs.push(
+      spineFills.push(
         Object.assign(
           new fabric.Rect({
             left: pageWidth(),
@@ -660,6 +661,9 @@ async function renderScene() {
           });
         }
       }
+      // A spine anchor also belongs to ordinary shapes crossing the fold.
+      // Designated spine text stays above the paint. Legacy spine titles were rotated 90°.
+      object.spineText = !!sec.cover && isSpineContent(l);
       object.masterId = l.id;
       object.boxSelection = ['photo', 'rect', 'ellipse', 'svg'].includes(l.type);
       object.selectionRadius = ['collage', 'grid', 'ellipse', 'line', 'svg'].includes(l.type)
@@ -684,7 +688,9 @@ async function renderScene() {
   canvas.discardActiveObject();
   canvas.clear();
   canvas.backgroundColor = '#f0f0f2';
-  canvas.add(...backs, ...objects, ...bookMarks(), ...safetyGuides());
+  const artwork = spineFills.length ? objects.filter(o => !o.spineText) : objects,
+    spineText = spineFills.length ? objects.filter(o => o.spineText) : [];
+  canvas.add(...backs, ...artwork, ...spineFills, ...spineText, ...bookMarks(), ...safetyGuides());
   const targets = objects.filter(o => selected.includes(o.masterId) && o.selectable);
   if (targets.length === 1) canvas.setActiveObject(targets[0]);
   else if (targets.length > 1) canvas.setActiveObject(new fabric.ActiveSelection(targets, { canvas }));
@@ -883,6 +889,7 @@ function placeOnCover(l, left, width, top = l.box.y, height = l.box.h) {
   }
   if (pin) l.pin = pin;
   else delete l.pin;
+  if (pin !== 'spine') delete l.spineContent;
   l.box.x = round(x);
   l.box.w = round(bw);
   l.box.h = round(h);
