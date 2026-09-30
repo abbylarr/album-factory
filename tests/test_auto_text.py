@@ -81,6 +81,10 @@ class ChipModifierTests(unittest.TestCase):
         self.assertEqual(auto_text.format_value('class', '9А', ['quotes']), '9 «А»')
         self.assertEqual(auto_text.apply_case('анна-мария «звезда» петрова', 'title'), 'Анна-Мария «Звезда» Петрова')
 
+    def test_no_empty_last_line(self):
+        from album_factory import auto_text
+        self.assertEqual(auto_text.resolve('{{class}}\n{{city}}\n', {'class': '11 А', 'city': ''}), '11 А')
+
     def test_unknown_modifiers_are_rejected(self):
         from album_factory import auto_text
         self.assertFalse(auto_text.unknown('{{owner.name|last|upper}} {{class|bare}} {{year|lower}}'))

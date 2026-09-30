@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from album_factory.master_layout import flex_frames
+from album_factory.master_layout import flex_frames, geometry
 from album_factory.master_plan import list_plan, people, personal_take
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +42,10 @@ SECTIONS = [
 CASES = [(section, n, cap) for section in SECTIONS for n in (0, 1, 5, 12, 22, 37, 80) for cap in (0, 6, 12)]
 ASPECTS = [[1.5], [0.75], [1.5, 1.5], [1.5, 0.66], [0.66, 0.66, 1.5], [1.5, 1.5, 1.5, 1.5], [0.75, 1.33, 1.5, 0.8], [1.5] * 5, [1.2] * 6]
 BOXES = [(178, 120, 4, 4), (90, 230, 3, 6), (182, 230, 0, 0)]
+CARD_BASE = {'gap': 5, 'minPhotoWidth': 20, 'photoWidth': 85, 'fontSize': 12, 'photoNameGap': 3, 'nameDetailGap': 2, 'detailFontSize': 9}
+CARDS = [{}, {'showDetail': True}, {'showDetail': True, 'detailAt': 'above'}, {'nameAt': 'right', 'captionWidth': 50},
+         {'showDetail': True, 'nameAt': 'left', 'detailAt': 'left', 'photoRatio': 1}, {'nameAt': 'over', 'showDetail': True, 'detailAt': 'over', 'photoRatio': 0.8},
+         {'showDetail': True, 'nameAt': 'above', 'detailAt': 'right', 'photoRatio': 2 / 3, 'lineHeight': 1.5}]
 
 
 @unittest.skipUnless(shutil.which('node'), 'node is not installed')
@@ -114,6 +118,30 @@ class PlanParityTest(unittest.TestCase):
         tall = flex_frames(90, 230, [1.5, 1.5], 3, 6)
         self.assertEqual(tall[0]['x'], tall[1]['x'])
         self.assertEqual(flex_frames(90, 120, [0.75])[0], {'x': 0, 'y': 0, 'w': 90, 'h': 120})
+
+    def test_vignette_cards_measure_the_same(self):
+        payload = [[{**CARD_BASE, **card, 'box': {'w': w, 'h': h}}, n] for card in CARDS for w, h in ((178, 224), (90, 230)) for n in (1, 4, 9, 13)]
+        js = self.run_js("vm.runInContext(fs.readFileSync('web/master-planner.js','utf8'),Object.assign(c,{document:{createElement:()=>({getContext:()=>({})})}}));"
+                         "const p=c.window.MasterPlanner({sections:[]},{});process.stdout.write(JSON.stringify(input.map(([l,n])=>p.gridGeometry(n,l))));", payload)
+        for (layer, n), geo in zip(payload, js):
+            with self.subTest(layer=layer, n=n):
+                py = geometry(n, layer)
+                self.assertEqual(py is None, geo is None)
+                if py is None:
+                    continue
+                self.assertEqual(py['cols'], geo['cols'])
+                for a, b in (('cell_w', 'cellW'), ('cell_h', 'cellH'), ('photo_w', 'photoW'), ('photo_h', 'photoH'), ('offset_x', 'offsetX'), ('offset_y', 'offsetY')):
+                    self.assertAlmostEqual(py[a], geo[b], places=9)
+                self.assertEqual(set(py['parts']), set(geo['parts']))
+                for key, box in py['parts'].items():
+                    for value, k in zip(box, 'xywh'):
+                        self.assertAlmostEqual(value, geo['parts'][key][k], places=9)
+        # Defaults keep the old card: photo on top, captions under it, card as wide as the photo.
+        old = geometry(12, {**CARD_BASE, 'box': {'w': 178, 'h': 224}})
+        self.assertEqual(old['cell_w'], old['photo_w'])
+        self.assertEqual(old['parts']['name'][1], old['photo_h'] + 3)
+        side = geometry(4, {**CARD_BASE, 'nameAt': 'right', 'captionWidth': 50, 'box': {'w': 178, 'h': 224}})
+        self.assertAlmostEqual(side['cell_w'], side['photo_w'] + 53)
 
 
 if __name__ == '__main__':

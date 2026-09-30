@@ -455,11 +455,11 @@ document.addEventListener('keyup', e => {
 });
 window.addEventListener('blur', () => altMeasure(false));
 const hideVignetteUi = () => {
-  const host = $('#vignette-ui');
-  if (host && !host.hidden) {
-    host.hidden = true;
-    host.innerHTML = '';
-  }
+  for (const host of [$('#vignette-ui'), $('#card-ui')])
+    if (host && !host.hidden) {
+      host.hidden = true;
+      host.innerHTML = '';
+    }
 };
 canvas.on('object:moving', opt => {
   hideVignetteUi();

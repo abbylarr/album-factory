@@ -178,6 +178,7 @@ function blockSettings(s) {
       )
       .join('')}</div>`;
   }
+  if (s.kind === 'flow') body += blockTestClass(s);
   const size = doc.pageSize || [210, 280];
   body += `<p class="block-label">Развороты${s.kind === 'flow' ? infoTip(MasterPlan.ROLES.map(r => `${ROLE_NAMES[r]} — ${ROLE_HELP[r]}.`).join(' ')) : ''}</p><ol class="block-spreads">${s.spreads
     .map((sp, i) => {
@@ -217,6 +218,22 @@ function openBlockSettings(id = view.section) {
   if (!dialog.open) dialog.showModal();
   renderBlockSettings();
 }
+/* The test class fills the vignettes on the canvas: change the count to see how the block spreads out. */
+function blockTestClass(s) {
+  const source = blockList(s).source,
+    plan = plans.find(p => p.sectionId === s.id),
+    spreads = Math.ceil((plan?.pages.length || 0) / 2),
+    design = new Set(planner.designIssues(s).map(i => i.text)),
+    own = /^(Минимум карточек|Минимальный кегль|По размерам фото)/,
+    issues = (plan?.issues || []).filter(i => !design.has(i.text) && !own.test(i.text)),
+    check = (flag, label) =>
+      `<label class="check"><input type="checkbox" data-test-flag="${flag}"${view[flag] ? ' checked' : ''}>${label}</label>`;
+  return (
+    `<p class="block-label">Тестовый класс${infoTip('Виньетки на холсте заполняются этим классом. Меняйте число, чтобы увидеть, как разойдётся список.')}</p><div class="block-range"><label><input type="number" data-test-count="${source}" min="0" max="${source === 'teachers' ? 60 : 80}" value="${view[source]}" aria-label="Сколько ${source === 'teachers' ? 'учителей' : 'учеников'} в тестовом классе"></label><span>${source === 'teachers' ? pluralWord(view[source], 'учитель', 'учителя', 'учителей') : pluralWord(view[source], 'ученик', 'ученика', 'учеников')} → ${spreads} ${pluralWord(spreads, 'разворот', 'разворота', 'разворотов')}</span></div>` +
+    `<div class="block-test-flags">${check('long', 'Длинное имя')}${check('missing', 'Нет портрета')}</div>` +
+    issues.map(i => `<div class="issue ${i.severity}">${esc(i.text)}</div>`).join('')
+  );
+}
 function renderBlockSettings() {
   const dialog = $('#block-settings');
   if (!dialog?.open) return;
@@ -224,11 +241,16 @@ function renderBlockSettings() {
   if (s.cover) return dialog.close();
   const body = $('#block-settings-body'),
     scroll = body.scrollTop,
-    focus = body.contains(document.activeElement) ? document.activeElement.dataset.blockNum : null;
+    active = body.contains(document.activeElement) ? document.activeElement : null,
+    focus = active?.dataset.blockNum
+      ? `[data-block-num="${active.dataset.blockNum}"]`
+      : active?.dataset.testCount
+        ? '[data-test-count]'
+        : null;
   $('#block-settings-title').textContent = s.name;
   body.innerHTML = blockSettings(s);
   body.scrollTop = scroll;
-  if (focus) body.querySelector(`[data-block-num="${focus}"]`)?.focus();
+  if (focus) body.querySelector(focus)?.focus();
 }
 /* Spreads with a vignette repeat; the others stay once before or after them. */
 function assignRoles(s) {
@@ -592,8 +614,23 @@ $('#sections').addEventListener('dblclick', e => {
       render();
     }
   });
+  dialog.addEventListener('input', e => {
+    const el = e.target;
+    if (!el.dataset.testCount || el.value === '' || !el.validity.valid) return;
+    view[el.dataset.testCount] = Number(el.value);
+    render();
+  });
   dialog.addEventListener('change', e => {
     const el = e.target;
+    if (el.dataset.testCount) {
+      if (el.value === '' || !el.validity.valid) el.value = view[el.dataset.testCount];
+      return;
+    }
+    if (el.dataset.testFlag) {
+      view[el.dataset.testFlag] = el.checked;
+      render();
+      return;
+    }
     if ('blockName' in el.dataset) {
       const name = el.value.trim();
       if (name && name !== section().name) blockSet('name', name);

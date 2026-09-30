@@ -1,0 +1,4 @@
+.phone-mask{display:block;position:relative;min-width:0}
+.phone-mask input{font-variant-numeric:tabular-nums}
+.phone-mask-hint{position:absolute;left:0;bottom:0;width:100%;border-style:solid;border-color:transparent;border-radius:inherit;pointer-events:none;white-space:pre;overflow:hidden;color:#a2a2ac;font-variant-numeric:tabular-nums}
+.phone-mask-hint>span:first-child{color:transparent}

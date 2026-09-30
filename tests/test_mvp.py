@@ -38,7 +38,11 @@ class MvpTests(unittest.TestCase):
 
     def layout(self):
         from album_factory import server as s
-        document = {"revision": "rev-1", "variants": [{"owner": "p00", "name": "Первый"}]}
+        with s.db() as con:
+            owners = [row[0] for row in con.execute('SELECT id FROM persons WHERE order_id=?', (self.order,))]
+        document = {"revision": "rev-1", "variants": [{"owner": owner, "name": owner, "sequence": ["page"]} for owner in owners + ["teacher_variant"]],
+                    "issues": [], "shared_spreads": {"page": {"key": "page", "elements": []}}, "variant_spreads": {}, "covers": {},
+                    "spread_size_mm": [30, 20], "print": {"dpi": 72, "files": "spreads"}}
         with s.db() as con:
             con.execute("INSERT INTO order_layouts VALUES (?,?,?,?,?)", (
                 self.order, "{}", json.dumps(document), "[]", s.now()))

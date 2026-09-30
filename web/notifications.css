@@ -1,0 +1,26 @@
+/* Bell on «Все заказы» and its panel: same white rounded surface as the dropdowns, shared stage colours on the icons. */
+.notify{position:relative;flex:none}
+.v2 .notify-toggle{position:relative;display:grid;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
+.v2 .notify-toggle:hover,.notify.open .notify-toggle{background:#ececef;color:var(--ink)}
+.notify-badge{position:absolute;top:4px;right:3px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;border:2px solid #f7f7f8;background:#ffd400;color:#3b3100;font-size:9px;font-weight:700;line-height:11px;text-align:center}
+.notify-badge[hidden]{display:none}
+.notify-panel{position:absolute;top:44px;right:0;z-index:30;display:flex;flex-direction:column;width:min(380px,calc(100vw - 32px));max-height:min(520px,70vh);border:1px solid #ecebe6;border-radius:14px;background:#fff;box-shadow:0 14px 40px #28212f24;animation:notify-in .14s cubic-bezier(.2,.7,.3,1)}
+.notify-panel[hidden]{display:none}
+.notify-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px 10px;font-size:15px}
+.v2 .notify-read-all{padding:4px 6px;margin:-4px -6px;border:0;border-radius:6px;background:none;color:#6f6b74;font:inherit;font-size:12px;cursor:pointer}
+.v2 .notify-read-all:hover{background:#f4f5f6;color:var(--ink)}
+.notify-list{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 6px 6px}
+.v2 .notify-item{position:relative;display:flex;align-items:flex-start;gap:11px;padding:10px 10px 10px 12px;border-radius:10px;color:var(--ink)}
+.v2 .notify-item:hover,.v2 .notify-item:focus-visible{background:#f4f5f6;outline:none}
+.v2 .notify-item.unread{background:#fffbe8}
+.v2 .notify-item.unread:hover{background:#fff6cc}
+.notify-item.unread::before{content:'';position:absolute;left:3px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:#e0a100}
+.notify-ico{flex:none;display:grid;place-items:center;width:32px;height:32px;color:var(--stage)}
+.notify-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.notify-text strong{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notify-text span{font-size:12px;color:#6f6b74}
+.notify-item time{flex:none;margin-top:1px;font-size:11px;color:#a3a0a8;white-space:nowrap}
+.notify-empty{margin:0;padding:24px 12px 30px;text-align:center;font-size:13px;color:var(--muted)}
+@keyframes notify-in{from{opacity:0;transform:translateY(-4px)}}
+@media(prefers-reduced-motion:reduce){.notify-panel{animation:none}}
+@media(max-width:560px){.notify-panel{position:fixed;top:auto;left:16px;right:16px;width:auto;margin-top:8px}}

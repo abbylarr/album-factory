@@ -13,6 +13,9 @@ import math
 
 ROLES = ('intro', 'repeat', 'last', 'outro')
 PEOPLE = ('all', 'others', 'owner', 'off')
+# Where a caption sits in a vignette card, and the photo proportions (width / height) a card may use.
+CARD_ZONES = ('above', 'below', 'left', 'right', 'over')
+PHOTO_RATIOS = (0.75, 0.8, 1, 2 / 3)
 LIST_DEFAULT = {'source': 'students', 'min': 4, 'max': 12, 'strictMin': False, 'excludeLead': False}
 
 

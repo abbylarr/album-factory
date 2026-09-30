@@ -1,4 +1,4 @@
-/* Photo selection, the floating action bar, review by person, the large viewer and page-wide upload.
+/* Photo selection, the action panel by the last selected photo, review by person and page-wide upload.
    Uses the V2 globals (state, $, api, json, esc, toast, count, svgIcon, ICONS, personName, statuses …). */
 Object.assign(ICONS,{
   x:'<path d="M18 6 6 18M6 6l12 12"/>',
@@ -16,7 +16,7 @@ Object.assign(ICONS,{
 });
 
 window.PhotoTools=(()=>{
-  let anchor=null,hovered=null,lasso=null,dragIds=null,dropDepth=0,pillTimer=null,viewer={ids:[],index:0};
+  let anchor=null,lasso=null,dragIds=null,dropDepth=0,pillTimer=null;
   const photo=id=>state.order?.photos.find(p=>p.id===id);
   const personIndex=id=>state.order.persons.findIndex(p=>p.id===id);
   const scope=()=>$('#person-dialog')?.open?$('#person-dialog'):$('#workspace');
@@ -36,11 +36,10 @@ window.PhotoTools=(()=>{
   document.addEventListener('click',e=>{
     const box=e.target.closest('.photo-tile')?.querySelector('input[data-photo]');
     if(!box||e.target.closest('button,a,select,summary'))return;
-    const id=box.dataset.photo;
+    const id=box.dataset.photo;last=id;picking=false;
     if(e.shiftKey&&anchor&&anchor!==id&&ids().includes(anchor)){e.preventDefault();select(rangeBetween(ids(),anchor,id),state.selected.has(anchor));anchor=id;return;}
     anchor=id;
   },true);
-  document.addEventListener('mouseover',e=>{hovered=e.target.closest?.('.photo-tile')?.querySelector('input[data-photo]')?.dataset.photo||null;});
 
   /* Rubber-band selection from empty space around the tiles. Shift or ⌘ adds to the current selection. */
   document.addEventListener('pointerdown',e=>{
@@ -57,50 +56,130 @@ window.PhotoTools=(()=>{
     const top=lasso.y-(scrollY-lasso.sy),r={left:Math.min(lasso.x,e.clientX),right:Math.max(lasso.x,e.clientX),top:Math.min(top,e.clientY),bottom:Math.max(top,e.clientY)};
     Object.assign(lasso.el.style,{left:r.left+'px',top:r.top+'px',width:r.right-r.left+'px',height:r.bottom-r.top+'px'});
     cancelAnimationFrame(lasso.frame);
-    lasso.frame=requestAnimationFrame(()=>{if(!lasso)return;const next=new Set(lasso.base);for(const box of boxes()){const t=box.closest('.photo-tile').getBoundingClientRect();if(t.right>r.left&&t.left<r.right&&t.bottom>r.top&&t.top<r.bottom)next.add(box.dataset.photo);}state.selected=next;changed();});
+    lasso.frame=requestAnimationFrame(()=>{if(!lasso)return;const next=new Set(lasso.base);for(const box of boxes()){const t=box.closest('.photo-tile').getBoundingClientRect();if(t.right>r.left&&t.left<r.right&&t.bottom>r.top&&t.top<r.bottom){next.add(box.dataset.photo);last=box.dataset.photo;}}state.selected=next;changed();});
   });
   const endLasso=e=>{if(!lasso||e.pointerId!==lasso.id)return;lasso.el?.remove();document.body.classList.remove('lassoing');lasso=null;};
   document.addEventListener('pointerup',endLasso);document.addEventListener('pointercancel',endLasso);
 
   document.addEventListener('keydown',e=>{
-    if($('#photo-viewer')?.open){viewerKey(e);return;}
+    if(picking&&!$('#selection-dock')?.hidden&&pickerKey(e))return;
     if(typing(e.target)||[...document.querySelectorAll('dialog[open]')].some(d=>d.id!=='person-dialog'))return;
     if(!boxes().length)return;
     const mod=e.metaKey||e.ctrlKey;
     if(mod&&e.code==='KeyA'){e.preventDefault();select(ids(),true);return;}
     if(e.key==='Escape'&&state.selected.size){e.preventDefault();clear();return;}
     if(mod||e.altKey||e.target.closest?.('button,a'))return;
-    if(e.code==='Space'){e.preventDefault();const list=ids();openViewer(list.includes(hovered)?hovered:[...state.selected].find(id=>list.includes(id))||list[0]);return;}
     if((e.key==='Delete'||e.key==='Backspace')&&state.selected.size){e.preventDefault();confirmRemoval('photos');return;}
+    const act=e.code==='KeyP'?'move':e.code==='KeyN'?'to-general':null,btn=act&&state.selected.size&&$(`#selection-dock [data-photo-tools="${act}"]`);
+    if(btn){e.preventDefault();btn.click();return;}
     if(e.key==='Enter'&&state.selected.size){const b=$('#selection-dock [data-v2="confirm-photos"]');if(b&&!b.disabled){e.preventDefault();b.click();}}
   });
 
-  /* Floating bar: shown only while something is selected; its buttons depend on what is selected. */
-  const button=(attrs,icon,label,title,cls='')=>`<button class="dock-btn ${cls}" ${attrs} title="${esc(title)}">${svgIcon(icon,17)}<span>${esc(label)}</span></button>`;
+  /* Actions panel next to the last selected photo; «Другой персоне» turns it into a person search in place. */
+  let last=null,picking=false,hot=0,query='',hints=new Map(),hintGen=0;
+  const button=(attrs,icon,label,title,cls='',key='')=>`<button class="sel-act ${cls}" ${attrs} title="${esc(title)}">${svgIcon(icon,16)}<span>${esc(label)}</span>${key?`<kbd>${key}</kbd>`:''}</button>`;
   function actions(){
     const chosen=state.order.photos.filter(p=>state.selected.has(p.id)),one=chosen.length===1;
     const cover=one?button('data-v2="set-cover"','star','На обложку','Сделать обложкой заказа'):'';
     const del=button('data-v2="delete-photos"','trash','Удалить','Удалить выбранные · Delete','danger');
     if(state.view==='photos'&&globalThis.GeneralReview?.isGeneral())return GeneralReview.dockActions(button)+cover+del;
     const portrait=chosen.length&&chosen.every(p=>isPortrait(p)&&!busy(p));
-    return (chosen.some(p=>p.uncertain&&canConfirmMatch(p))?`<button class="dock-btn primary-dock" data-v2="confirm-photos"></button>`:'')
-      +(portrait?button('data-action="move"','swap','Другой персоне','Назначить другую или новую персону'):'')
-      +(portrait?button('data-photo-tools="to-general"','scene','Не портрет','Перенести в общую съёмку'):'')+cover+del;
+    return (chosen.some(p=>p.uncertain&&canConfirmMatch(p))?`<button class="sel-act primary" data-v2="confirm-photos"></button>`:'')
+      +(portrait?button('data-photo-tools="move"','swap','Другой персоне','Назначить другую или новую персону','','P'):'')
+      +(portrait?button('data-photo-tools="to-general"','scene','Не портрет','Перенести в общую съёмку','','N'):'')+cover+del;
+  }
+  /* While something is selected the filter row shows the count instead of the chips. */
+  function countRow(n){
+    const bar=$('.shoot-bar');if(!bar)return;
+    bar.classList.toggle('selecting',!!n);let row=bar.querySelector('.sel-slim');
+    if(!n){row?.remove();return;}
+    if(!row){row=document.createElement('div');row.className='sel-slim';bar.prepend(row);}
+    const list=ids();
+    row.innerHTML=`<b>Выбрано ${n}</b><button type="button" data-photo-tools="clear">Снять</button>${list.length&&!list.every(id=>state.selected.has(id))?`<button type="button" data-photo-tools="select-all">Выбрать все ${list.length}</button>`:''}`;
   }
   function dock(){
     let el=$('#selection-dock');
     if(!el){el=document.createElement('div');el.id='selection-dock';el.className='selection-dock';el.setAttribute('role','toolbar');el.setAttribute('aria-label','Действия с выбранными фото');}
-    const host=$('#person-dialog')?.open?$('#person-dialog'):document.body;
+    const dialog=$('#person-dialog')?.open?$('#person-dialog'):null,host=dialog||document.body;
     if(el.parentElement!==host)host.append(el);
-    el.classList.toggle('in-dialog',host!==document.body);
-    const n=state.selected.size;
-    document.body.classList.toggle('has-dock',!!n&&host===document.body);
-    if(!n||!state.order){el.hidden=true;el.innerHTML='';return;}
-    const list=ids(),all=list.every(id=>state.selected.has(id));
-    el.hidden=false;
-    el.innerHTML=`<button class="dock-icon" data-photo-tools="clear" title="Снять выделение · Esc" aria-label="Снять выделение">${svgIcon('x',18)}</button><span class="dock-count">Выбрано ${n}</span>${all||!list.length?'':`<button class="dock-link" data-photo-tools="select-all">Выбрать все ${list.length}</button>`}<span class="dock-sep"></span>${actions()}`;
-    syncConfirmation();
+    el.classList.toggle('in-dialog',!!dialog);if(dialog){el.style.top=el.style.left='';el.classList.remove('below','above');}
+    const n=state.order?state.selected.size:0;
+    document.body.classList.toggle('has-selection',!!n);
+    countRow(n);
+    if(!n){el.hidden=true;el.innerHTML='';picking=false;return;}
+    // Appear in place; only moves between photos are animated.
+    const appearing=el.hidden;if(appearing)el.style.transition='none';
+    el.hidden=false;el.classList.toggle('picking',picking);
+    el.innerHTML=picking?pickerHtml():`<div class="near-row"><span class="near-count"><button type="button" class="ico-btn" data-photo-tools="clear" title="Снять выделение · Esc" aria-label="Снять выделение">${svgIcon('x',16)}</button>${n}</span>${actions()}</div>`;
+    if(picking){const q=$('#pick-q');q.oninput=()=>{query=q.value;hot=0;refreshPicker();};}else syncConfirmation();
+    place();
+    if(appearing){void el.offsetWidth;el.style.transition='';}
   }
+  /* Under the anchor photo if it fits, above otherwise, never over the sticky count row; arrow points at the photo. */
+  function place(){
+    const el=$('#selection-dock');if(!el||el.hidden||el.classList.contains('in-dialog'))return;
+    const all=boxes(),box=all.find(b=>b.dataset.photo===last&&state.selected.has(last))||all.find(b=>state.selected.has(b.dataset.photo));
+    const tile=box?.closest('.photo-tile'),area=($('#workspace')||document.body).getBoundingClientRect(),room=Math.min(innerWidth,area.right)-area.left-24;
+    // Narrow window: key hints go first, then labels; icons keep their titles.
+    el.classList.remove('no-kbd','icons');if(el.offsetWidth>room)el.classList.add('no-kbd');if(el.offsetWidth>room)el.classList.add('icons');
+    const w=el.offsetWidth,h=el.offsetHeight,bar=$('.shoot-bar'),minTop=Math.max(10,bar?bar.getBoundingClientRect().bottom+8:10),minLeft=area.left+12,maxLeft=innerWidth-w-12;
+    if(!tile){el.classList.remove('below','above');el.style.top=innerHeight-h-22+'px';el.style.left=Math.max(minLeft,Math.min(maxLeft,area.left+(Math.min(innerWidth,area.right)-area.left-w)/2))+'px';return;}
+    const r=tile.getBoundingClientRect(),below=r.bottom+10+h<=innerHeight-10||r.top-10-h<minTop;
+    const top=Math.max(minTop,Math.min(innerHeight-h-10,below?r.bottom+10:r.top-h-10)),left=Math.max(minLeft,Math.min(maxLeft,r.left+r.width/2-w/2));
+    el.style.top=top+'px';el.style.left=left+'px';el.style.setProperty('--tip',Math.max(18,Math.min(w-18,r.left+r.width/2-left))+'px');
+    el.style.setProperty('--arrow',r.bottom<minTop||r.top>innerHeight?'0':'1');
+    el.classList.toggle('below',below);el.classList.toggle('above',!below);
+  }
+  window.addEventListener('scroll',place,{passive:true});window.addEventListener('resize',place);
+
+  function openPicker(){
+    const chosen=[...state.selected].map(photo).filter(Boolean);
+    if(!chosen.length||!chosen.every(p=>isPortrait(p)&&!busy(p))){toast('Персону можно назначить только обработанным портретам');return;}
+    picking=true;query='';hot=0;hints=new Map();dock();$('#pick-q')?.focus({preventScroll:true});
+    // No room on either side of the photo: scroll so the search opens below it.
+    const el=$('#selection-dock'),tile=boxes().find(b=>b.dataset.photo===last)?.closest('.photo-tile');
+    if(tile&&!el.classList.contains('in-dialog')){const r=tile.getBoundingClientRect(),bar=$('.shoot-bar'),minTop=bar?bar.getBoundingClientRect().bottom+8:10,h=el.offsetHeight,need=r.bottom+10+h-(innerHeight-10);
+      // The count row sticks to the top once scrolled, so the photo may go up to just below it.
+      if(need>0&&r.top-10-h<minTop)scrollBy({top:Math.min(need,r.top-(bar?bar.offsetHeight+8:10)),behavior:'smooth'});}
+    const gen=++hintGen,orderId=state.order.id;
+    api(`/orders/${orderId}/person-suggestions`,json('POST',{photo_ids:chosen.map(p=>p.id)})).then(result=>{
+      if(gen!==hintGen||!picking)return;
+      for(const item of result.photos)for(const c of item.candidates){if(c.similarity!==null&&c.similarity<.35&&c.reason==='face')continue;const rank=c.reason==='face_and_neighbors'?3:c.reason==='neighbors'?1:2;hints.set(c.person_id,Math.max(rank,hints.get(c.person_id)||0));}
+      refreshPicker();
+    }).catch(()=>{});
+  }
+  function closePicker(){if(!picking)return;picking=false;dock();}
+  function candidates(){
+    const o=state.order,q=query.trim().toLocaleLowerCase();
+    return o.persons.map((person,i)=>{const own=o.photos.filter(p=>p.person_id===person.id);return {id:person.id,i,name:personName(person,i),cover:own.find(p=>!p.uncertain&&p.face&&!state.selected.has(p.id))||own.find(p=>!p.uncertain&&!state.selected.has(p.id))||own.find(p=>!state.selected.has(p.id))};})
+      .filter(p=>!q||p.name.toLocaleLowerCase().includes(q)).sort((a,b)=>(hints.get(b.id)||0)-(hints.get(a.id)||0)||a.i-b.i);
+  }
+  function pickerRows(){
+    const list=candidates(),current=[...new Set([...state.selected].map(id=>photo(id)?.person_id))];
+    return list.map((p,j)=>`<button type="button" class="opt ${j===hot?'hot':''}" data-pick="${p.id}"><span class="ava">${p.cover?faceImg(p.cover):''}</span><span class="opt-name">${esc(p.name)}</span>${current.length===1&&current[0]===p.id?'<span class="tag">сейчас</span>':hints.has(p.id)?'<span class="tag like">похож</span>':''}</button>`).join('')
+      +(list.length?'':'<div class="pp-empty">Никого не нашли</div>')
+      +`<button type="button" class="opt new ${hot===list.length?'hot':''}" data-pick=""><span class="ava">${svgIcon('plus',12)}</span><span class="opt-name">Новая персона</span></button>`;
+  }
+  /* The thumbnail scaled and shifted so the stored face box fills the circle; no extra requests. */
+  function faceImg(p){const f=p.face;if(!f)return `<img src="/media/${p.id}/thumb" alt="" loading="lazy">`;const zoom=Math.min(6,Math.max(1,.62/f[2]));
+    return `<img class="face" src="/media/${p.id}/thumb" alt="" loading="lazy" style="width:${(zoom*100).toFixed(1)}%;transform:translate(${(-(f[0]+f[2]/2)*100).toFixed(1)}%,${(-(f[1]+f[3]/2)*100).toFixed(1)}%)">`;}
+  function pickerHtml(){return `<div class="pp-head"><button type="button" class="ico-btn" data-photo-tools="pick-back" title="Назад · Esc" aria-label="Назад">${svgIcon('left',16)}</button><strong>Другой персоне <span>· ${state.selected.size} фото</span></strong></div><div class="pp-search">${svgIcon('search',15)}<input id="pick-q" type="text" placeholder="Найти по имени" autocomplete="off" aria-label="Найти персону" value="${esc(query)}"></div><div class="pp-list">${pickerRows()}</div><div class="pp-foot">↑↓ — выбрать · Enter — перенести · Esc — назад</div>`;}
+  /* Only the list is redrawn so the search field keeps focus. */
+  function refreshPicker(){const box=$('#selection-dock .pp-list');if(!box)return;box.innerHTML=pickerRows();place();box.querySelector('.opt.hot')?.scrollIntoView({block:'nearest'});}
+  function pickerKey(e){
+    const opts=[...document.querySelectorAll('#selection-dock .opt')];
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();hot=(hot+(e.key==='ArrowDown'?1:-1)+opts.length)%opts.length;opts.forEach((x,j)=>x.classList.toggle('hot',j===hot));opts[hot]?.scrollIntoView({block:'nearest'});return true;}
+    if(e.key==='Enter'){e.preventDefault();opts[hot]?.click();return true;}
+    if(e.key==='Escape'){e.preventDefault();closePicker();return true;}
+    return false;
+  }
+  async function assign(pid){
+    const list=[...state.selected],o=state.order,i=pid?personIndex(pid):-1;
+    document.querySelectorAll('#selection-dock .opt').forEach(b=>{b.disabled=true;});
+    try{await api(`/orders/${o.id}/move`,json('POST',{photo_ids:list,person_id:pid||null}));picking=false;$('#person-dialog')?.open&&$('#person-dialog').close();state.selected.clear();await refreshOrder();toast(pid?`${personName(o.persons[i],i)}: перенесено ${list.length}`:`Новая персона: ${list.length} фото`);}
+    catch(error){toast(error.message);refreshPicker();}
+  }
+  document.addEventListener('click',e=>{if(picking&&!e.target.closest('#selection-dock,.photo-tile'))closePicker();});
 
   /* Review: suggested matches grouped by person next to a confirmed reference, then unrecognised frames, then errors. */
   function reviewTile(p,kind){
@@ -108,7 +187,7 @@ window.PhotoTools=(()=>{
       :kind==='unknown'?`<button type="button" class="quick" data-review="assign" data-id="${p.id}" title="Кто это? Выбрать персону" aria-label="Выбрать персону">${svgIcon('user',17)}</button><button type="button" class="quick" data-review="general" data-id="${p.id}" title="Не портрет — в общую съёмку" aria-label="Перенести в общую съёмку">${svgIcon('scene',17)}</button>`:'';
     const note=kind==='unknown'?(p.status==='ready'?'Персона не определена':statuses[p.status]||'Проверить'):kind==='error'?p.error||statuses.error:'';
     // The checkbox goes first: a label activates its first labelable descendant, and buttons are labelable too.
-    return `<label class="photo-tile review-tile" ${kind==='error'?'':'draggable="true"'}><input type="checkbox" data-photo="${p.id}" aria-label="Выбрать ${esc(p.filename)}" ${state.selected.has(p.id)?'checked':''}><span class="tile-media"><img src="/media/${p.id}/thumb" alt="${esc(p.filename)}" loading="lazy" decoding="async" draggable="false"><span class="tile-quick">${quick}</span></span><button type="button" class="quick-view" data-review="view" data-id="${p.id}" title="Открыть крупно · Пробел" aria-label="Открыть крупно">${svgIcon('eye',15)}</button><p title="${esc(p.filename)}">${esc(p.filename)}</p>${note?`<small>${esc(note)}</small>`:''}</label>`;
+    return `<label class="photo-tile review-tile" ${kind==='error'?'':'draggable="true"'}><input type="checkbox" data-photo="${p.id}" aria-label="Выбрать ${esc(p.filename)}" ${state.selected.has(p.id)?'checked':''}><span class="tile-media"><img src="/media/${p.id}/thumb" alt="${esc(p.filename)}" loading="lazy" decoding="async" draggable="false"><span class="tile-quick">${quick}</span></span><p title="${esc(p.filename)}">${esc(p.filename)}</p>${note?`<small>${esc(note)}</small>`:''}</label>`;
   }
   function reviewGroup(g){
     const o=state.order,i=personIndex(g.id),name=personName(o.persons[i],i);
@@ -130,6 +209,7 @@ window.PhotoTools=(()=>{
   }
   function only(id,then){state.selected=new Set([id]);changed();then();}
   document.addEventListener('click',async e=>{
+    const pick=e.target.closest('[data-pick]');if(pick){e.preventDefault();assign(pick.dataset.pick);return;}
     const t=e.target.closest('[data-review],[data-photo-tools]');if(!t)return;
     e.preventDefault();
     const action=t.dataset.review||t.dataset.photoTools,pid=t.dataset.pid,group=()=>state.order.photos.filter(p=>p.person_id===pid&&needsReview(p));
@@ -137,11 +217,12 @@ window.PhotoTools=(()=>{
       if(action==='clear')clear();
       if(action==='select-all')selectAll();
       if(action==='to-general')toGeneral([...state.selected]);
-      if(action==='view')openViewer(t.dataset.id);
+      if(action==='move')openPicker();
+      if(action==='pick-back')closePicker();
       if(action==='select-group'){const list=group().map(p=>p.id),all=list.every(id=>state.selected.has(id));select(list,!all);}
       if(action==='confirm-group'){t.disabled=true;const i=personIndex(pid);await confirm(group(),`${personName(state.order.persons[i],i)}: подтверждено ${group().length}`);}
       if(action==='ok'){t.disabled=true;await confirm([photo(t.dataset.id)].filter(Boolean));}
-      if(action==='wrong'||action==='assign')only(t.dataset.id,openMove);
+      if(action==='wrong'||action==='assign'){last=t.dataset.id;only(t.dataset.id,openPicker);}
       if(action==='general')toGeneral([t.dataset.id]);
     }catch(error){toast(error.message);t.disabled=false;}
   });
@@ -163,32 +244,6 @@ window.PhotoTools=(()=>{
     if(!$('#action-dialog').open)$('#action-dialog').showModal();
   }
 
-  /* Large viewer: the photo next to the person's reference, with the same actions as the bar. */
-  function viewerDialog(){let d=$('#photo-viewer');if(!d){d=document.createElement('dialog');d.id='photo-viewer';d.className='photo-viewer';d.setAttribute('aria-label','Просмотр фотографии');document.body.append(d);d.addEventListener('click',viewerClick);}return d;}
-  function openViewer(id){const list=ids();if(!list.length)return;viewer={ids:list,index:Math.max(0,list.indexOf(id))};drawViewer();const d=viewerDialog();if(!d.open)d.showModal();}
-  function drawViewer(){
-    const d=viewerDialog(),id=viewer.ids[viewer.index],p=photo(id);
-    if(!p){if(d.open)d.close();return;}
-    const i=p.person_id?personIndex(p.person_id):-1,name=i>=0?personName(state.order.persons[i],i):'',ref=i>=0&&isPortrait(p)?matchReference(p):null,sel=state.selected.has(id),can=p.uncertain&&canConfirmMatch(p);
-    d.innerHTML=`<div class="viewer-top"><span>${viewer.index+1} из ${viewer.ids.length} · ${esc(p.filename)}${name?` · ${esc(name)}`:''}</span><button class="viewer-close" data-viewer="close" aria-label="Закрыть · Esc">${svgIcon('x',20)}</button></div><div class="viewer-stage"><figure><img src="/media/${p.id}/full" alt="${esc(p.filename)}" style="background-image:url('/media/${p.id}/thumb')"><figcaption>${p.status!=='ready'?esc(statuses[p.status]||''):p.uncertain?`Предположительно: ${esc(name)}`:name?esc(name):''}</figcaption></figure>${ref?`<figure class="viewer-ref"><img src="/media/${ref.id}/full" alt="Эталон: ${esc(name)}" style="background-image:url('/media/${ref.id}/thumb')"><figcaption>Эталон: ${esc(name)}</figcaption></figure>`:''}</div><button class="viewer-nav prev" data-viewer="prev" aria-label="Предыдущее фото" ${viewer.index?'':'disabled'}>${svgIcon('left',28)}</button><button class="viewer-nav next" data-viewer="next" aria-label="Следующее фото" ${viewer.index<viewer.ids.length-1?'':'disabled'}>${svgIcon('right',28)}</button><div class="viewer-bar"><button class="dock-btn ${sel?'on':''}" data-viewer="toggle">${svgIcon('selectAll',17)}<span>${sel?'Выбрано':'Выбрать'}</span><kbd>X</kbd></button>${can?`<button class="dock-btn primary-dock" data-viewer="ok">${svgIcon('ok',17)}<span>Верно: ${esc(name)}</span><kbd>Enter</kbd></button>`:''}${isPortrait(p)&&!busy(p)?`<button class="dock-btn" data-viewer="move">${svgIcon('swap',17)}<span>Другой персоне</span><kbd>P</kbd></button>`:''}<button class="dock-btn danger" data-viewer="delete">${svgIcon('trash',17)}<span>Удалить</span><kbd>Del</kbd></button></div>`;
-  }
-  async function viewerAction(action){
-    const d=viewerDialog(),id=viewer.ids[viewer.index];
-    if(action==='close')d.close();
-    if(action==='prev'&&viewer.index>0){viewer.index--;drawViewer();}
-    if(action==='next'&&viewer.index<viewer.ids.length-1){viewer.index++;drawViewer();}
-    if(action==='toggle'){select([id],!state.selected.has(id));drawViewer();}
-    if(action==='move'){d.close();only(id,openMove);}
-    if(action==='delete'){d.close();only(id,()=>confirmRemoval('photos'));}
-    if(action==='ok'){const p=photo(id);if(!(p?.uncertain&&canConfirmMatch(p)))return;try{await confirm([p]);}catch(error){toast(error.message);return;}const list=ids();if(!list.length){d.close();return;}viewer={ids:list,index:Math.min(list.includes(id)?list.indexOf(id)+1:viewer.index,list.length-1)};drawViewer();}
-  }
-  function viewerClick(e){const t=e.target.closest('[data-viewer]');if(t)viewerAction(t.dataset.viewer);}
-  function viewerKey(e){
-    const map={ArrowLeft:'prev',ArrowRight:'next',Space:'close',KeyX:'toggle',Enter:'ok',KeyP:'move',Delete:'delete',Backspace:'delete'},action=map[e.code]||map[e.key];
-    if(!action||e.metaKey||e.ctrlKey||e.altKey)return;
-    e.preventDefault();viewerAction(action);
-  }
-
   /* Page-wide drop, folders included. Without an open shoot the dialog asks where to put the photos. */
   const imageName=f=>!/^\./.test(f.name)&&(/\.(jpe?g|png)$/i.test(f.name)||['image/jpeg','image/png'].includes(f.type));
   const byName=new Intl.Collator('ru',{numeric:true});
@@ -206,14 +261,14 @@ window.PhotoTools=(()=>{
   document.addEventListener('dragend',()=>{internalDrag=false;},true);
   const fileDrag=e=>!internalDrag&&[...(e.dataTransfer?.types||[])].includes('Files');
   const canDrop=()=>!!state.order&&location.hash.startsWith('#order/')&&!document.querySelector('dialog[open]');
-  function overlay(show){let el=$('#drop-overlay');if(!el){el=document.createElement('div');el.id='drop-overlay';el.className='drop-overlay';document.body.append(el);}const shoot=state.view==='photos'&&state.order?.shoots?.find(s=>s.id===state.shootId);el.innerHTML=`<div>${svgIcon('upload',40)}<strong>${shoot?`Загрузить в «${esc(shoot.title)}»`:'Отпустите, чтобы загрузить'}</strong><small>${shoot?'Файлы и папки целиком · JPG, PNG':'Затем выберите съёмку'}</small></div>`;el.classList.toggle('show',show);}
+  function overlay(show){let el=$('#drop-overlay');if(!el){el=document.createElement('div');el.id='drop-overlay';el.className='drop-overlay';document.body.append(el);}const shoot=state.view==='photos'&&(state.shootId==='teachers'?{title:'Учителя'}:state.order?.shoots?.find(s=>s.id===state.shootId));el.innerHTML=`<div>${svgIcon('upload',40)}<strong>${shoot?`Загрузить в «${esc(shoot.title)}»`:'Отпустите, чтобы загрузить'}</strong><small>${shoot?'Файлы и папки целиком · JPG, PNG':'Затем выберите съёмку'}</small></div>`;el.classList.toggle('show',show);}
   document.addEventListener('dragenter',e=>{if(!fileDrag(e)||!canDrop())return;dropDepth++;overlay(true);});
   document.addEventListener('dragleave',e=>{if(!fileDrag(e)||!dropDepth)return;if(!--dropDepth)overlay(false);});
-  document.addEventListener('dragover',e=>{if(!fileDrag(e))return;e.preventDefault();e.dataTransfer.dropEffect=canDrop()?'copy':'none';});
+  document.addEventListener('dragover',e=>{if(!fileDrag(e))return;e.preventDefault();e.dataTransfer.dropEffect=canDrop()||e.target.closest?.('.shoot-drop')?'copy':'none';});
   document.addEventListener('drop',async e=>{
     if(!fileDrag(e))return;e.preventDefault();dropDepth=0;overlay(false);if(!canDrop())return;
     const files=onlyImages(await filesFrom(e.dataTransfer));if(!files.length)return;
-    if(state.view==='photos'&&state.order.shoots?.some(s=>s.id===state.shootId))uploadFiles(files);else openShootDialog(files);
+    if(state.view==='photos'&&(state.shootId==='teachers'||state.order.shoots?.some(s=>s.id===state.shootId)))uploadFiles(files);else openShootDialog(files);
   });
 
   /* Upload progress that follows the photographer across pages. */
@@ -223,7 +278,11 @@ window.PhotoTools=(()=>{
     clearTimeout(pillTimer);
     if(!p||inPlace||!state.uploading&&Date.now()-(p.finishedAt||0)>6000){el.hidden=true;return;}
     el.hidden=false;el.href=`#order/${p.orderId}/photos`;
-    el.innerHTML=`<span class="pill-icon ${state.uploading?'busy':''}">${svgIcon(state.uploading?'upload':'check',18)}</span><span><strong>${state.uploading?`Загружаем ${p.done} из ${p.total}`:`Загружено ${p.done-p.duplicates-p.errors.length} из ${p.total}`}</strong><progress max="${p.total}" value="${p.done}"></progress>${p.errors.length?`<small>Ошибок: ${p.errors.length}</small>`:''}</span>`;
+    const mode=state.uploading?'busy':'done';
+    if(el.dataset.mode!==mode){el.dataset.mode=mode;el.innerHTML=`<span class="pill-icon ${mode}">${mode==='busy'?'<svg class="pill-spin" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15.5"/></svg>':''}${svgIcon(mode==='busy'?'upload':'check',18)}</span><span><strong></strong><progress></progress><small hidden></small></span>`;}
+    el.querySelector('strong').textContent=state.uploading?`Загружаем ${p.done} из ${p.total}`:`Загружено ${p.done-p.duplicates-p.errors.length} из ${p.total}`;
+    const bar=el.querySelector('progress');bar.max=p.total;bar.value=p.done;
+    const err=el.querySelector('small');err.hidden=!p.errors.length;err.textContent=p.errors.length?`Ошибок: ${p.errors.length}`:'';
     if(!state.uploading)pillTimer=setTimeout(renderPill,6100);
   }
   window.addEventListener('hashchange',()=>setTimeout(renderPill));
@@ -247,5 +306,5 @@ window.PhotoTools=(()=>{
   async function guessDate(files){for(const f of files.slice(0,5)){const d=await exifDate(f);if(d)return d;}return null;}
 
   $('#person-dialog')?.addEventListener('close',()=>{state.selected.clear();anchor=null;changed();});
-  return {changed,selectAll,rangeBetween,reviewBoard,onlyImages,guessDate,exifDate,renderPill,openViewer};
+  return {changed,selectAll,rangeBetween,reviewBoard,onlyImages,filesFrom,guessDate,exifDate,renderPill};
 })();

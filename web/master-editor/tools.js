@@ -167,7 +167,7 @@ canvas.on('mouse:up', opt => {
         y = clamp(d.y, 0, pageHeight() - h);
       box = { x, y, w, h };
     } else if (opt.e.shiftKey && d.type === 'svg') box.free = true;
-    addLayer(d.type, box);
+    addLayer(d.type, box, { x: opt.e.clientX, y: opt.e.clientY });
     return;
   }
   if (pan) {
@@ -203,6 +203,18 @@ canvas.on('mouse:up', opt => {
 });
 canvas.on('mouse:dblclick', opt => {
   const layer = allLayers().find(l => l.id === opt.target?.masterId);
+  if (layer?.type === 'grid' && selected.length === 1 && selected[0] === layer.id) {
+    opt.e.preventDefault();
+    const part = cardPartAt(layer, canvas.getScenePoint(opt.e));
+    if (cardLayer()) pickCardPart(part);
+    else enterCard(layer, part);
+    return;
+  }
+  if (layer?.type === 'text' && selected.length === 1 && selected[0] === layer.id) {
+    opt.e.preventDefault();
+    startTextEdit(layer);
+    return;
+  }
   if (layer?.type === 'photo' && layer.source === 'custom' && layer.dataUrl) {
     opt.e.preventDefault();
     startPhotoCrop(layer);
@@ -332,12 +344,15 @@ function setTool(next) {
     grid: 'Потяните область автовиньетки',
   };
 }
-function addLayer(type, box) {
+function addLayer(type, box, at, source) {
   if (preview) return;
   const p = page();
   if (!p) return;
+  if (type === 'grid' && section().cover) return notify('На обложке виньетки нет', true);
   if (type === 'grid' && p.layers.some(l => l.type === 'grid'))
     return notify('На этой странице уже есть виньетка', true);
+  /* A vignette only works in a list block: the first one asks whom to place and turns the block into one. */
+  if (type === 'grid' && section().kind !== 'flow' && !source) return askVignetteSource(box, at);
   const b = {
     x: round(box.x),
     y: round(box.y),
@@ -411,7 +426,7 @@ function addLayer(type, box) {
   }
   if (type === 'grid')
     Object.assign(l, {
-      source: blockList(section()).source,
+      source: source || blockList(section()).source,
       gap: 5,
       minPhotoWidth: 32,
       photoWidth: 85,
@@ -443,12 +458,43 @@ function addLayer(type, box) {
   }
   commit(() => {
     p.layers.push(l);
-    if (type === 'grid') makeList(section());
+    if (type === 'grid') {
+      const s = section(),
+        converted = s.kind !== 'flow';
+      makeList(s);
+      if (converted && source) {
+        s.list.source = source;
+        if (source !== 'teachers') s.list.excludeLead = false;
+      }
+    }
     selected = [l.id];
     inspectorTab = 'design';
   });
   setTool('select');
+  if (type === 'text') startTextEdit(l, true);
 }
+function askVignetteSource(box, at) {
+  const menu = $('#object-menu'),
+    row = (id, label) =>
+      `<button type="button" role="menuitem" data-vignette-source="${id}">${kindIcon('flow')}<span>${label}</span></button>`;
+  menu.innerHTML = `<p class="object-menu-title">Кого разместить</p>${row('students', 'Учеников')}${row('teachers', 'Учителей')}`;
+  menu.vignetteBox = box;
+  menu.hidden = false;
+  const r = menu.getBoundingClientRect(),
+    x = at?.x ?? window.innerWidth / 2,
+    y = at?.y ?? window.innerHeight / 2;
+  menu.style.left = clamp(x, 8, window.innerWidth - r.width - 8) + 'px';
+  menu.style.top = clamp(y, 8, window.innerHeight - r.height - 8) + 'px';
+  menu.style.transformOrigin = 'left top';
+}
+$('#object-menu').addEventListener('click', e => {
+  const b = e.target.closest('[data-vignette-source]');
+  if (!b) return;
+  const box = $('#object-menu').vignetteBox;
+  closeObjectMenu();
+  if (!box) return;
+  addLayer('grid', box, null, b.dataset.vignetteSource);
+});
 /* A new page or cover size scales every object of it proportionally. */
 /* Layers scale with the page; far edges round down so a layer on the page edge never ends up past it. */
 function resizeDesign(cover, newW, newH) {
@@ -577,6 +623,10 @@ function property(key, value) {
         'detailStrike',
         'detailLineHeight',
         'detailLetterSpacing',
+        'nameAt',
+        'detailAt',
+        'photoRatio',
+        'captionWidth',
       ].includes(key)
     )
       layers = section()
@@ -662,6 +712,36 @@ function align(which) {
       b.l.box.y = round(y);
       settle(b.l);
     }
+  });
+}
+/* Layer-panel actions keep the page selected and use the same stack bands as the canvas. */
+function layerPanelAction(id, type) {
+  if (preview || !['forward','backward','visibility','lock','delete'].includes(type)) return;
+  const sec = section(), sp = sec.spreads[view.spread], groups = stackGroups(sp, sec),
+    order = groups.find(group => group.some(l => l.id === id)), layer = order?.find(l => l.id === id);
+  if (!layer) return;
+  if ((type === 'forward' && order.at(-1) === layer) || (type === 'backward' && order[0] === layer)) return;
+  commit(() => {
+    if (type === 'visibility') layer.hidden = !layer.hidden;
+    else if (type === 'lock') layer.locked = !layer.locked;
+    else if (type === 'delete') for (const p of sp.pages) p.layers = p.layers.filter(l => l.id !== id);
+    else restack(sp, groups.flatMap(group => group === order ? restackOrder(group, l => l.id === id, type) : group));
+    selected = []; focusCell = null;
+  });
+}
+/* Drag in the layer panel: put the layer just above or below another one of the same stack band. */
+function layerPanelMove(id, targetId, above) {
+  if (preview || id === targetId) return;
+  const sec = section(), sp = sec.spreads[view.spread], groups = stackGroups(sp, sec),
+    order = groups.find(group => group.some(l => l.id === id));
+  if (!order?.some(l => l.id === targetId)) return;
+  const layer = order.find(l => l.id === id), next = order.filter(l => l !== layer),
+    at = next.findIndex(l => l.id === targetId);
+  next.splice(above ? at + 1 : at, 0, layer);
+  if (next.every((l, i) => l === order[i])) return;
+  commit(() => {
+    restack(sp, groups.flatMap(group => (group === order ? next : group)));
+    selected = []; focusCell = null;
   });
 }
 function action(type) {
@@ -793,6 +873,7 @@ const menuGlyphs = {
   lock: '<rect x="4.2" y="8" width="9.6" height="6.6" rx="1.4"/><path d="M6.4 8V6.2a2.6 2.6 0 0 1 5.2 0V8"/>',
   unlock:
     '<rect x="4.2" y="8" width="9.6" height="6.6" rx="1.4"/><path d="M6.4 8V6.2a2.6 2.6 0 0 1 4.8-1.4"/>',
+  hide: '<path d="M3 3l12 12M6.3 5.6A7 7 0 0 1 9 5c3.8 0 6.2 4 6.2 4a12 12 0 0 1-2.2 2.6M10.8 12.7A7 7 0 0 1 9 13c-3.8 0-6.2-4-6.2-4a12 12 0 0 1 2-2.4"/>',
   show: '<path d="M2.8 9s2.4-4 6.2-4 6.2 4 6.2 4-2.4 4-6.2 4-6.2-4-6.2-4z"/><circle cx="9" cy="9" r="1.7"/>',
 };
 function menuGlyph(name) {
@@ -813,7 +894,9 @@ function orderEnabled(kind) {
 }
 function closeObjectMenu() {
   const menu = $('#object-menu');
-  if (menu) menu.hidden = true;
+  if (!menu) return;
+  menu.hidden = true;
+  menu.vignetteBox = null;
 }
 function objectMenuRow(id, label, icon, kbd, enabled) {
   return `<button type="button" role="menuitem" data-object-menu="${id}"${enabled ? '' : ' disabled'}>${menuGlyph(icon)}<span>${label}</span>${kbd ? `<kbd>${kbd}</kbd>` : ''}</button>`;

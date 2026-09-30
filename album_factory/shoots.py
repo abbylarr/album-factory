@@ -22,6 +22,9 @@ def init(con):
         title TEXT NOT NULL, created_at TEXT NOT NULL)""")
     if 'shot_on' not in {r['name'] for r in con.execute('PRAGMA table_info(shoots)')}:
         con.execute("ALTER TABLE shoots ADD COLUMN shot_on TEXT NOT NULL DEFAULT ''")
+    if 'in_layout' not in {r['name'] for r in con.execute('PRAGMA table_info(shoots)')}:
+        # A general shoot switched off stays in the order but is not offered to the layout builder.
+        con.execute("ALTER TABLE shoots ADD COLUMN in_layout INTEGER NOT NULL DEFAULT 1")
     if 'shoot_id' not in {r['name'] for r in con.execute('PRAGMA table_info(photos)')}:
         con.execute('ALTER TABLE photos ADD COLUMN shoot_id TEXT REFERENCES shoots(id)')
     for row in con.execute('SELECT DISTINCT order_id FROM photos WHERE shoot_id IS NULL').fetchall():

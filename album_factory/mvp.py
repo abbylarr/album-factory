@@ -20,7 +20,6 @@ from .storage import retention_deadline
 
 LOCAL = "local"
 studio_ctx = contextvars.ContextVar("album_studio", default=None)
-PDF = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
 
 
 def init(con):
@@ -93,6 +92,8 @@ def init(con):
     con.execute("INSERT OR IGNORE INTO profiles (studio_id) VALUES ('local')")
     con.execute("""INSERT OR IGNORE INTO order_membership (order_id, studio_id)
                    SELECT id, 'local' FROM orders""")
+    from . import production
+    production.init(con)
     jobs.init(con)
 
 
@@ -186,7 +187,7 @@ def photo_visible(con, photo_id):
 
 def forget(con, order_id):
     for table in ("order_membership", "order_terms", "order_pins", "order_codes", "pin_attempts", "allocations", "deliveries",
-                  "publications", "approvals", "authorizations", "production_snapshots"):
+                  "publications", "approvals", "authorizations", "production_snapshots", "production_layouts", "publication_sources"):
         con.execute(f"DELETE FROM {table} WHERE order_id=?", (order_id,))
     con.execute("DELETE FROM class_sessions WHERE order_id=?", (order_id,))
     from . import client_portal
@@ -518,6 +519,7 @@ class ApproveInput(BaseModel):
 
 class ProductionInput(BaseModel):
     responsibility: bool = False
+    gift_owner: str | None = Field(default=None, max_length=100)
 
 
 def install(app, s):
@@ -651,7 +653,8 @@ def install(app, s):
     def publish_layout(order_id: str):
         with s.db() as con:
             con.execute("BEGIN IMMEDIATE")
-            s.require_order(con, order_id)
+            from . import production
+            production.require_editable(con, s.require_order(con, order_id))
             layout = con.execute("SELECT document FROM order_layouts WHERE order_id=?", (order_id,)).fetchone()
             if layout is None:
                 raise HTTPException(409, "Сначала создайте макет")
@@ -666,6 +669,8 @@ def install(app, s):
             if con.execute("SELECT stage FROM orders WHERE id=?", (order_id,)).fetchone()["stage"] in order_stages.STAGES[5:]:
                 raise HTTPException(409, "Заказ уже отправлен в печать")
             con.execute("UPDATE order_terms SET workflow='layout' WHERE order_id=?", (order_id,))
+            from .production import save_publication_source
+            save_publication_source(con, s, order_id, revision)
             order_stages.set_stage(con, order_id, 'approval')
             # A new revision answers the class's earlier requests.
             con.execute("UPDATE layout_corrections SET status='resolved' WHERE order_id=? AND status='open' AND revision<>?", (order_id, revision))
@@ -680,14 +685,16 @@ def install(app, s):
             approval = con.execute("SELECT snapshot FROM approvals WHERE order_id=? ORDER BY approved_at DESC LIMIT 1", (order_id,)).fetchone()
             if publication is None:
                 raise HTTPException(409, "Сначала опубликуйте макет")
-            if missing_layout_photos(json.loads(publication["document"]), s.DATA):
+            from . import production
+            if production.read(con, order_id) is None and missing_layout_photos(json.loads(publication["document"]), s.DATA):
                 raise HTTPException(409, "Фотографии опубликованного макета недоступны")
             approved_revision = json.loads(approval["snapshot"])["revision"] if approval else None
             if approved_revision != publication["revision"] and not payload.responsibility:
                 raise HTTPException(409, "Ожидается повторное согласование")
             if approval is None and not payload.responsibility:
                 raise HTTPException(409, "Сначала нужно согласование класса")
-            production_snapshot(con, order)
+            summary = production_snapshot(con, order)
+            production.freeze(con, s, order_id, summary, payload.gift_owner)
             existing = con.execute("SELECT revision FROM authorizations WHERE order_id=?", (order_id,)).fetchone()
             if existing and existing["revision"] == publication["revision"]:
                 return {"authorized": True}
@@ -709,14 +716,36 @@ def install(app, s):
             if con.execute("SELECT 1 FROM authorizations WHERE order_id=?", (order_id,)).fetchone() is None:
                 raise HTTPException(409, "Производство ещё не разрешено")
             snapshot = production_snapshot(con, order)
-        path = _manifest_path(s, order_id)
-        try:
-            manifest = json.loads(path.read_text())
-        except (OSError, ValueError):
-            manifest = None
-        if not isinstance(manifest, dict) or manifest.get("production_hash") != snapshot["hash"]:
-            manifest = _write_export(s, order_id, snapshot)
-        return manifest
+        return _write_export(s, order_id, snapshot)
+
+    @app.get("/api/orders/{order_id}/export/download")
+    def download_bundle(order_id: str):
+        manifest = export_bundle(order_id)
+        path = Path(s.DATA)/"exports"/order_id/manifest["layout_hash"]/manifest["bundle_name"]
+        return FileResponse(path, media_type="application/zip", filename="album-print-bundle.zip")
+
+    @app.get("/api/orders/{order_id}/export/files/{filename}")
+    def download_export_file(order_id: str, filename: str):
+        manifest = export_bundle(order_id)
+        allowed = {name for row in manifest["files"] for name in (row["name"], row["jpeg_name"])}
+        if filename not in allowed:
+            raise HTTPException(404, "Файл не найден")
+        path = Path(s.DATA)/"exports"/order_id/manifest["layout_hash"]/filename
+        return FileResponse(path, media_type="application/pdf" if filename.endswith('.pdf') else "application/zip", filename=filename)
+
+    @app.get("/api/orders/{order_id}/production/photos/{photo_id}")
+    def production_photo(order_id: str, photo_id: str):
+        from . import production
+        with s.db() as con:
+            s.require_order(con, order_id)
+            source = production.read(con, order_id)
+            meta = (source or {}).get("snapshot", {}).get("photos", {}).get(photo_id)
+            if meta is None:
+                raise HTTPException(404, "Фотография не найдена")
+        path = Path(meta["path"])
+        if not path.is_file():
+            raise HTTPException(409, "Фотография производственной редакции недоступна")
+        return FileResponse(path, media_type="image/jpeg")
 
     @app.post("/client-api/{token}/enter")
     def enter(token: str, payload: PinInput):
@@ -855,6 +884,8 @@ def install(app, s):
             con.execute("INSERT INTO approvals VALUES (?,?,?,?,?)", (
                 s.uid(), order["id"], body["hash"], json.dumps({"revision": body["revision"], "summary": body}, ensure_ascii=False), s.now()))
             con.execute("UPDATE order_terms SET workflow='client_approved' WHERE order_id=?", (order["id"],))
+            from . import notifications
+            notifications.emit(con, order["id"], "approved")
         return {"ok": True}
 
     @app.post("/client-api/{token}/persons/{person_id}/submit")
@@ -882,24 +913,12 @@ def _manifest_path(server, order_id):
 
 
 def _write_export(server, order_id, snapshot=None):
-    if snapshot is None:
-        with server.db() as con:
-            snapshot = production_snapshot(con, server.require_order(con, order_id))
-    rows = snapshot["allocations"]
-    files = []
-    folder = Path(server.DATA) / "exports" / order_id
-    folder.mkdir(parents=True, exist_ok=True)
-    for row in rows:
-        copies = row["paid"] + row["gift"]
-        if copies <= 0:
-            continue
-        safe = "".join(ch if ch.isalnum() or ch in " ._-" else "_" for ch in row["label"]).strip() or row["key"]
-        name = f"{safe}.pdf"
-        (folder / name).write_bytes(PDF)
-        files.append({"name": name, "copies_paid": row["paid"], "copies_gift": row["gift"]})
-    manifest = {"files": files, "total": sum(item["copies_paid"] + item["copies_gift"] for item in files),
-                "production_hash": snapshot["hash"], "revision": snapshot["revision"]}
-    temporary = folder / ("manifest-" + secrets.token_hex(8) + ".part")
-    temporary.write_text(json.dumps(manifest, ensure_ascii=False))
-    temporary.replace(folder / "manifest.json")
-    return manifest
+    from . import production
+    with server.db() as con:
+        con.execute("BEGIN IMMEDIATE")
+        order = server.require_order(con, order_id)
+        if con.execute("SELECT 1 FROM authorizations WHERE order_id=?", (order_id,)).fetchone() is None:
+            raise HTTPException(409, "Производство ещё не разрешено")
+        snapshot = snapshot or production_snapshot(con, order)
+        source = production.freeze(con, server, order_id, snapshot)
+    return production.export(server, order_id, source)

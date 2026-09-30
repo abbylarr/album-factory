@@ -35,12 +35,21 @@
     }
     return applyCase(value,mode);
   }
-  /* value(field) returns the raw data for one chip; an empty value leaves nothing behind. */
-  const resolve=(text,value)=>(text||'').replace(TOKEN,(all,field,raw)=>field in FIELDS?format(field,value(field),mods(raw)):all);
+  /* value(field) returns the raw data for one chip; an empty value leaves nothing behind.
+     Line breaks at the end are not printed: an empty last line would only take height from the frame. */
+  const resolve=(text,value)=>(text||'').replace(TOKEN,(all,field,raw)=>field in FIELDS?format(field,value(field),mods(raw)):all).replace(/\n+$/,'');
   /* Split into static text and chips for the chip editor. */
   const parts=text=>{const out=[];let last=0;for(const m of (text||'').matchAll(TOKEN)){if(!(m[1] in FIELDS))continue;if(m.index>last)out.push({text:text.slice(last,m.index)});out.push({field:m[1],mods:mods(m[2])});last=m.index+m[0].length;}if(last<(text||'').length)out.push({text:text.slice(last)});return out;};
   const token=(field,list=[])=>`{{${[field,...list.filter(Boolean)].join('|')}}}`;
+  /* Master text has one case setting. Keep an old single-chip appearance when no frame case was set. */
+  function unifyCase(text,current){
+    const chunks=parts(text||''), chips=chunks.filter(p=>p.field),
+      modes=chips.map(p=>p.mods.find(m=>CASE_IDS.includes(m))||'');
+    const textCase=current==null&&!chunks.some(p=>p.text?.trim())&&modes.length&&modes.every(m=>m===modes[0])
+      ? modes[0] : current||'';
+    return {text:chunks.map(p=>p.field?token(p.field,p.mods.filter(m=>!CASE_IDS.includes(m))):p.text).join(''),textCase};
+  }
   /* Short chip label: the field and its settings, e.g. «Класс · 11 Б · AG». */
   const label=(field,list=[])=>{const group=kind(field),form=(FORMS[group]||[]).find(([id])=>id&&list.includes(id)),mode=CASES.find(([id])=>id&&list.includes(id));return [FIELDS[field],form?(group==='class'?form[2]:form[1].toLocaleLowerCase('ru')):'',mode?mode[2]:''].filter(Boolean).join(' · ');};
-  root.AutoText={GROUPS,FIELDS,FORMS,CASES,kind,fields,resolve,parts,token,label,format,applyCase,classParts};
+  root.AutoText={GROUPS,FIELDS,FORMS,CASES,kind,fields,resolve,parts,token,label,format,applyCase,classParts,unifyCase};
 })(typeof window!=='undefined'?window:globalThis);

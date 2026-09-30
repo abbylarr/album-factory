@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Список этапа · стенд</title>
+<!-- Real service styles: the prototype is judged against what ships. -->
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/v2.css">
+<link rel="stylesheet" href="../../web/board.css">
+<style>
+body.v2{display:block;min-height:100vh;margin:0;background:#f5f5f3}
+.proto-bar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:12px 34px;background:#fcfcfaee;backdrop-filter:blur(6px);border-bottom:1px solid #e6e7e1;font-size:13px}
+.proto-bar b{font-size:14px}
+.proto-seg{display:inline-flex;padding:3px;background:#efeef1;border-radius:9px}
+.proto-seg button{padding:5px 11px;border:0;border-radius:7px;background:none;font:inherit;color:#5f5c64;cursor:pointer;min-height:0}
+.proto-seg button.on{background:#fff;color:#242522;box-shadow:0 1px 2px #28212f1a}
+.proto-note{color:#8d8992}
+.v2 main{margin:0;padding:0}
+.v2 .page.queue{max-width:none;padding:26px 34px 60px}
+@media(max-width:700px){.proto-bar,.v2 .page.queue{padding-left:16px;padding-right:16px}}
+
+/* ── A · Карточка лёжа: превью + кольцо + имя | плашка справа ─────────── */
+.qa{display:flex;flex-direction:column;gap:8px}
+.qa-row{position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,460px);align-items:center;gap:16px;padding:8px 8px 8px 8px;background:#fefefe;border:1px solid var(--line);border-radius:16px;box-shadow:var(--card-shadow);transition:border-color .15s,box-shadow .15s}
+.qa-row:hover{border-color:#e2ddd6;box-shadow:0 8px 28px #2222220d}
+.qa-thumb{position:relative;width:92px;height:60px;border-radius:10px;background:#f1efec;overflow:hidden}
+.qa-thumb .fan{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.qa-thumb .fan i{flex:none;display:block;width:30px;height:40px;border:2px solid #fff;border-radius:2px;box-shadow:1px 3px 6px #28212f22}
+.qa-thumb .fan i+i{margin-left:-7px}
+.qa-thumb .fan i:first-child{transform:rotate(-7deg) translateY(2px)}
+.qa-thumb .fan i:nth-child(2){position:relative;z-index:1;height:44px;width:33px}
+.qa-thumb .fan i:last-child{transform:rotate(7deg) translateY(2px)}
+.qa-thumb .paper{position:absolute;left:18px;top:9px;width:56px;height:42px;padding:5px 6px;box-sizing:border-box;background:#f6f3ee;box-shadow:2px 3px 8px #28212f1f;transform:rotate(-3deg);font-family:Georgia,serif;font-size:15px;color:#3d3a36}
+.qa-id{display:flex;align-items:center;gap:12px;min-width:0;color:var(--ink);text-decoration:none}
+.qa-id .order-tile-heading{font-size:16px}
+.qa-meta{display:flex;gap:10px;font-size:12px;color:#8d8992;white-space:nowrap}
+.qa-plate{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:6px 16px;border-radius:12px;background:var(--plate);color:var(--plate-ink);font-size:13px}
+.qa-plate .txt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qa-plate .bar{flex:1 1 60px;max-width:110px;height:4px;border-radius:4px;background:#0000000f;overflow:hidden}
+.qa-plate .bar i{display:block;height:100%;background:var(--turn);border-radius:4px}
+.mark{display:inline-flex;align-items:center;gap:5px;color:#8d8992;font-variant-numeric:tabular-nums}
+.mark svg{animation:spin 1.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:860px){.qa-row{grid-template-columns:minmax(0,1fr)}}
+
+/* ── B · Таблица: колонки вместо пустоты ─────────────────────────────── */
+.qb{background:#fefefe;border:1px solid var(--line);border-radius:16px;box-shadow:var(--card-shadow);overflow:hidden}
+.qb-head,.qb-row{display:grid;grid-template-columns:minmax(220px,1.4fr) minmax(220px,1.6fr) 150px 90px 80px 150px;align-items:center;gap:16px;padding:0 18px}
+.qb-head{height:38px;font-size:12px;color:#8d8992;border-bottom:1px solid #efeee9}
+.qb-head span:nth-child(n+4){text-align:right}
+.qb-row{min-height:60px;border-top:1px solid #f3f2ee;color:var(--ink);text-decoration:none;transition:background .12s}
+.qb-row:first-of-type{border-top:0}
+.qb-row:hover{background:#faf9f7}
+.qb-name{display:flex;align-items:center;gap:11px;min-width:0}
+.qb-name .order-tile-heading{font-size:15px}
+.qb-status{display:flex;align-items:center;gap:9px;min-width:0;font-size:13px}
+.qb-pill{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:5px 10px;border-radius:8px;background:var(--plate);color:var(--plate-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qb-pill::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--turn)}
+.qb-prog{display:flex;align-items:center;gap:8px;font-size:12px;color:#5f5c64;font-variant-numeric:tabular-nums}
+.qb-prog .bar{flex:1;height:4px;border-radius:4px;background:#ecebee;overflow:hidden}
+.qb-prog .bar i{display:block;height:100%;background:#8d8992;border-radius:4px}
+.qb-prog.full .bar i{background:#d39a1a}
+.qb-num{text-align:right;font-size:13px;color:#5f5c64;font-variant-numeric:tabular-nums}
+.qb-num.hot{color:#b3261e;font-weight:600}
+.qb-act{text-align:right}
+.qb-act a,.qb-act button{margin:0;padding:6px 0;border:0;background:none;font:inherit;font-size:13px;font-weight:650;color:var(--ink);white-space:nowrap;cursor:pointer;min-height:0}
+.qb-act a:hover,.qb-act button:hover{background:none;text-decoration:underline;text-underline-offset:3px}
+.qb-act .yellow{padding:7px 12px;border-radius:9px;background:#ffd400}
+.qb-act .yellow:hover{text-decoration:none;background:#f5cb00}
+@media(max-width:1000px){.qb-head{display:none}.qb-row{grid-template-columns:minmax(0,1fr) auto;padding:10px 14px;row-gap:8px}.qb-status{grid-column:1/-1;order:3}.qb-prog,.qb-num{display:none}}
+
+/* ── C · Группы по ходу, строки в две колонки ────────────────────────── */
+.qc{display:grid;gap:26px}
+.qc-group h3{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13px;font-weight:600;color:#5f5c64}
+.qc-group h3 i{width:8px;height:8px;border-radius:50%;background:var(--turn)}
+.qc-group h3 small{font-weight:400;color:#8d8992}
+.qc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:8px}
+.qc-row{position:relative;display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 14px 10px 10px;background:#fefefe;border:1px solid var(--line);border-radius:14px;box-shadow:var(--card-shadow);color:var(--ink);text-decoration:none;overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.qc-row:hover{border-color:#e2ddd6;box-shadow:0 8px 28px #2222220d}
+.qc-row::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:var(--turn)}
+.qc-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.qc-text .order-tile-heading{font-size:15px}
+.qc-sub{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--plate-ink);min-width:0}
+.qc-sub span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qc-sub .bar{flex:none;width:80px;height:4px;border-radius:4px;background:#ecebee;overflow:hidden}
+.qc-sub .bar i{display:block;height:100%;background:var(--turn);border-radius:4px}
+.qc-side{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:12px;color:#8d8992}
+.qc-side .order-plate-action{padding:0;font-size:13px;color:var(--ink)}
+.qc-row.turn-mine .qc-side .order-plate-action{padding:6px 12px;border-radius:9px;background:#ffd400}
+.qc-row.turn-mine .qc-side .order-plate-action:hover{text-decoration:none;background:#f5cb00}
+@media(max-width:560px){.qc-list{grid-template-columns:1fr}}
+</style>
+</head>
+<body class="v2">
+<div class="proto-bar">
+  <b>Список этапа</b>
+  <div class="proto-seg" id="variant"></div>
+  <div class="proto-seg" id="stage"></div>
+  <span class="proto-note" id="note"></span>
+</div>
+<main><div class="page queue" id="page"></div></main>
+<script>
+const ICONS={search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',upload:'<path d="M12 15V3m-5 5 5-5 5 5M5 21h14"/>',photo:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>',forms:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v3H9zM9 12h6M9 16h4"/>',layout:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 12h9"/>',approve:'<path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="m9 12 2 2 4-4"/>',print:'<path d="M6 9V3h12v6M6 17H4V9h16v8h-2"/><rect x="6" y="14" width="12" height="7"/>',truck:'<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M10 12h4"/>',loader:'<path d="M21 12a9 9 0 1 1-6.2-8.56"/>'};
+const svgIcon=(n,s=18)=>`<svg class="ico" viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]||''}</svg>`;
+const STAGES=[['new','Загрузить фото','#7712b3'],['photos','Проверить фото','#4d6ff0'],['forms','Сбор данных','#50b7f1','Класс заполняет анкеты детей и выбирает учителей. Перед созданием макета проверьте состав.'],['layout','Сверстать макет','#28cec5','Проверьте собранный макет и отправьте его классу на согласование.'],['approval','Согласовать макет','#f29b38','Макет у класса. После согласования отправьте заказ в печать.'],['print','Напечатать','#e2458a'],['delivery','Доставить','#3aa655'],['archive','Архив','#8a8b85']];
+const STAGE_ICONS={new:'upload',photos:'photo',forms:'forms',layout:'layout',approval:'approve',print:'print',delivery:'truck',archive:'archive'};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function stageRing(stage,size){const color=STAGES.find(s=>s[0]===stage)[2],n=STAGES.length,at=STAGES.findIndex(x=>x[0]===stage)+1,c=size/2,w=Math.max(2.5,size/11),r=c-w/2-1,len=2*Math.PI*r,seg=len/n,gap=Math.max(1.5,size/22);return `<span class="stage-ring" style="width:${size}px;height:${size}px;--turn:${color}" aria-hidden="true"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${STAGES.map((_,k)=>`<circle cx="${c}" cy="${c}" r="${r.toFixed(2)}" class="${k<at?'on':''}" stroke-width="${w.toFixed(1)}" stroke-dasharray="${(seg-gap).toFixed(2)} ${len.toFixed(2)}" stroke-dashoffset="${(-k*seg).toFixed(2)}" transform="rotate(-90 ${c} ${c})"/>`).join('')}</svg>${svgIcon(STAGE_ICONS[stage],Math.round(size*.4))}</span>`;}
+const count=(n,a,b,c)=>{const m=n%10,h=n%100;return n+' '+(m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c);};
+const days=n=>count(n,'день','дня','дней');
+
+// Orders per stage. turn: mine = photographer acts, wait = others, alert = blocker / silent class.
+const PHOTOS=[['#c9b8a6','#8e7b6a'],['#b7c2c9','#6d7e89'],['#d8c7b0','#a18a6c'],['#c4bcb0','#7d7468'],['#bfc9bd','#72806e']];
+const DATA={
+ forms:[
+  {school:'1 школа',cls:'11 А',albums:19,turn:'mine',text:'Все заполнили',action:'Создать макет',prog:[19,19],days:3,photos:3},
+  {school:'Гимназия № 5',cls:'11 Б',albums:24,turn:'mine',text:'Заполнили 25 из 25',action:'Создать макет',prog:[25,25],days:1,photos:3},
+  {school:'Лицей № 2',cls:'9 А',albums:22,turn:'alert',text:'Стоит напомнить · 16 дней',action:'Напомнить',prog:[3,22],days:16,photos:2},
+  {school:'20 школа',cls:'11 А',albums:19,turn:'wait',text:'Заполнили 0 из 19',prog:[0,19],days:2,photos:0},
+  {school:'7 школа',cls:'11 А',albums:21,turn:'wait',text:'Заполнили 18 из 21',prog:[18,21],days:5,photos:3,mark:'64%'},
+  {school:'Школа № 44 им. А. С. Пушкина',cls:'11 В',albums:27,turn:'wait',text:'Заполнили 12 из 27',prog:[12,27],days:8,photos:1},
+ ],
+ layout:[
+  {school:'3 школа',cls:'11 А',albums:23,turn:'mine',text:'Макет собран',action:'Проверить макет',days:1,photos:3},
+  {school:'Лицей № 2',cls:'11 Б',albums:18,turn:'wait',text:'Макет собирается',days:0,photos:3,mark:'38%'},
+  {school:'12 школа',cls:'9 Б',albums:25,turn:'mine',text:'Фото готовы',action:'Собрать макет',days:4,photos:2},
+ ],
+ approval:[
+  {school:'5 школа',cls:'11 А',albums:20,turn:'alert',text:'Правки · осталось 4',action:'Открыть правки',prog:[3,7],days:2,photos:3},
+  {school:'Гимназия № 1',cls:'11 В',albums:26,turn:'mine',text:'Согласовано',action:'В печать',days:1,photos:3},
+  {school:'8 школа',cls:'11 А',albums:17,turn:'wait',text:'Макет у класса',days:4,photos:3},
+  {school:'33 школа',cls:'9 А',albums:21,turn:'alert',text:'Стоит напомнить · 15 дней',action:'Напомнить',days:15,photos:2},
+ ]};
+const PROGRESS_LABEL={forms:'Анкеты',approval:'Правки'};
+
+const thumb=o=>o.photos?`<span class="qa-thumb"><span class="fan">${PHOTOS.slice(0,o.photos).map(([a,b])=>`<i style="background:linear-gradient(160deg,${a},${b})"></i>`).join('')}</span></span>`:`<span class="qa-thumb"><span class="paper">${esc(o.cls)}</span></span>`;
+const heading=o=>`<span class="order-tile-heading" title="${esc(o.school)} · ${esc(o.cls)}"><strong class="order-tile-school">${esc(o.school)}</strong><span class="order-tile-separator">·</span><strong class="order-tile-class">${esc(o.cls)}</strong></span>`;
+const mark=o=>o.mark?`<span class="mark">${svgIcon('loader',12)}${o.mark}</span>`:'';
+const bar=o=>o.prog?`<span class="bar"><i style="width:${Math.round(o.prog[0]/o.prog[1]*100)}%"></i></span>`:'';
+const plateText=o=>o.turn==='mine'&&o.prog&&o.prog[0]===o.prog[1]?o.text:o.text;
+
+// A — the card turned on its side: identity left, the same coloured plate right.
+function variantA(stage,list){return `<div class="qa">${list.map(o=>`<article class="qa-row turn-${o.turn}">
+  <a class="qa-id" href="#">${thumb(o)}${stageRing(stage,32)}<span class="order-tile-text">${heading(o)}<span class="qa-meta"><span>${count(o.albums,'альбом','альбома','альбомов')}</span><span>${o.days?days(o.days)+' на этапе':'сегодня'}</span>${mark(o)}</span></span></a>
+  <div class="qa-plate"><span class="txt">${esc(o.text)}</span>${o.turn==='wait'?bar(o):''}${o.action&&!(o.turn==='alert'&&o.text.startsWith('Стоит'))?`<button class="order-plate-action">${esc(o.action)} →</button>`:''}</div>
+</article>`).join('')}</div>`;}
+
+// B — table: the width holds columns you can compare down the list.
+function variantB(stage,list){const pl=PROGRESS_LABEL[stage];return `<div class="qb"><div class="qb-head"><span>Класс</span><span>Состояние</span><span>${pl||''}</span><span>На этапе</span><span>Альбомов</span><span></span></div>${list.map(o=>`<a class="qb-row turn-${o.turn}" href="#">
+  <span class="qb-name">${stageRing(stage,28)}${heading(o)}</span>
+  <span class="qb-status"><span class="qb-pill">${esc(o.text)}</span>${mark(o)}</span>
+  <span class="qb-prog ${o.prog&&o.prog[0]===o.prog[1]?'full':''}">${pl&&o.prog?`${bar(o)}<span>${o.prog[0]} / ${o.prog[1]}</span>`:''}</span>
+  <span class="qb-num ${o.days>=14?'hot':''}">${o.days?days(o.days):'сегодня'}</span>
+  <span class="qb-num">${o.albums}</span>
+  <span class="qb-act">${o.action?`<button class="${o.turn==='mine'?'yellow':''}" onclick="event.preventDefault()">${esc(o.action)} →</button>`:''}</span>
+</a>`).join('')}</div>`;}
+
+// C — grouped by whose turn; short rows sit two per line on a wide screen.
+function variantC(stage,list){const groups=[['mine','Ваш ход'],['alert','Требуют внимания'],['wait','Ждём']];return `<div class="qc">${groups.map(([t,label])=>{const g=list.filter(o=>o.turn===t);return g.length?`<section class="qc-group turn-${t}"><h3><i></i>${label} <small>${g.length}</small></h3><div class="qc-list">${g.map(o=>`<a class="qc-row turn-${o.turn}" href="#">${stageRing(stage,34)}<span class="qc-text">${heading(o)}<span class="qc-sub"><span>${esc(o.text)}</span>${o.turn==='wait'?bar(o):''}${mark(o)}</span></span><span class="qc-side">${o.action?`<span class="order-plate-action">${esc(o.action)} →</span>`:`<span>${o.days?days(o.days):'сегодня'}</span>`}</span></a>`).join('')}</div></section>`:'';}).join('')}</div>`;}
+
+const VARIANTS={A:['A · Карточка лёжа',variantA,'Тот же набор, что на карточке: превью, кольцо, имя, цветная плашка. Плашка занимает правую треть, поэтому строка не пустая.'],B:['B · Таблица',variantB,'Ширина уходит в колонки, которые сравниваешь сверху вниз: сколько заполнили, сколько дней стоит. Цвет хода — точкой в плашке.'],C:['C · Группы по ходу',variantC,'Сначала «ваш ход», потом «требуют внимания», потом «ждём». Строки короткие и встают по две в ряд.']};
+let variant='A',stage='forms';
+try{const s=JSON.parse(localStorage.getItem('queueListProto')||'{}');if(VARIANTS[s.variant])variant=s.variant;if(DATA[s.stage])stage=s.stage;}catch{}
+function draw(){
+  try{localStorage.setItem('queueListProto',JSON.stringify({variant,stage}));}catch{}
+  const [k,label,color,hint]=STAGES.find(s=>s[0]===stage),n=STAGES.findIndex(s=>s[0]===k)+1,order={mine:0,alert:1,wait:2};
+  const list=[...DATA[stage]].sort((a,b)=>order[a.turn]-order[b.turn]||b.days-a.days);
+  document.getElementById('variant').innerHTML=Object.entries(VARIANTS).map(([key,[name]])=>`<button data-v="${key}" class="${key===variant?'on':''}">${name}</button>`).join('');
+  document.getElementById('stage').innerHTML=Object.keys(DATA).map(key=>`<button data-s="${key}" class="${key===stage?'on':''}">${STAGES.find(s=>s[0]===key)[1]}</button>`).join('');
+  document.getElementById('note').textContent=VARIANTS[variant][2];
+  const page=document.getElementById('page');page.dataset.stage=k;page.style.cssText=`--stage:${color}`;
+  page.innerHTML=`<span class="stage-chip">${svgIcon(STAGE_ICONS[k],14)}Этап ${n} из ${STAGES.length}</span><div class="queue-head"><h1>${label}</h1><div class="queue-tools"><label class="queue-search"><button type="button" aria-label="Поиск">${svgIcon('search',16)}</button><input type="search" placeholder="Школа или класс"></label><div class="segmented"><button aria-pressed="true">${svgIcon('list',16)}</button><button aria-pressed="false">${svgIcon('grid',16)}</button></div></div></div><p class="muted queue-hint">${hint}</p><div id="queue-items">${VARIANTS[variant][1](k,list)}</div>`;
+}
+document.addEventListener('click',e=>{const v=e.target.closest('[data-v]'),s=e.target.closest('[data-s]');if(v){variant=v.dataset.v;draw();}if(s){stage=s.dataset.s;draw();}if(e.target.closest('#page a'))e.preventDefault();});
+draw();
+</script>
+</body>
+</html>

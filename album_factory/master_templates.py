@@ -7,6 +7,7 @@ import json
 import math
 import re
 from .photo_pick import RELAX_TEXT
+from .master_plan import CARD_ZONES, PHOTO_RATIOS
 RELAX_MESSAGES = set(RELAX_TEXT.values())
 from PIL import Image
 from fastapi import HTTPException
@@ -346,6 +347,9 @@ def validate(document):
                         check(number(layer.get('minPhotoWidth'),5,180) and number(layer.get('photoWidth', 85),5,180) and layer['minPhotoWidth'] <= layer.get('photoWidth', 85), 'Неверный диапазон ширины фото')
                         check(number(layer.get('photoNameGap',3),0,20) and number(layer.get('nameDetailGap',2),0,20), 'Неверное расстояние между фото и подписями')
                         check(number(layer.get('minFontSize'),4,layer['fontSize']), 'Неверный минимальный кегль')
+                        check(layer.get('nameAt', 'below') in CARD_ZONES and layer.get('detailAt', 'below') in CARD_ZONES, 'Неверное место подписи в карточке')
+                        check(any(abs(layer.get('photoRatio', .75) - r) < 1e-3 for r in PHOTO_RATIOS) if isinstance(layer.get('photoRatio', .75), (int, float)) else False, 'Неверные пропорции фото в карточке')
+                        check(number(layer.get('captionWidth', 40), 10, 150), 'Неверная ширина подписи сбоку')
         check(len(grid_sources) <= 1, 'В одном разделе нужен один источник виньеток')
     return document
 

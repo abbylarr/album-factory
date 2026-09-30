@@ -4,21 +4,31 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Album Factory — Заказы</title>
   <link rel="icon" href="/static/assets/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/v2.css?v=forms-12">
+  <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/v2.css?v=forms-25">
   <link rel="stylesheet" href="/static/person-picker.css">
+  <link rel="stylesheet" href="/static/phone-input.css?v=1">
   <link rel="stylesheet" href="/static/layout.css">
   <link rel="stylesheet" href="/static/general-review.css">
-  <link rel="stylesheet" href="/static/board.css?v=kanban-10">
-  <link rel="stylesheet" href="/static/photo-tools.css">
+  <link rel="stylesheet" href="/static/board.css?v=queue-table-1">
+  <link rel="stylesheet" href="/static/photo-tools.css?v=face-avatars-2">
   <link rel="stylesheet" href="/static/schools.css">
+  <link rel="stylesheet" href="/static/layout-start.css?v=4">
+  <link rel="stylesheet" href="/static/select-menu.css?v=1">
+  <link rel="stylesheet" href="/static/notifications.css?v=4">
+  <link rel="stylesheet" href="/static/order-activities.css?v=cards-live-1">
   <script src="/static/person-picker.js" defer></script>
+  <script src="/static/phone-input.js?v=1" defer></script>
   <script src="/static/master-default.js" defer></script>
-  <script src="/static/v2.js?v=forms-9" defer></script>
-  <script src="/static/schools.js" defer></script>
-  <script src="/static/photo-tools.js" defer></script>
-  <script src="/static/general-review.js" defer></script>
+  <script src="/static/order-activities.js?v=cards-live-2" defer></script>
+  <script src="/static/v2.js?v=queue-table-2" defer></script>
+  <script src="/static/schools.js?v=teachers-upload-1" defer></script>
+  <script src="/static/layout-start.js?v=3" defer></script>
+  <script src="/static/photo-tools.js?v=teachers-upload-1" defer></script>
+  <script src="/static/general-review.js?v=shoot-head-1" defer></script>
   <script src="/static/layout-canvas.js?v=edits-1" defer></script>
   <script src="/static/layout.js" defer></script>
+  <script src="/static/select-menu.js?v=2" defer></script>
+  <script src="/static/notifications.js?v=4" defer></script>
 </head>
 <body class="v2">
 <aside class="sidebar">
@@ -31,8 +41,8 @@
   <form id="order-form">
     <div class="dialog-heading"><h2 id="dialog-title">Новый заказ</h2><button type="button" class="close" data-close="order-dialog" aria-label="Закрыть">×</button></div>
     <div class="field"><span class="field-label" id="order-school-label">Школа</span><div id="order-school" class="school-picker" role="group" aria-labelledby="order-school-label"></div></div>
-    <div class="form-row three"><label>Класс<input name="class_name" maxlength="30" placeholder="9 Б" required></label><label>Год выпуска<input name="graduation_year" id="graduation-year" type="number" min="2000" max="2100" required></label><label>Альбомов<input name="copies" type="number" min="1" max="1000" value="20" required></label></div>
-    <div class="form-row"><label>Заказчик<input name="customer_name" maxlength="100" placeholder="Ирина Петрова" required autocomplete="name"></label><label>Телефон<input name="customer_contact" type="tel" inputmode="tel" maxlength="40" placeholder="+7 999 000-00-00" required autocomplete="tel"></label></div>
+    <div class="form-row three"><label>Класс <i class="req" aria-hidden="true">*</i><input name="class_name" maxlength="30" placeholder="9 Б" required></label><label>Год выпуска <i class="req" aria-hidden="true">*</i><input name="graduation_year" id="graduation-year" type="number" min="2000" max="2100" required></label><label>Альбомов <i class="req" aria-hidden="true">*</i><input name="copies" type="number" min="1" max="1000" value="20" required></label></div>
+    <div class="form-row"><label>Заказчик<input name="customer_name" maxlength="100" placeholder="Ирина Петрова" autocomplete="name"></label><label>Телефон<input name="customer_contact" type="tel" inputmode="tel" maxlength="40" placeholder="+7 999 000-00-00" autocomplete="tel"></label></div>
     <fieldset class="package-field"><legend>Дизайн и комплектация</legend><div id="order-packages"></div></fieldset>
     <p id="form-error" class="error" role="alert"></p>
     <button class="primary wide" type="submit">Создать заказ</button>

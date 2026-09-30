@@ -1,0 +1,47 @@
+/* Rows under the order head plate: one per background process (web/order-activities.js). */
+.v2 .act-list{display:grid;margin:8px 22px 0;padding:4px 0}
+.v2 .act{display:flex;align-items:center;gap:12px;min-height:40px;padding:4px 18px 4px 12px;font-size:13px;color:#5f5c64;animation:act-in .3s ease-out}
+.v2 .act+.act{border-top:1px solid #f0eff2}
+@keyframes act-in{from{opacity:0;transform:translateY(-4px)}}
+.v2 .act-ico{position:relative;flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#f3f2f4;color:#6f6b74}
+.v2 .act-spin{position:absolute;inset:0;width:100%;height:100%;animation:pill-spin 1.4s linear infinite}
+.v2 .act-spin circle{fill:none;stroke:currentColor;stroke-opacity:.7;stroke-width:1.6;stroke-linecap:round;stroke-dasharray:20 70}
+.v2 .act-ico.rise .ico{animation:act-rise 1.2s ease-in-out infinite}
+@keyframes act-rise{0%{transform:translateY(3px);opacity:.3}50%{opacity:1}100%{transform:translateY(-3px);opacity:.3}}
+.v2 .act-label{flex:none;font-weight:650;color:var(--ink)}
+.v2 .act-detail{flex:none;font-variant-numeric:tabular-nums;white-space:nowrap}
+.v2 .act-bar{flex:1 1 auto;min-width:60px;max-width:280px;height:4px;border-radius:4px;background:#ecebee;overflow:hidden}
+.v2 .act-bar i{display:block;height:100%;border-radius:4px;background:#8d8992;transition:width .5s}
+.v2 .act-fill{flex:1}
+.v2 .act-eta{flex:none;color:#8d8992;white-space:nowrap}
+.v2 .act-tag{flex:none;padding:2px 8px;border-radius:6px;background:#f3f2f4;color:#6f6b74;font-size:11px;white-space:nowrap}
+.v2 .act-action{flex:none;margin:0 0 0 auto;padding:4px 0;border:0;background:none;box-shadow:none;font:inherit;font-weight:650;color:var(--ink);text-decoration:none;white-space:nowrap;cursor:pointer}
+.v2 .act-action:hover{background:none;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.v2 .act-action+.act-action{margin-left:14px}
+.v2 .act-action.quiet{font-weight:500;color:#8d8992}
+.v2 .act.alert .act-ico{background:#fcecea;color:#d2493b}
+.v2 .act.alert .act-label,.v2 .act.alert .act-action:not(.quiet){color:#8a2a22}
+.v2 .act.task .act-ico{background:#fcf1da;color:#b07d10}
+.v2 .act.done .act-ico{background:#e9f5ec;color:#3aa655}
+.v2 .act.done{animation:act-fade 5s forwards}
+@keyframes act-fade{0%{opacity:0}6%,75%{opacity:1}100%{opacity:.25}}
+/* Board cards and order tiles: what runs or broke, one quiet line under the plate. */
+.v2 .act-mini{display:flex;flex-wrap:wrap;gap:4px 10px;margin:-2px 12px 9px;font-size:11px;color:#6f6b74;font-variant-numeric:tabular-nums}
+.v2 .act-mini>span{display:inline-flex;align-items:center;gap:4px}
+.v2 .act-mini .alert{color:#b3261e}
+.v2 .act-mini .mini-spin{display:inline-flex;animation:pill-spin 1.4s linear infinite}
+.v2 .order-tile .act-mini{margin:-6px 20px 10px}
+.v2 .act-slot:empty{display:none}
+/* Corrections dialog: tick what is fixed. */
+.v2 .fix-list{display:grid;max-height:min(60vh,520px);margin:14px 0 0;padding:0;overflow:auto;list-style:none}
+.v2 .fix-list li{border-top:1px solid #f0eff2}
+.v2 .fix-list label{display:flex;align-items:flex-start;gap:12px;margin:0;padding:11px 2px;font-weight:400;cursor:pointer}
+.v2 .fix-list input{flex:none;width:18px;height:18px;margin:2px 0 0;accent-color:#3aa655}
+.v2 .fix-list .fix-body{display:grid;gap:2px;min-width:0;font-size:13px;color:#5f5c64}
+.v2 .fix-list strong{font-size:14px;color:var(--ink)}
+.v2 .fix-list small{color:#8d8992}
+.v2 .fix-list .fixed .fix-body{opacity:.55}
+.v2 .fix-list .fixed strong{text-decoration:line-through}
+.v2 .fix-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+@media(max-width:760px){.v2 .act-list{margin:8px 18px 0}.v2 .act{flex-wrap:wrap}.v2 .act-bar{flex-basis:100%;max-width:none;order:9}}
+@media(prefers-reduced-motion:reduce){.v2 .act-spin,.v2 .act-ico.rise .ico,.v2 .act-mini .mini-spin{animation:none}}

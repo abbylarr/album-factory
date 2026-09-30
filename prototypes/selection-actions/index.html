@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Панель у фото · стенд</title>
+<!-- Real service styles: the prototype is judged against what ships. -->
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/v2.css">
+<link rel="stylesheet" href="../../web/board.css">
+<link rel="stylesheet" href="../../web/photo-tools.css">
+<style>
+body.v2{display:block;min-height:100vh;margin:0;background:#f5f5f3}
+.proto{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}
+.proto-side{position:sticky;top:0;height:100vh;overflow:auto;box-sizing:border-box;padding:20px 18px 40px;background:#fcfcfa;border-right:1px solid #e6e7e1;font-size:13px;z-index:60}
+.proto-side h1{margin:0 0 6px;font-size:16px}
+.proto-side p{margin:0 0 14px;color:#77796e;line-height:1.45}
+.proto-opt{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13px;font-weight:400;color:#3c3d37}
+.proto-opt input{margin:0;width:auto;min-height:0}
+.proto-reset{padding:0;background:none;border:0;color:#81827d;font:inherit;font-size:12px;text-decoration:underline;cursor:pointer}
+.proto-main{padding:26px 34px 160px;min-width:0}
+.photo-tile img{background:#dcdad6}
+.photo-tile .tile-person{display:block;padding:0 10px 9px;margin-top:-6px;font-size:11px;color:#9a9c92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* ---- Selection mark: hidden until hover, a round check when chosen ---- */
+.v2 .photo-tile input[data-photo]{-webkit-appearance:none;appearance:none;position:absolute;top:10px;left:10px;z-index:2;width:22px;height:22px;margin:0;border:1.5px solid #fff;border-radius:50%;background:#0000002e;box-shadow:0 1px 4px #0000004d;cursor:pointer;opacity:0;transform:scale(.85);transition:opacity .12s,transform .12s,background .12s}
+.photo-tile:hover input[data-photo],.photo-grid.selecting .photo-tile input[data-photo]{opacity:1;transform:none}
+.photo-grid.selecting .photo-tile:not(:hover) input[data-photo]:not(:checked){opacity:.7}
+.photo-tile input[data-photo]:hover{background:#00000052}
+.v2 .photo-tile input[data-photo]:checked{opacity:1;transform:none;border-color:var(--yellow,#ffdc20);background:var(--yellow,#ffdc20) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23242522' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12.5 4 4 8-9'/%3E%3C/svg%3E") center/14px no-repeat;box-shadow:0 1px 4px #00000040}
+.photo-tile:has(input:checked){outline:3px solid var(--yellow,#ffdc20);outline-offset:-1px}
+.photo-tile.leaving{opacity:0;transform:scale(.96);transition:.18s}
+
+/* Slim count row in place of the filters while something is selected. */
+.sel-slim{display:flex;align-items:center;gap:14px;font-size:13px;min-height:32px}
+.sel-slim b{font-weight:700}
+.v2 .sel-slim button{padding:5px 0;background:none;color:#242522;font-size:12px;font-weight:600;text-decoration:underline;text-decoration-color:#d7b400;text-decoration-thickness:2px;text-underline-offset:3px}
+
+/* ---- The panel that follows the last selected photo ---- */
+.near{position:fixed;z-index:70;left:0;top:0;width:max-content;box-sizing:border-box;background:#fff;border:1px solid #e3e4de;border-radius:14px;box-shadow:0 14px 36px #22242226,0 2px 6px #2224220f;font-size:13px;color:#242522;transition:top .16s ease,left .16s ease}
+.near[hidden]{display:none}
+.near::before{content:"";position:absolute;left:var(--tip,50%);width:12px;height:12px;background:#fff;border:1px solid #e3e4de;transform:translateX(-50%) rotate(45deg);opacity:var(--arrow,1)}
+.near.below::before{top:-7px;border-right:0;border-bottom:0}
+.near.above::before{bottom:-7px;border-left:0;border-top:0}
+.near-row{position:relative;display:flex;align-items:center;gap:4px;padding:6px}
+.near-count{display:flex;align-items:center;gap:2px;padding-right:6px;margin-right:2px;border-right:1px solid #ecece7;font-weight:700;white-space:nowrap}
+.v2 .near button{font:inherit}
+.v2 .near .ico-btn{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:8px;background:none;color:#9a9c92}
+.v2 .near .ico-btn:hover{background:#f1f1ec;color:#242522}
+.v2 .near .act{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 11px;border-radius:9px;background:none;color:#242522;font-size:13px;font-weight:600;white-space:nowrap}
+.v2 .near .act:hover{background:#f3f3ef}
+.v2 .near .act.danger{color:#c2412f}
+.v2 .near .act.danger:hover{background:#fbece9}
+.near .act kbd,.near .opt kbd{margin-left:1px;font-size:10px;padding:2px 4px;background:#f5f5f2;border-color:#e4e4de;color:#8d8f86}
+.near.no-kbd .act kbd,.near.icons .act span{display:none}
+.v2 .near.icons .act{padding:0 9px}
+.near .act svg{color:#81827d}.near .act.danger svg{color:inherit}
+
+/* Person step: the same panel grows into a picker. */
+.near.picking{width:340px}
+.pick-head{display:flex;align-items:center;gap:6px;padding:8px 8px 4px}
+.pick-head strong{font-size:13px}
+.pick-head span{color:#9a9c92;font-weight:500}
+.pick-search{position:relative;margin:4px 10px 6px}
+.pick-search svg{position:absolute;left:10px;top:50%;translate:0 -50%;color:#a3a49e}
+.v2 .pick-search input{width:100%;box-sizing:border-box;height:36px;margin:0;padding:0 10px 0 32px;border:1px solid #e0e1db;border-radius:9px;background:#fafaf8;font:inherit;font-size:13px}
+.v2 .pick-search input:focus{outline:none;border-color:#c9cac3;background:#fff}
+.pick-list{max-height:248px;overflow:auto;padding:0 6px 6px}
+.v2 .near .opt{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 8px;border-radius:9px;background:none;color:#242522;text-align:left;font-size:13px;font-weight:500}
+.v2 .near .opt.hot{background:#f3f3ef}
+.opt .ava{display:grid;place-items:center;width:24px;height:24px;flex:none;border-radius:50%;background:#efeee9;color:#77796e;font-size:10px;font-weight:700}
+.opt .now{margin-left:auto;font-size:11px;color:#a3a49e}
+.opt.new .ava{background:none;border:1px dashed #c9cac3;color:#9a9c92}
+.opt.new{color:#55574e}
+.pick-empty{padding:10px 8px;color:#9a9c92;font-size:12px}
+.pick-foot{padding:7px 14px 9px;border-top:1px solid #efefea;font-size:11px;color:#a3a49e}
+
+.proto-toast{position:fixed;left:calc(50% + 120px);bottom:26px;z-index:95;display:flex;gap:14px;align-items:center;transform:translate(-50%,20px);padding:10px 16px;border-radius:10px;background:#242522;color:#fff;font-size:13px;opacity:0;transition:.25s;pointer-events:none}
+.proto-toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.v2 .proto-toast button{padding:0;background:none;color:#ffe45c;font-size:13px;font-weight:600}
+</style>
+</head>
+<body class="v2">
+<div class="proto">
+  <aside class="proto-side">
+    <h1>Панель у фото</h1>
+    <p>Панель встаёт у последнего выбранного фото. «Другой персоне» раскрывает выбор прямо в ней.</p>
+    <label class="proto-opt"><input type="checkbox" id="hotkeys" checked> Горячие клавиши</label>
+    <button class="proto-reset" id="reset">Вернуть все фото</button>
+  </aside>
+  <main class="proto-main">
+    <div class="shoot-head"><button type="button" class="shoot-back" aria-label="Все съёмки"></button><h2>Портреты <span class="muted" id="total"></span></h2><div class="add-menu"><button type="button" class="add-toggle" id="add-ico">Добавить</button></div></div>
+    <div class="shoot-bar" id="bar"></div>
+    <div class="photo-grid" id="grid"></div>
+  </main>
+</div>
+<div class="near" id="near" role="toolbar" aria-label="Действия с выбранными фото" hidden></div>
+<div class="proto-toast" id="toast"><span></span><button type="button">Вернуть</button></div>
+
+<script>
+/* Thumbnails come from the local demo server; without it tiles stay grey. */
+const MEDIA='http://localhost:8191/media/';
+const IDS=['06540b8876a04edc8c2e69094478d2ef','231264bb65254aaaba4ceea7e8741cd5','89adf21c69ff46ef96c218c1872eba5d','1f4e0873463f47ef84a33ce2324b16a9','d69ac92f0d834bfb952cbb6cee716b2e','f4099da2bafb4135a4176a7b4dcffb4c','dad0b4c4d35146fb97bf58920865eebf','5e48c1dba22248e59d86f7f9d98e5286','fec860938f644ddf938b13bb23671c93','088bb96c014245d0bf4db0a3f7c4fce2','fcadee03c6b3499982d27e44216492e1','71fd4453b0464a3d983c6bed195e63fd','905ba6e4de0a4bedb4198b666f228bf0','f2a2110cad4148278114e6fdb4368ecf','54b23731970e4f559a414ee5a8276934','e7e39438a23a44228b3d76700669aeff','eb99e6e08c364c1b881f9df93e2b2fa9','382c2d3ea25c491a921312732dea8549','303f4bd3fd414a7d8d917c5a8268ac36','4c67fb7d371d43da9a241da627a7179f','5c90a04913d845039110d895d3d6ba10','ae17c63267564d9c8dbbef3bdc97a647','75f13e58085e45c68d25ab9e4cd61019','31e5ad41a8e74b17adcf60c701af8610','6e1c5d7c8b70432cbc35e13b2e97c92b','9e4176ffb9cc40949bf7ad10c0ace093','0cbcf13201504db9bb95d5b0158b5e9f','143ee5e56e5b45e4938e5c964e3d1a8f','2373e720c4cf4e9c89cc810e1a0d5e11','a042ee5a477948089cc73d120dc96a47','e4eb10487c8049968cdb496e93dbe125','8450277b14c74bcdb881b6e2ec338cea','bf3afc4011a84934b4939268b2c8470a','b1e5945ea8cb47febeee4c199fb6d066','8ae0d7e1b9c9412a9c828b1dfd2841ff','20a1912b332546a1a12b5a2a0f4326b0','94f61ba7a8134d9da9c169d93655f50a','5adf4822e99441ec8a65ec517709ebe7','7ad8fdd024564f888726a8d39f29a15a','ba961bb289754209b34f98dfb9422ed0','859fe97c6fdc446eace75c636ffc2e68','2cf2fd3f1fe246cc91b82f44d31a927e','8ba928c750e6464c81a080c246cb5513','4ebc71044e694dd1a5d4d274b1fc89af','4ca86dcc35804a5db54fe3f9d4e06243','7af7878c13a74f83a640fcce226342c4','034db3e9cd474589afd67965d5b1b980','ac489f08ce1749279f63fc40bf2d4315','9e8bf70b16014d648b4d0112f7c14e65','0955459937234e3cbf17bc9167e38519','92b184b61de1408784690006a02ae69a','dd52e74348a34ce09d1ac81c90bc1be2','7344680431634274b307438218d84414','5b549555d48f4f1a80f388180ba423b7','2b51134dea9048cc9fd16298ce246380','8503938e2833476a9f65d0bab904610c','d4a2d6e9d7834a1fb1f7ad4ce8919df6','07f3031bd9c4416188a0a6b3f1a6e5fe','35a841e61606492897bc7ab3bdff6e90','cd3e1d5569a44f2889bbd222cc185e96'];
+const PERSONS=['Александр Тестов','Анна Примерова','Михаил Демов','Мария Образцова','Дмитрий Макетов','Екатерина Тестова','Иван Примеров','София Демова','Артём Образцов','Полина Макетова','Максим Пробников','Дарья Пробникова','Кирилл Черновиков','Алиса Черновикова','Никита Демонстрационов','Виктория Демонстрационова'];
+const ICONS={x:'<path d="M18 6 6 18M6 6l12 12"/>',swap:'<circle cx="9" cy="8" r="4"/><path d="M2 21c1-4 3.5-6 7-6 1.4 0 2.6.3 3.6.9M15 15h7m-2.5-2.5L22 15l-2.5 2.5M22 20h-7m2.5-2.5L15 20l2.5 2.5"/>',scene:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.5"/>',trash:'<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/>',eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',back:'<path d="m15 18-6-6 6-6"/>',upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 20h16"/>',selectAll:'<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>',search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',plus:'<path d="M12 5v14M5 12h14"/>'};
+const icon=(n,s=16)=>`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const initials=n=>n.split(' ').map(w=>w[0]).slice(0,2).reverse().join('');
+
+let photos=[],selected=new Set(),anchor=null,last=null,mode='actions',query='',hot=0,undo=null,toastTimer=null;
+const hotkeys=()=>$('#hotkeys').checked;
+const kbd=k=>hotkeys()?`<kbd>${k}</kbd>`:'';
+
+function build(){photos=[];for(let r=0;r<2;r++)IDS.forEach((id,i)=>photos.push({key:r+'-'+i,id,name:`DSC${String(298+r*60+i).padStart(5,'0')}.jpg`,person:(Math.floor(i/4)+r*3)%PERSONS.length}));}
+
+function renderGrid(){
+  $('#total').textContent=photos.length;
+  $('#grid').innerHTML=photos.map(p=>`<label class="photo-tile" data-key="${p.key}"><img src="${MEDIA}${p.id}/thumb" alt="" loading="lazy" draggable="false" onerror="this.removeAttribute('src')"><input type="checkbox" data-photo="${p.key}" tabindex="-1" aria-label="Выбрать ${p.name}"><p>${p.name}</p><span class="tile-person">${PERSONS[p.person]}</span></label>`).join('');
+  syncChecks();
+}
+function syncChecks(){document.querySelectorAll('#grid input[data-photo]').forEach(i=>{i.checked=selected.has(i.dataset.photo);});$('#grid').classList.toggle('selecting',selected.size>0);}
+function renderBar(){const n=selected.size;
+  $('#bar').innerHTML=n?`<div class="sel-slim"><b>Выбрано ${n}</b><button data-act="clear">Снять</button>${n<photos.length?`<button data-act="all">Выбрать все ${photos.length}</button>`:''}</div>`
+    :`<div class="filter-chips photo-filters">${['Все','В обработке','Проверить','Ошибки'].map((l,i)=>`<button class="${i?'':'active'}">${l}</button>`).join('')}</div><div class="grid-tools"><button class="text-button" data-act="all">${icon('selectAll',15)}Выбрать все</button></div>`;}
+
+/* ---- Panel ---- */
+function chosen(){return photos.filter(p=>selected.has(p.key));}
+function matches(){const q=query.trim().toLowerCase();return PERSONS.map((name,i)=>({name,i})).filter(p=>!q||p.name.toLowerCase().includes(q));}
+function panelHtml(){
+  const n=selected.size;
+  if(mode==='actions')return `<div class="near-row"><span class="near-count"><button class="ico-btn" data-act="clear" title="Снять выделение · Esc">${icon('x',16)}</button>${n}</span>
+    <button class="act" data-act="move" title="Другой персоне">${icon('swap',16)}<span>Другой персоне</span>${kbd('P')}</button>
+    <button class="act" data-act="general" title="Не портрет">${icon('scene',16)}<span>Не портрет</span>${kbd('N')}</button>
+    <button class="act danger" data-act="delete" title="Удалить">${icon('trash',16)}<span>Удалить</span></button></div>`;
+  const list=matches(),cur=new Set(chosen().map(p=>p.person)),q=query.trim();
+  const rows=list.map((p,j)=>`<button class="opt ${j===hot?'hot':''}" data-person="${p.i}"><span class="ava">${esc(initials(p.name))}</span>${esc(p.name)}${cur.size===1&&cur.has(p.i)?'<span class="now">сейчас</span>':''}</button>`).join('');
+  const add=`<button class="opt new ${hot===list.length?'hot':''}" data-person="new"><span class="ava">${icon('plus',12)}</span>${q?`Новая персона «${esc(q)}»`:'Новая персона'}</button>`;
+  return `<div class="pick-head"><button class="ico-btn" data-act="back" title="Назад · Esc">${icon('back',16)}</button><strong>Другой персоне <span>· ${n} фото</span></strong></div>
+    <div class="pick-search">${icon('search',15)}<input id="pick-q" placeholder="Найти по имени" autocomplete="off" value="${esc(query)}"></div>
+    <div class="pick-list">${rows||'<div class="pick-empty">Никого не нашли</div>'}${add}</div>
+    <div class="pick-foot">↑↓ — выбрать · Enter — перенести · Esc — назад</div>`;
+}
+function renderPanel(focus=false){
+  const el=$('#near');if(!selected.size){el.hidden=true;mode='actions';return;}
+  // Appear in place; only moves between photos are animated.
+  const appearing=el.hidden;if(appearing)el.style.transition='none';
+  el.hidden=false;el.classList.toggle('picking',mode==='person');el.innerHTML=panelHtml();place();
+  if(appearing){el.offsetWidth;el.style.transition='';}
+  if(mode==='person'){const q=$('#pick-q');if(focus){q.focus();q.setSelectionRange(q.value.length,q.value.length);}q.oninput=()=>{query=q.value;hot=0;refreshList();};}
+}
+/* Re-render only the list so the search field keeps focus and caret. */
+function refreshList(){const box=$('#near .pick-list');if(!box)return;const tmp=document.createElement('div');tmp.innerHTML=panelHtml();box.replaceWith(tmp.querySelector('.pick-list'));place();$('#near .opt.hot')?.scrollIntoView({block:'nearest'});}
+
+/* Under the anchor tile if it fits, above otherwise; arrow points at the tile. */
+function place(){const el=$('#near');if(el.hidden)return;
+  const key=selected.has(last)?last:[...selected].pop(),tile=document.querySelector(`.photo-tile[data-key="${key}"]`);if(!tile)return;
+  const main=$('.proto-main').getBoundingClientRect(),room=Math.min(innerWidth,main.right)-main.left-24;
+  // Narrow window: drop key hints first, then labels (icons keep their titles).
+  el.classList.remove('no-kbd','icons');if(el.offsetWidth>room)el.classList.add('no-kbd');if(el.offsetWidth>room)el.classList.add('icons');
+  const r=tile.getBoundingClientRect(),w=el.offsetWidth,h=el.offsetHeight;
+  // Never over the sticky «Выбрано» row at the top.
+  const minTop=Math.max(10,$('#bar').getBoundingClientRect().bottom+8);
+  const fitsBelow=r.bottom+10+h<=innerHeight-10,fitsAbove=r.top-10-h>=minTop;
+  let below=fitsBelow||!fitsAbove,top=below?r.bottom+10:r.top-h-10;
+  top=Math.max(minTop,Math.min(innerHeight-h-10,top));
+  const left=Math.max(main.left+12,Math.min(innerWidth-w-12,r.left+r.width/2-w/2));
+  el.style.top=top+'px';el.style.left=left+'px';el.style.setProperty('--tip',Math.max(18,Math.min(w-18,r.left+r.width/2-left))+'px');
+  el.classList.toggle('below',below);el.classList.toggle('above',!below);
+  // Hide the arrow when the tile has scrolled away and the panel is clamped to the edge.
+  el.style.setProperty('--arrow',(r.bottom<0||r.top>innerHeight)?'0':'1');
+}
+addEventListener('scroll',place,{passive:true});addEventListener('resize',place);
+
+function render(){syncChecks();renderBar();renderPanel();}
+
+/* Selection like the real grid: click toggles, Shift+click adds a range. */
+$('#grid').addEventListener('click',e=>{
+  const tile=e.target.closest('.photo-tile');if(!tile)return;e.preventDefault();
+  const key=tile.dataset.key,keys=photos.map(p=>p.key);
+  if(e.shiftKey&&anchor&&keys.includes(anchor)){const [a,b]=[keys.indexOf(anchor),keys.indexOf(key)].sort((x,y)=>x-y);keys.slice(a,b+1).forEach(k=>selected.add(k));}
+  else{selected.has(key)?selected.delete(key):selected.add(key);anchor=key;}
+  last=key;mode='actions';render();});
+
+function run(act){
+  if(act==='clear'){selected.clear();render();return;}
+  if(act==='all'){photos.forEach(p=>selected.add(p.key));render();return;}
+  if(act==='back'){mode='actions';renderPanel();return;}
+  if(!selected.size)return;
+  if(act==='move'){mode='person';query='';hot=0;renderPanel(true);return;}
+  const list=chosen(),n=list.length,idx=list.map(p=>photos.indexOf(p));
+  list.forEach(p=>document.querySelector(`.photo-tile[data-key="${p.key}"]`)?.classList.add('leaving'));
+  $('#near').hidden=true;
+  setTimeout(()=>{photos=photos.filter(p=>!selected.has(p.key));done(act==='delete'?`Удалено ${n} фото`:`${n} фото перенесено в общую съёмку`,()=>list.forEach((p,i)=>photos.splice(idx[i],0,p)));},180);
+}
+function assign(value){const list=chosen(),prev=list.map(p=>[p,p.person]);
+  let name;if(value==='new'){name=query.trim()||'Новая персона';PERSONS.push(name);value=PERSONS.length-1;}else name=PERSONS[value];
+  list.forEach(p=>{p.person=+value;});done(`${list.length} фото → ${name}`,()=>prev.forEach(([p,v])=>{p.person=v;}));}
+function done(text,restore){selected.clear();mode='actions';undo=restore;renderGrid();render();toast(text);}
+function toast(text){const t=$('#toast');t.querySelector('span').textContent=text;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),4000);}
+$('#toast button').onclick=()=>{if(undo){undo();undo=null;renderGrid();render();}$('#toast').classList.remove('show');};
+
+document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b){e.preventDefault();run(b.dataset.act);return;}
+  const o=e.target.closest('[data-person]');if(o){assign(o.dataset.person);return;}
+  // A click outside while picking steps back to the actions, keeping the selection.
+  if(mode==='person'&&!e.target.closest('#near')&&!e.target.closest('.photo-tile')){mode='actions';renderPanel();}});
+document.addEventListener('mousemove',e=>{const o=e.target.closest?.('#near .opt');if(!o)return;const all=[...document.querySelectorAll('#near .opt')],i=all.indexOf(o);if(i!==hot){hot=i;all.forEach((x,j)=>x.classList.toggle('hot',j===i));}});
+document.addEventListener('keydown',e=>{
+  if(mode==='person'){const opts=[...document.querySelectorAll('#near .opt')];
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();hot=(hot+(e.key==='ArrowDown'?1:-1)+opts.length)%opts.length;opts.forEach((x,j)=>x.classList.toggle('hot',j===hot));opts[hot]?.scrollIntoView({block:'nearest'});return;}
+    if(e.key==='Enter'){e.preventDefault();opts[hot]?.click();return;}
+    if(e.key==='Escape'){e.preventDefault();run('back');return;}
+    return;}
+  if(e.target.matches?.('input:not([type=checkbox])'))return;
+  if(e.key==='Escape'){run('clear');return;}
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='a'){e.preventDefault();run('all');return;}
+  if(!hotkeys()||!selected.size||e.metaKey||e.ctrlKey||e.altKey)return;
+  const k=e.key.toLowerCase();
+  if(k==='p'||k==='з'){e.preventDefault();run('move');}
+  else if(k==='n'||k==='т'){e.preventDefault();run('general');}
+  else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();run('delete');}});
+
+$('#hotkeys').onchange=()=>renderPanel();
+$('#reset').onclick=()=>{build();selected.clear();renderGrid();render();};
+document.querySelector('.shoot-back').innerHTML=icon('back',18);$('#add-ico').insertAdjacentHTML('afterbegin',icon('upload',15));
+build();renderGrid();render();
+</script>
+</body>
+</html>

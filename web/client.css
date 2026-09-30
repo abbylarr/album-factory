@@ -50,7 +50,7 @@ main{outline:none}
 .card-icon{position:absolute;top:18px;right:18px;width:46px;height:46px;border-radius:50%;background:#fff;display:grid;place-items:center;color:var(--ink)}
 .card-icon.dark{background:var(--ink);color:#fff}
 .card-foot{display:flex;align-items:center;justify-content:space-between;font-size:15px}
-.card-foot span{display:inline-flex;align-items:center;gap:6px}
+.card-foot > span:not(.card-icon){display:inline-flex;align-items:center;gap:6px}
 .card-foot .card-icon{position:static;width:50px;height:50px}
 .card.active{min-height:210px}
 .card.active h2{font-size:30px;letter-spacing:-.8px}
@@ -235,3 +235,7 @@ textarea{resize:vertical}
 .sign-fields .primary{margin-top:6px}
 
 .teacher-order-subject{display:block;font-size:12px;margin:10px 0}.teacher-order-subject input{display:block;width:100%;margin-top:5px}.teacher-row{flex-wrap:wrap}.teacher-order-subject{flex:1 1 100%}
+.teacher-sign-photo{display:block;width:100%;max-height:320px;object-fit:contain;border-radius:12px;background:#efedf0}
+
+.collection-parts{display:grid;gap:8px;margin-top:16px}.collection-parts>a{display:flex;align-items:center;gap:10px;padding:12px;background:#ffffff80;border-radius:12px;color:inherit}.collection-parts>a>span{display:grid;gap:3px;flex:1}.collection-parts strong{font-size:14px}.collection-parts small{font-size:12px;opacity:.7}.collection-parts img{width:18px;height:18px}
+.sign-frames:has(.teacher-sign-photo){display:block}

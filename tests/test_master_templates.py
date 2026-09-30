@@ -391,6 +391,25 @@ class MasterTests(unittest.TestCase):
         actual_name_height=measurer().height(name['text'],name['font'],name['size'],name['leading'],name['box'][2],name.get('letterSpacing') or 0)
         self.assertAlmostEqual(detail['box'][1]-(name['box'][1]+actual_name_height),5)
 
+    def test_vignette_card_places_captions_around_the_photo(self):
+        doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        grid.update(gap=4,photoWidth=40,minPhotoWidth=20,photoNameGap=3,nameDetailGap=2,showDetail=True,
+                    nameAt='right',detailAt='above',captionWidth=45,photoRatio=1)
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        people=[{'id':str(i),'first_name':'Анна','last_name':'Иванова','quote':'Привет'} for i in range(4)]
+        snapshot={'students':people,'teachers':[],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        card=[e for spread in compiled['variant_spreads']['student:0'].values() for e in spread['elements'] if '/card[student:0]' in e['key']]
+        photo,name,detail=(next(e for e in card if e['key'].endswith(k)) for k in ('/photo','/name','/detail'))
+        self.assertAlmostEqual(photo['box'][2],photo['box'][3])  # 1:1
+        self.assertAlmostEqual(name['box'][0],photo['box'][0]+photo['box'][2]+3)
+        self.assertAlmostEqual(name['box'][2],45)
+        self.assertLess(detail['box'][1]+detail['box'][3],photo['box'][1]+1e-6)
+        self.assertAlmostEqual(detail['box'][0],photo['box'][0])
+        for bad in ({'nameAt':'middle'},{'photoRatio':0.5},{'captionWidth':5}):
+            broken=master();broken['sections'][0]['spreads'][0]['pages'][0]['layers'][0].update(bad)
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,bad)
+
     def test_vignette_radius_and_shadow_go_to_card_photos(self):
         doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
         grid.update(radius=4,shadow={'color':'#000000','offsetX':0,'offsetY':1,'blur':2,'opacity':30})

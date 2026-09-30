@@ -15,6 +15,17 @@ function contentTarget() {
   if (!l || selected.length !== 1) return null;
   return l.type === 'photo' ? l : l.type === 'collage' ? (l.flex ? l : focusedLeaf(l)) : null;
 }
+/* A selected photo layer gets the same source bar as a collage frame, minus splitting. */
+function activePhoto() {
+  if (preview || tool !== 'select' || selected.length !== 1 || photoCrop) return null;
+  const l = selectedLayer();
+  return l && l.type === 'photo' && !l.hidden ? l : null;
+}
+/* The frame the source bar and its menu edit: the selected photo or the focused collage frame. */
+function barCell() {
+  const l = selectedLayer();
+  return l?.type === 'photo' ? l : l ? focusedLeaf(l) : null;
+}
 function focusedLeaf(layer) {
   const loc = locateCell(layer, focusCell);
   return loc && !loc.cell.split ? loc.cell : null;
@@ -251,13 +262,25 @@ function cellSourceMenu(cell) {
   const file = `<label class="menu-row${source === 'custom' ? ' on' : ''}">${cell.dataUrl ? thumb(cell.dataUrl) : `<i class="thumb-empty upload">${cellGlyph.upload}</i>`}<span>${cell.dataUrl ? 'Заменить файл' : 'Загрузить файл'}</span>${source === 'custom' ? cellGlyph.tick : ''}<input data-cell-file type="file" accept="image/jpeg,image/png,image/webp" hidden></label>`;
   return `<p class="menu-label">Общее фото</p>${hero}${cats}<p class="menu-label">Портрет</p>${people}<p class="menu-label">Своё изображение</p>${file}`;
 }
-/* Floating toolbar above the focused frame: what is in it, split, crop, delete. */
+/* Floating toolbar above the focused frame or selected photo: what is in it, split (collage only), crop, delete. */
 function cellBar(l, f, origin) {
   const host = $('#canvas-host'),
-    r = frameScreen(origin, f),
-    cell = f.cell,
-    allowed = CollageCore.can(l, cell.id),
-    above = r.top - 52 >= 8,
+    photo = l.type === 'photo';
+  let r, cell, allowed;
+  if (photo) {
+    const b = findCanvasObject(l.id)?.getBoundingRect();
+    if (!b) return '';
+    const a = sceneToHost(b.left, b.top),
+      z = sceneToHost(b.left + b.width, b.top + b.height);
+    r = { left: a.x, top: a.y, width: z.x - a.x, height: z.y - a.y };
+    cell = l;
+    allowed = { split: false, remove: !l.locked };
+  } else {
+    r = frameScreen(origin, f);
+    cell = f.cell;
+    allowed = CollageCore.can(l, cell.id);
+  }
+  const above = r.top - 52 >= 8,
     top = above ? r.top - 10 : r.top + r.height + 10,
     left = r.left + r.width / 2,
     open = cellMenu === cell.id,
@@ -266,9 +289,19 @@ function cellBar(l, f, origin) {
     cell.source === 'custom' && cell.dataUrl
       ? `<button type="button" data-cell-crop title="Кадрировать · двойной клик" aria-label="Кадрировать">${cellGlyph.crop}</button>`
       : '';
-  return `<div class="cell-bar${above ? '' : ' below'}" style="left:${left}px;top:${top}px" role="toolbar" aria-label="Кадр коллажа"><button type="button" data-collage-whole title="Выделить весь коллаж · Esc" aria-label="Выделить весь коллаж">${cellGlyph.whole}</button><i class="bar-sep"></i><button type="button" class="cell-source" data-cell-sources aria-haspopup="menu" aria-expanded="${open}" title="Что в кадре">${thumb(src)}<span>${esc(sourceLabel(cell))}</span>${cellGlyph.caret}</button><i class="bar-sep"></i><button type="button" data-collage="split-h" title="Разделить по ширине" aria-label="Разделить по ширине"${allowed.split ? '' : ' disabled'}>${cellGlyph.h}</button><button type="button" data-collage="split-v" title="Разделить по высоте" aria-label="Разделить по высоте"${allowed.split ? '' : ' disabled'}>${cellGlyph.v}</button>${crop}<button type="button" class="danger" data-collage="remove" title="Удалить кадр · Delete" aria-label="Удалить кадр"${allowed.remove ? '' : ' disabled'}>${cellGlyph.remove}</button>${open ? `<div class="cell-sources" role="menu">${cellSourceMenu(cell)}</div>` : ''}</div>`;
+  const lead = photo
+      ? ''
+      : `<button type="button" data-collage-whole title="Выделить весь коллаж · Esc" aria-label="Выделить весь коллаж">${cellGlyph.whole}</button><i class="bar-sep"></i>`,
+    split = photo
+      ? ''
+      : `<i class="bar-sep"></i><button type="button" data-collage="split-h" title="Разделить по ширине" aria-label="Разделить по ширине"${allowed.split ? '' : ' disabled'}>${cellGlyph.h}</button><button type="button" data-collage="split-v" title="Разделить по высоте" aria-label="Разделить по высоте"${allowed.split ? '' : ' disabled'}>${cellGlyph.v}</button>`,
+    remove = photo
+      ? `<button type="button" class="danger" data-photo-remove title="Удалить изображение · Delete" aria-label="Удалить изображение"${allowed.remove ? '' : ' disabled'}>${cellGlyph.remove}</button>`
+      : `<button type="button" class="danger" data-collage="remove" title="Удалить кадр · Delete" aria-label="Удалить кадр"${allowed.remove ? '' : ' disabled'}>${cellGlyph.remove}</button>`;
+  return `<div class="cell-bar${above ? '' : ' below'}" style="left:${left}px;top:${top}px" role="toolbar" aria-label="${photo ? 'Изображение' : 'Кадр коллажа'}">${lead}<button type="button" class="cell-source" data-cell-sources aria-haspopup="menu" aria-expanded="${open}" title="Что в кадре">${thumb(src)}<span>${esc(sourceLabel(cell))}</span>${cellGlyph.caret}</button>${split}${photo ? '<i class="bar-sep"></i>' : ''}${crop}${remove}${open ? `<div class="cell-sources" role="menu">${cellSourceMenu(cell)}</div>` : ''}</div>`;
 }
 function placeCollageUi() {
+  placeTextEditUi();
   placeSpaceUi();
   placeVignetteUi();
   const host = $('#collage-ui');
@@ -276,6 +309,14 @@ function placeCollageUi() {
   if (gapDrag) {
     host.querySelector('.cell-bar')?.remove();
     moveGapHandles();
+    return;
+  }
+  const pl = activePhoto();
+  if (pl) {
+    const bar = cellBar(pl);
+    host.hidden = false;
+    host.innerHTML = bar;
+    placeBar(host);
     return;
   }
   const l = photoCrop ? null : activeCollage();
@@ -307,6 +348,9 @@ function placeCollageUi() {
   const adds = `${allowed.addRow ? `<div class="collage-edge down" style="left:${boxA.x}px;top:${boxB.y + 14}px;width:${spanX}px"><button type="button" class="collage-add" data-collage="add-row" style="--span:${spanX}px" title="Добавить ряд" aria-label="Добавить ряд">${plus}</button></div>` : ''}${allowed.addColumn ? `<div class="collage-edge right" style="left:${boxB.x + 14}px;top:${boxA.y}px;height:${spanY}px"><button type="button" class="collage-add" data-collage="add-col" style="--span:${spanY}px" title="Добавить колонку" aria-label="Добавить колонку">${plus}</button></div>` : ''}`;
   host.hidden = false;
   host.innerHTML = `<div class="cell-hover" hidden></div>${gaps}${focus ? `<div class="cell-focus" style="${boxStyle(frameScreen(origin, focus))}"></div>` : ''}${adds}${focus ? cellBar(l, focus, origin) : ''}`;
+  placeBar(host);
+}
+function placeBar(host) {
   const bar = host.querySelector('.cell-bar');
   if (bar) {
     const half = bar.offsetWidth / 2,
@@ -345,7 +389,7 @@ function hoverCollageCell(opt) {
 }
 function setCellSource(source, extra) {
   commit(() => {
-    const cell = focusedLeaf(selectedLayer());
+    const cell = barCell();
     if (cell) CollageCore.setSource(cell, source, extra);
     cellMenu = null;
   });
@@ -457,7 +501,8 @@ function bindCollageUi() {
     }
     if (e.target.closest('[data-cell-sources]')) {
       e.stopPropagation();
-      cellMenu = cellMenu === focusCell ? null : focusCell;
+      const id = barCell()?.id;
+      cellMenu = cellMenu === id ? null : id;
       placeCollageUi();
       return;
     }
@@ -465,7 +510,7 @@ function bindCollageUi() {
       who = e.target.closest('[data-cell-who]');
     if (cat || who) {
       e.stopPropagation();
-      const cell = focusedLeaf(selectedLayer());
+      const cell = barCell();
       if (!cell) return;
       const base =
           cell.source === 'class' ? MasterPhotos.upgrade(cell.pick) || { category: 'any' } : defaultPick(),
@@ -475,7 +520,7 @@ function bindCollageUi() {
         };
       if (!pick.who) delete pick.who;
       commit(() => {
-        const target = focusedLeaf(selectedLayer());
+        const target = barCell();
         if (target) CollageCore.setSource(target, 'class', { pick });
         if (cat) cellMenu = null;
       });
@@ -489,7 +534,14 @@ function bindCollageUi() {
     }
     if (e.target.closest('[data-cell-crop]')) {
       e.stopPropagation();
-      startPhotoCrop(selectedLayer(), focusCell);
+      const l = selectedLayer();
+      startPhotoCrop(l, l?.type === 'collage' ? focusCell : null);
+      return;
+    }
+    if (e.target.closest('[data-photo-remove]')) {
+      e.stopPropagation();
+      cellMenu = null;
+      action('delete');
       return;
     }
     const act = e.target.closest('[data-collage]');
@@ -563,27 +615,42 @@ function vignetteHandles(l) {
       w: right - left,
       h: gap,
     });
-  cards.forEach((card, n) => {
+  return out;
+}
+/* Inside a card: the spacing of the main card only — photo to each caption place, name to the second caption. */
+function cardHandles(l) {
+  const obj = canvas.getObjects().find(o => o.masterId === l.id),
+    card = obj?.vignette?.cards?.[0];
+  if (!card) return [];
+  const ox = layerOffset(l, obj.side) + l.box.x,
+    oy = l.box.y,
+    p = card.photo,
+    gap = vignetteGap(l, 'photoNameGap'),
+    pad = Math.min(gap, p.w / 4),
+    out = [],
+    seen = new Set();
+  for (const text of [card.name, card.detail].filter(Boolean)) {
+    if (seen.has(text.zone)) continue;
+    seen.add(text.zone);
+    const strip = {
+      below: { axis: 'y', sign: 1, x: p.x, y: p.y + p.h, w: p.w, h: gap },
+      above: { axis: 'y', sign: -1, x: p.x, y: p.y - gap, w: p.w, h: gap },
+      left: { axis: 'x', sign: -1, x: p.x - gap, y: p.y, w: gap, h: p.h },
+      right: { axis: 'x', sign: 1, x: p.x + p.w, y: p.y, w: gap, h: p.h },
+      over: { axis: 'y', sign: -1, x: p.x, y: p.y + p.h - pad, w: p.w, h: pad },
+    }[text.zone];
+    out.push({ key: 'photoNameGap', ...strip, x: ox + strip.x, y: oy + strip.y });
+  }
+  if (card.detail && card.detail.zone === card.name.zone)
     out.push({
-      key: 'photoNameGap',
+      key: 'nameDetailGap',
       axis: 'y',
-      x: ox + card.x,
-      y: oy + card.photoBottom,
-      w: geo.cellW,
-      h: card.nameTop - card.photoBottom,
-      card: n,
+      sign: card.name.zone === 'over' ? -1 : 1,
+      x: ox + card.name.x,
+      y: oy + card.name.y + card.name.h,
+      w: card.name.w,
+      h: vignetteGap(l, 'nameDetailGap'),
     });
-    if (card.detail)
-      out.push({
-        key: 'nameDetailGap',
-        axis: 'y',
-        x: ox + card.x,
-        y: oy + card.nameBottom,
-        w: geo.cellW,
-        h: vignetteGap(l, 'nameDetailGap'),
-        card: n,
-      });
-  });
   return out;
 }
 function vignetteHitBox(h) {
@@ -605,6 +672,7 @@ function vignetteHitBox(h) {
   return { left, top, width, height };
 }
 function placeVignetteUi() {
+  placeCardUi();
   const host = $('#vignette-ui');
   if (!host || !canvas) return;
   const l = activeVignette();
@@ -614,13 +682,13 @@ function placeVignetteUi() {
     return;
   }
   const drag = vignetteDrag,
-    handles = vignetteHandles(l),
+    handles = cardLayer() ? cardHandles(l) : vignetteHandles(l),
     dragged = drag ? Math.min(drag.index, handles.length - 1) : -1;
   host.hidden = false;
   host.innerHTML = handles
     .map(
       (h, i) =>
-        `<div class="gap-hit vignette-gap ${h.axis} ${h.key}${h.card > 0 ? ' quiet' : ''}${i === dragged ? ' dragging' : ''}" data-vignette-gap="${h.key}" data-axis="${h.axis}" style="${boxStyle(vignetteHitBox(h))}" title="${vignetteGapLabel(l, h.key)}"><i class="gap-tick"></i><b class="gap-badge">${mmLabel(vignetteGap(l, h.key))}</b></div>`,
+        `<div class="gap-hit vignette-gap ${h.axis} ${h.key}${i === dragged ? ' dragging' : ''}" data-vignette-gap="${h.key}" data-axis="${h.axis}" data-sign="${h.sign || 1}" style="${boxStyle(vignetteHitBox(h))}" title="${vignetteGapLabel(l, h.key)}"><i class="gap-tick"></i><b class="gap-badge">${mmLabel(vignetteGap(l, h.key))}</b></div>`,
     )
     .join('');
 }
@@ -637,6 +705,7 @@ function bindVignetteUi() {
     vignetteDrag = {
       key,
       axis,
+      sign: Number(hit.dataset.sign) || 1,
       index: [...host.children].indexOf(hit),
       x: e.clientX,
       y: e.clientY,
@@ -649,7 +718,7 @@ function bindVignetteUi() {
   addEventListener('pointermove', e => {
     const drag = vignetteDrag;
     if (!drag) return;
-    const delta = (drag.axis === 'x' ? e.clientX - drag.x : e.clientY - drag.y) / (canvas.getZoom() || 1),
+    const delta = (drag.sign * (drag.axis === 'x' ? e.clientX - drag.x : e.clientY - drag.y)) / (canvas.getZoom() || 1),
       next = Math.round(clamp(drag.start + delta, 0, vignetteGapMax[drag.key]) * 2) / 2;
     if (next === (drag.value ?? drag.start)) return;
     drag.value = next;

@@ -166,11 +166,11 @@ function paintColor(hex, opacity) {
       }
     }
     canvas.requestRenderAll();
-    if ($('#vignette-dialog').open) vignettePreview();
   }
   document.querySelectorAll(`[data-color-key="${key}"]`).forEach(b => {
     b.dataset.colorValue = hex;
     b.style.setProperty('--swatch', hex);
+    b.classList.remove('no-color');
     const em = b.querySelector('em');
     if (em) em.textContent = hex.toUpperCase();
   });

@@ -227,13 +227,19 @@ function ensureCover() {
     changed = true;
   }
   for (const layer of allLayers()) {
+    if (layer.type !== 'text') continue;
     const style = textStyle(layer);
-    if (!style || layer.type !== 'text') continue;
-    for (const key of textStyleKeys)
+    if (style) for (const key of textStyleKeys)
       if (layer[key] !== style[key]) {
         layer[key] = style[key];
         changed = true;
       }
+    const unified = AutoText.unifyCase(layer.text, style ? layer.textCase || '' : layer.textCase);
+    if (unified.text !== layer.text) {
+      layer.text = unified.text;
+      layer.textCase = unified.textCase;
+      changed = true;
+    }
   }
   for (const s of doc.sections) {
     if (s.cover) continue;

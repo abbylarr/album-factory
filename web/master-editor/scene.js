@@ -239,32 +239,44 @@ async function vignetteChildren(l, g, background) {
     inset = align === 'inside' ? sw / 2 : align === 'outside' ? -sw / 2 : 0,
     reach = align === 'outside' ? sw : align === 'center' ? sw / 2 : 0;
   if (geo) {
+    const part = geo.parts,
+      photoX = part.photo.x,
+      photoY = part.photo.y,
+      pad = Math.min(geo.photoNameGap, geo.photoW / 4),
+      editing = cardEdit?.id === l.id;
     for (let i = 0; i < records.length; i++) {
       const x = geo.offsetX + (i % geo.cols) * (geo.cellW + l.gap),
-        y = geo.offsetY + Math.floor(i / geo.cols) * (geo.cellH + l.gap);
+        y = geo.offsetY + Math.floor(i / geo.cols) * (geo.cellH + l.gap),
+        px = x + photoX,
+        py = y + photoY,
+        /* Inside a card the others fade, like a component's instances around the main one. */
+        fade = editing && i ? 0.25 : 1;
       const el = await imageElement(planner.placeholderSvg(records[i]));
-      const photo = new fabric.FabricImage(el, {
-          left: x,
-          top: y,
-          scaleX: geo.photoW / el.naturalWidth,
-          scaleY: geo.photoW / 0.75 / el.naturalHeight,
-          opacity: records[i].missing ? 0.2 : 1,
-        }),
-        corner = Math.min(Number(l.radius) || 0, geo.photoW / 2, geo.photoH / 2);
-      if (corner)
-        photo.clipPath = new fabric.Rect({
-          width: el.naturalWidth,
-          height: el.naturalHeight,
-          rx: corner / photo.scaleX,
-          ry: corner / photo.scaleY,
+      /* The portrait covers the photo box whatever its proportions. */
+      const cover = Math.max(geo.photoW / el.naturalWidth, geo.photoH / el.naturalHeight),
+        photo = new fabric.FabricImage(el, {
+          left: px + geo.photoW / 2,
+          top: py + geo.photoH / 2,
           originX: 'center',
           originY: 'center',
-        });
+          scaleX: cover,
+          scaleY: cover,
+          opacity: (records[i].missing ? 0.2 : 1) * fade,
+        }),
+        corner = Math.min(Number(l.radius) || 0, geo.photoW / 2, geo.photoH / 2);
+      photo.clipPath = new fabric.Rect({
+        width: geo.photoW / cover,
+        height: geo.photoH / cover,
+        rx: corner / cover,
+        ry: corner / cover,
+        originX: 'center',
+        originY: 'center',
+      });
       if (l.shadow)
         shadows.push(
           new fabric.Rect({
-            left: x - reach,
-            top: y - reach,
+            left: px - reach,
+            top: py - reach,
             width: geo.photoW + 2 * reach,
             height: geo.photoH + 2 * reach,
             rx: corner && corner + reach,
@@ -272,6 +284,7 @@ async function vignetteChildren(l, g, background) {
             fill: background || '#fff',
             strokeWidth: 0,
             shadow: shadowPaint(l.shadow),
+            opacity: fade,
             evented: false,
           }),
         );
@@ -279,8 +292,8 @@ async function vignetteChildren(l, g, background) {
       if (sw)
         children.push(
           new fabric.Rect({
-            left: x + geo.photoW / 2,
-            top: y + geo.photoH / 2,
+            left: px + geo.photoW / 2,
+            top: py + geo.photoH / 2,
             originX: 'center',
             originY: 'center',
             width: Math.max(geo.photoW - 2 * inset, 0.2),
@@ -294,14 +307,15 @@ async function vignetteChildren(l, g, background) {
             strokeDashArray: dashArray(l.strokeDash, sw),
             strokeLineCap: l.strokeCap || 'butt',
             strokeLineJoin: l.strokeJoin || 'miter',
+            opacity: fade,
             evented: false,
             objectCaching: false,
           }),
         );
       const nameBox = new fabric.Textbox(records[i].name, {
-        left: x,
-        top: y + geo.photoH + geo.photoNameGap,
-        width: geo.cellW,
+        left: x + part.name.x,
+        top: y + part.name.y,
+        width: part.name.w,
         fontFamily: l.font,
         fontWeight: l.bold ? 'bold' : 'normal',
         fontStyle: l.italic ? 'italic' : 'normal',
@@ -312,36 +326,50 @@ async function vignetteChildren(l, g, background) {
         charSpacing: (Number(l.letterSpacing) || 0) * 10,
         textAlign: l.align || 'center',
         fill: l.color,
+        opacity: fade,
         strokeWidth: 0,
       });
+      const detailBox =
+        l.showDetail && records[i].detail && part.detail
+          ? new fabric.Textbox(records[i].detail, {
+              left: x + part.detail.x,
+              top: y + part.detail.y,
+              width: part.detail.w,
+              fontFamily: l.detailFont || l.font,
+              fontWeight: l.detailBold ? 'bold' : 'normal',
+              fontStyle: l.detailItalic ? 'italic' : 'normal',
+              underline: !!l.detailUnderline,
+              linethrough: !!l.detailStrike,
+              fontSize: (l.detailFontSize || 9) * 0.3528,
+              lineHeight: l.detailLineHeight || 1.25,
+              charSpacing: (Number(l.detailLetterSpacing) || 0) * 10,
+              textAlign: l.detailAlign || 'center',
+              fill: l.detailColor || l.color,
+              opacity: fade,
+              strokeWidth: 0,
+            })
+          : null;
+      /* Captions of one zone hug each other; over the photo they rest on its bottom edge (as in master_layout). */
+      const floor = py + geo.photoH - pad;
+      if (detailBox && part.detail.zone === 'over') detailBox.set('top', floor - detailBox.height);
+      if (part.name.zone === 'over')
+        nameBox.set(
+          'top',
+          (detailBox && part.detail.zone === 'over' ? detailBox.top - geo.nameDetailGap : floor) - nameBox.height,
+        );
+      else if (detailBox && part.detail.zone === part.name.zone)
+        detailBox.set('top', nameBox.top + nameBox.height + geo.nameDetailGap);
       children.push(nameBox);
+      if (detailBox) children.push(detailBox);
       cards.push({
         x,
         y,
-        photoBottom: y + geo.photoH,
-        nameTop: nameBox.top,
-        nameBottom: nameBox.top + nameBox.height,
-        detail: !!(l.showDetail && records[i].detail),
+        photo: { x: px, y: py, w: geo.photoW, h: geo.photoH },
+        name: { x: nameBox.left, y: nameBox.top, w: part.name.w, h: nameBox.height, zone: part.name.zone },
+        detail: detailBox
+          ? { x: detailBox.left, y: detailBox.top, w: part.detail.w, h: detailBox.height, zone: part.detail.zone }
+          : null,
       });
-      if (l.showDetail && records[i].detail)
-        children.push(
-          new fabric.Textbox(records[i].detail, {
-            left: x,
-            top: nameBox.top + nameBox.height + geo.nameDetailGap,
-            width: geo.cellW,
-            fontFamily: l.detailFont || l.font,
-            fontWeight: l.detailBold ? 'bold' : 'normal',
-            fontStyle: l.detailItalic ? 'italic' : 'normal',
-            underline: !!l.detailUnderline,
-            linethrough: !!l.detailStrike,
-            fontSize: (l.detailFontSize || 9) * 0.3528,
-            lineHeight: l.detailLineHeight || 1.25,
-            charSpacing: (Number(l.detailLetterSpacing) || 0) * 10,
-            textAlign: l.detailAlign || 'center',
-            fill: l.detailColor || l.color,
-            strokeWidth: 0,
-          }),
-        );
     }
   }
   children.splice(1, 0, ...shadows);
@@ -452,7 +480,7 @@ async function renderScene() {
           fontStyle: l.italic ? 'italic' : 'normal',
           underline: !!l.underline,
           linethrough: !!l.strike,
-          editable: !AutoText.fields(l.text).size && !l.textCase && !preview && !l.locked,
+          editable: false,
           splitByGrapheme: false,
         });
         applyTextPaint(object, l);
@@ -512,6 +540,9 @@ async function renderScene() {
           objectCaching: false,
         });
         object.vignette = { geo: built.geo, cards: built.cards };
+        /* Inside a card the vignette itself stays in place, like a component frame in Figma. */
+        if (cardEdit?.id === l.id)
+          object.set({ lockMovementX: true, lockMovementY: true, hasControls: false, hoverCursor: 'default' });
       } else if (l.type === 'collage') {
         const frames = l.flex ? flexLayout(l, sec.id, pageIndex) : collageFrames(l),
           radius = Number(l.radius) || 0,
@@ -696,9 +727,9 @@ async function renderScene() {
   else if (targets.length > 1) canvas.setActiveObject(new fabric.ActiveSelection(targets, { canvas }));
   canvas.requestRenderAll();
   changing = false;
+  syncTextOverflow();
   placeCollageUi();
   placePhotoCropUi();
-  if ($('#vignette-dialog')?.open) vignettePreview();
 }
 function syncSelectionCoords() {
   const active = canvas.getActiveObject();
@@ -973,12 +1004,4 @@ canvas.on('object:modified', event => {
       l.angle = ((((angle + 180) % 360) + 360) % 360) - 180;
     }),
   );
-});
-canvas.on('text:editing:exited', ({ target }) => {
-  const l = allLayers().find(l => l.id === target.masterId);
-  if (l && l.text !== target.text)
-    commit(() => {
-      l.text = target.text.slice(0, 2000);
-      l.box.h = round(Math.min(pageHeight() - l.box.y, target.height));
-    });
 });

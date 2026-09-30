@@ -361,14 +361,15 @@ def snapshot_for(con, order, data, master=False):
             'general_photos': [p['id'] for p in data['photos'] if p['id'] in photos and p['shoot_type'] == 'general'],
             'general': [e for e in general_entries(con, order['id']) if e['id'] in photos],
             'shoots': {r['id']: {'title': r['title'], 'date': r['shot_on']} for r in con.execute(
-                "SELECT id,title,shot_on FROM shoots WHERE order_id=? AND kind='general' ORDER BY created_at,id", (order['id'],))},
+                "SELECT id,title,shot_on FROM shoots WHERE order_id=? AND kind='general' AND in_layout=1 ORDER BY created_at,id", (order['id'],))},
             'teacher_variant': {'enabled': False}}
 
 
 def order_data(con, order_id, data_root):
     return {'persons': [dict(r) for r in con.execute('SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id', (order_id,))],
             'photos': [dict(r) for r in con.execute('''SELECT p.id,p.person_id,p.status,s.kind AS shoot_type
-                FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? ORDER BY p.created_at,p.id''', (order_id,))],
+                FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id WHERE p.order_id=? AND COALESCE(s.in_layout,1)=1
+                ORDER BY p.created_at,p.id''', (order_id,))],
             'data_root': data_root}
 
 
@@ -395,6 +396,34 @@ def layout_status(con, order_id, document):
     reviews = {r['owner']: {'reviewed_at': r['reviewed_at'], 'current': current.get(r['owner']) == r['fingerprint']}
                for r in con.execute('SELECT owner,fingerprint,reviewed_at FROM layout_reviews WHERE order_id=?', (order_id,))}
     return {'publication': publication, 'approval': approval, 'reviews': reviews}
+
+
+def build_layout(con, s, order_id, master_template_id=None):
+    """Builds and stores the order's layout inside the caller's transaction."""
+    order = dict(s.require_order(con, order_id))
+    from .production import require_editable
+    require_editable(con, order)
+    data = order_data(con, order_id, s.DATA)
+    changed_master = bool(master_template_id and master_template_id != order.get('master_template_id'))
+    if changed_master:
+        from .master_templates import select_order_master
+        select_order_master(con, order_id, master_template_id)
+    selected_edition = order_edition(con, order_id, s.ROOT)
+    snapshot = snapshot_for(con, order, data, master='master' in selected_edition)
+    if 'master' in selected_edition:
+        enrich_master_snapshot(con, order_id, snapshot, selected_edition, s.DATA)
+    old = None if changed_master else con.execute('SELECT overrides,document FROM order_layouts WHERE order_id=?', (order_id,)).fetchone()
+    overrides = json.loads(old['overrides']) if old else []
+    try:
+        document = generate_document(selected_edition, snapshot, overrides)
+        document = merge_custom(document, json.loads(old['document']) if old else None)
+    except LayoutError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    con.execute('''INSERT INTO order_layouts VALUES (?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET
+        snapshot=excluded.snapshot,document=excluded.document,overrides=excluded.overrides,generated_at=excluded.generated_at''',
+        (order_id, json.dumps(snapshot), json.dumps(document), json.dumps(overrides), s.now()))
+    order_stages.reopen_layout(con, order_id)
+    return {'snapshot': snapshot, 'document': document, 'overrides': overrides, 'generated_at': s.now()}
 
 
 def install(app, s):
@@ -447,9 +476,13 @@ def install(app, s):
         layout['fonts'] = [{'id': f.get('id'), 'name': f.get('name'), 'dataUrl': f.get('dataUrl')}
                            for f in master.get('fonts') or [] if f.get('id') and f.get('dataUrl')]
         from .mvp import missing_layout_photos
-        for photo_id in missing_layout_photos(layout['document'], s.DATA):
+        missing = ([photo_id for photo_id, meta in layout['snapshot']['photos'].items() if not Path(meta['path']).is_file()]
+                   if layout.get('frozen') else missing_layout_photos(layout['document'], s.DATA))
+        for photo_id in missing:
             layout['document'].setdefault('issues', []).append({'level': 'error', 'message': 'Фотография недоступна: ' + photo_id})
         layout['status'] = layout_status(con, order_id, layout['document'])
+        from .production import locked
+        layout['status']['locked'] = locked(con, s.require_order(con, order_id))
         return layout
 
     def save(con, order_id, layout, document, overrides):
@@ -466,7 +499,9 @@ def install(app, s):
             raise HTTPException(409, str(exc)) from exc
 
     def current(con, order_id, revision):
-        s.require_order(con, order_id)
+        con.execute('BEGIN IMMEDIATE')
+        from .production import require_editable
+        require_editable(con, s.require_order(con, order_id))
         layout = enrich(con, order_id, read_layout(con, order_id))
         if revision != layout['document']['revision']:
             raise HTTPException(409, 'Макет изменился в другой вкладке. Обновите страницу.')
@@ -506,7 +541,9 @@ def install(app, s):
     @app.put('/api/orders/{order_id}/layout/reviews')
     def review_variant(order_id: str, payload: Review):
         with s.db() as con:
-            s.require_order(con, order_id)
+            con.execute('BEGIN IMMEDIATE')
+            from .production import require_editable
+            require_editable(con, s.require_order(con, order_id))
             document = read_layout(con, order_id)['document']
             prints = fingerprints(document)
             if payload.owner not in prints:
@@ -533,7 +570,12 @@ def install(app, s):
         with s.db() as con:
             s.require_order(con, order_id)
             layout = read_layout(con, order_id)
-            if not layout['document'].get('master_template') and layout['document'].get('edition') != {'id': 'editorial', 'version': 2}:
+            from .production import locked, read as read_production
+            frozen = read_production(con, order_id) if locked(con, s.require_order(con, order_id)) else None
+            if frozen:
+                layout['document'], layout['snapshot'], layout['overrides'] = frozen['document'], frozen['snapshot'], []
+                layout['frozen'] = True
+            if not locked(con, s.require_order(con, order_id)) and not layout['document'].get('master_template') and layout['document'].get('edition') != {'id': 'editorial', 'version': 2}:
                 try:
                     document = LayoutEngine(edition(s.ROOT), measurer()).generate(layout['snapshot'], layout['overrides'])
                     document = merge_custom(document, layout['document'])
@@ -541,36 +583,22 @@ def install(app, s):
                     raise HTTPException(409, str(exc)) from exc
                 con.execute('UPDATE order_layouts SET document=? WHERE order_id=?', (json.dumps(document), order_id))
                 layout['document'] = document
-            return response(enrich(con, order_id, layout))
+            enriched = enrich(con, order_id, layout)
+            if frozen:
+                enriched['fonts'] = (frozen['edition'].get('master') or {}).get('fonts') or []
+                # These resources are independent of the mutable working uploads.
+            body = response(enriched)
+            if frozen:
+                body['photos'] = [{'id': photo_id, 'filename': photo_id+'.jpg', 'width': meta['width'], 'height': meta['height'],
+                                   'url': f'/api/orders/{order_id}/production/photos/{photo_id}'}
+                                  for photo_id, meta in frozen['snapshot']['photos'].items()]
+            return body
 
     @app.post('/api/orders/{order_id}/layout')
     def generate_layout(order_id: str, payload: MasterSelection | None = None):
         with s.db() as con:
-            order = dict(s.require_order(con, order_id))
-            data = order_data(con, order_id, s.DATA)
-            changed_master = bool(payload and payload.master_template_id and payload.master_template_id != order.get('master_template_id'))
-            if changed_master:
-                from .master_templates import select_order_master
-                select_order_master(con, order_id, payload.master_template_id)
-            selected_edition = order_edition(con, order_id, s.ROOT)
-            snapshot = snapshot_for(con, order, data, master='master' in selected_edition)
-            if 'master' in selected_edition:
-                enrich_master_snapshot(con, order_id, snapshot, selected_edition, s.DATA)
-            old = con.execute('SELECT overrides,document FROM order_layouts WHERE order_id=?', (order_id,)).fetchone()
-            if changed_master:
-                old = None
-            overrides = json.loads(old['overrides']) if old else []
-            try:
-                document = generate_document(selected_edition, snapshot, overrides)
-                document = merge_custom(document, json.loads(old['document']) if old else None)
-            except LayoutError as exc:
-                raise HTTPException(409, str(exc)) from exc
-            con.execute('''INSERT INTO order_layouts VALUES (?,?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET
-                snapshot=excluded.snapshot,document=excluded.document,overrides=excluded.overrides,generated_at=excluded.generated_at''',
-                (order_id, json.dumps(snapshot), json.dumps(document), json.dumps(overrides), s.now()))
-            order_stages.reopen_layout(con, order_id)
-            return response(enrich(con, order_id, {'snapshot': snapshot, 'document': document, 'overrides': overrides,
-                                                   'generated_at': s.now()}))
+            con.execute('BEGIN IMMEDIATE')
+            return response(enrich(con, order_id, build_layout(con, s, order_id, payload.master_template_id if payload else None)))
 
     @app.put('/api/orders/{order_id}/layout/element')
     def edit_layout(order_id: str, payload: Edit):
@@ -583,11 +611,8 @@ def install(app, s):
     @app.post('/api/orders/{order_id}/layout/spreads')
     def create_spread(order_id: str, payload: AddSpread):
         with s.db() as con:
-            s.require_order(con, order_id)
-            layout = enrich(con, order_id, read_layout(con, order_id))
+            layout = current(con, order_id, payload.revision)
             document = layout['document']
-            if payload.revision != document['revision']:
-                raise HTTPException(409, 'Макет изменился. Обновите страницу.')
             if document['spread_count'] >= (1000 if document.get('master_template') else 30):
                 raise HTTPException(409, 'Достигнут предел числа разворотов')
             key = 'custom:' + s.uid()
@@ -600,11 +625,8 @@ def install(app, s):
     @app.put('/api/orders/{order_id}/layout/spreads/{spread_key}/pages/{side}')
     def apply_page_template(order_id: str, spread_key: str, side: str, payload: PageTemplate):
         with s.db() as con:
-            s.require_order(con, order_id)
-            layout = enrich(con, order_id, read_layout(con, order_id))
+            layout = current(con, order_id, payload.revision)
             document = layout['document']
-            if payload.revision != document['revision']:
-                raise HTTPException(409, 'Макет изменился. Обновите страницу.')
             if spread_key not in document.get('custom_positions', {}) or side not in {'left', 'right'} or payload.template not in PAGE_TEMPLATES:
                 raise HTTPException(422, 'Выберите страницу и шаблон нового разворота')
             set_page_template(document, spread_key, side, payload.template, layout['snapshot'])
@@ -614,21 +636,35 @@ def install(app, s):
     @app.delete('/api/orders/{order_id}/layout/spreads/{spread_key}')
     def delete_spread(order_id: str, spread_key: str, payload: Revision):
         with s.db() as con:
-            s.require_order(con, order_id)
-            layout = enrich(con, order_id, read_layout(con, order_id))
+            layout = current(con, order_id, payload.revision)
             document = layout['document']
-            if payload.revision != document['revision']:
-                raise HTTPException(409, 'Макет изменился. Обновите страницу.')
             if spread_key not in document.get('custom_positions', {}):
                 raise HTTPException(422, 'Можно удалить только добавленный разворот')
             remove_spread(document, spread_key)
             con.execute('UPDATE order_layouts SET document=? WHERE order_id=?', (json.dumps(document), order_id))
             return response(layout)
 
+    def frozen_download(source, owner, kind):
+        from . import production
+        manifest = production.export(s, source['order_id'], source)
+        row = next((r for r in manifest['files'] if r['owner'] == owner), None)
+        if row is None:
+            raise HTTPException(404, 'Этот вариант не входит в разрешённый тираж')
+        name = row['name'] if kind == 'pdf' else row['jpeg_name']
+        order_id = source['order_id']
+        return FileResponse(s.DATA/'exports'/order_id/manifest['layout_hash']/name,
+                            media_type='application/pdf' if kind == 'pdf' else 'application/zip', filename=name)
+
     @app.get('/api/orders/{order_id}/layout/pdf/{owner:path}')
     def pdf(order_id: str, owner: str):
         with s.db() as con:
-            s.require_order(con, order_id)
+            order = s.require_order(con, order_id)
+            from . import production
+            if production.locked(con, order):
+                source = production.read(con, order_id)
+                if source is None:
+                    raise HTTPException(409, 'Сначала подготовьте производственный комплект в заказе класса')
+                return frozen_download(source, owner, 'pdf')
             layout = read_layout(con, order_id)
             edition = order_edition(con, order_id, s.ROOT)
         document = layout['document']
@@ -654,7 +690,13 @@ def install(app, s):
     def print_files(order_id: str, owner: str):
         """Files for the printer: a zip of JPEG spreads (or pages) of one book."""
         with s.db() as con:
-            s.require_order(con, order_id)
+            order = s.require_order(con, order_id)
+            from . import production
+            if production.locked(con, order):
+                source = production.read(con, order_id)
+                if source is None:
+                    raise HTTPException(409, 'Сначала подготовьте производственный комплект в заказе класса')
+                return frozen_download(source, owner, 'jpeg')
             layout = read_layout(con, order_id)
             edition = order_edition(con, order_id, s.ROOT)
         document = layout['document']

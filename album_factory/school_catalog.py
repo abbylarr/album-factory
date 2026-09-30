@@ -5,9 +5,7 @@ school's orders, so a portrait taken once keeps working in later albums. The cla
 which teachers appear in its album and who is the class teacher; the photographer can do the
 same from the order page. Nothing here is shared between studios.
 
-Teacher photos arrive unsigned and are grouped by face like pupils' portraits. Anyone in the
-class (or the teacher with the class entry code) picks the best frame of a teacher who has no
-portrait yet and signs the name; source frames are retained for photographer undo. The photographer can
+Teacher photos arrive unsigned and are grouped by face like pupils' portraits. The photographer picks a frame and releases it for naming. The class only signs that frame; source frames are retained for photographer undo. The photographer can
 replace a portrait later.
 """
 from __future__ import annotations
@@ -22,7 +20,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import mvp, order_stages
+from . import mvp, order_stages, upload_runs
 
 LOCKED_STAGES = set(order_stages.STAGES[5:])
 PORTRAIT_SUFFIXES = (".original", ".jpg", ".thumb.jpg")
@@ -62,8 +60,13 @@ def init(con):
                          ("portrait_by", "TEXT NOT NULL DEFAULT ''"), ("portrait_at", "TEXT NOT NULL DEFAULT ''")):
         if column not in teachers:
             con.execute(f"ALTER TABLE teachers ADD COLUMN {column} {kind}")
+    con.execute("""CREATE TABLE IF NOT EXISTS teacher_shoots (
+      id TEXT PRIMARY KEY, school_id TEXT NOT NULL, title TEXT NOT NULL,
+      shot_on TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS teacher_frame_choices (
+      group_id TEXT PRIMARY KEY, photo_id TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 0)""")
     photos = {r[1] for r in con.execute("PRAGMA table_info(teacher_photos)")}
-    for column, kind in (("group_id", "TEXT"), ("status", "TEXT NOT NULL DEFAULT 'ready'"), ("embedding", "TEXT")):
+    for column, kind in (("group_id", "TEXT"), ("status", "TEXT NOT NULL DEFAULT 'ready'"), ("embedding", "TEXT"), ("shoot_id", "TEXT")):
         if column not in photos:
             con.execute(f"ALTER TABLE teacher_photos ADD COLUMN {column} {kind}")
     con.execute("UPDATE teacher_photos SET group_id=id WHERE group_id IS NULL")
@@ -234,6 +237,24 @@ def photo_groups(con, school_id, ready_only=False):
     return groups
 
 
+def frame_choice(con, rows):
+    """A singleton is selected automatically; multiple frames need an explicit choice."""
+    choice = con.execute("SELECT * FROM teacher_frame_choices WHERE group_id=?", (rows[0]["group_id"],)).fetchone()
+    selected = next((r for r in rows if choice and r["id"] == choice["photo_id"] and r["status"] == "ready"), None)
+    if selected is None and len(rows) == 1 and rows[0]["status"] == "ready":
+        selected = rows[0]
+    return selected, bool(selected and choice and choice["published"])
+
+
+def client_groups(con, school_id):
+    result = []
+    for key, rows in photo_groups(con, school_id).items():
+        selected, published = frame_choice(con, rows)
+        if published:
+            result.append({"id": key, "photos": [selected["id"]]})
+    return result
+
+
 def face_engine(server):
     if server.engine is None:
         from .faces import FaceEngine
@@ -275,7 +296,7 @@ def group_pending(server, engine=None):
             if vector is not None:
                 samples = {}
                 for sample in con.execute("""SELECT group_id, embedding FROM teacher_photos
-                        WHERE school_id=? AND status='ready' AND embedding IS NOT NULL""", (row["school_id"],)):
+                        WHERE school_id=? AND shoot_id IS ? AND status='ready' AND embedding IS NOT NULL""", (row["school_id"], row["shoot_id"])):
                     samples.setdefault(sample["group_id"], []).append(json.loads(sample["embedding"]))
                 match, _uncertain = choose_person(vector, samples, strong_match_threshold=0.93, join_threshold=0.75)
                 group = match or group
@@ -302,6 +323,7 @@ def sign_photo(server, con, photo, teacher_id, by):
     con.execute("INSERT INTO teacher_assignments VALUES (?,?,?,?,?,?,?,?,?,0)",
                 (assignment_id, photo["school_id"], teacher_id, photo["group_id"], path,
                  teacher["portrait_path"], teacher["portrait_by"], teacher["portrait_at"], when))
+    con.execute("INSERT INTO teacher_frame_choices VALUES (?,?,0) ON CONFLICT(group_id) DO UPDATE SET photo_id=excluded.photo_id,published=0", (photo["group_id"], photo["id"]))
     con.execute("UPDATE teachers SET portrait_path=?, portrait_by=?, portrait_at=? WHERE id=?", (path, by, when, teacher_id))
     con.execute("UPDATE teacher_photos SET status='signed' WHERE school_id=? AND group_id=?", (photo["school_id"], photo["group_id"]))
     return assignment_id
@@ -314,7 +336,7 @@ def client_summary(con, order_id):
     picked = chosen(con, order_id)
     lead = next((row for row in picked if row["is_class_teacher"]), None)
     return {"available": available, "chosen": len(picked),
-            "unsigned": unsigned_groups(con, school_id, ready_only=True) if school_id else 0,
+            "unsigned": len(client_groups(con, school_id)) if school_id else 0,
             "done": con.execute("SELECT 1 FROM order_teacher_state WHERE order_id=?", (order_id,)).fetchone() is not None,
             "class_teacher": full_name(lead) if lead else ""}
 
@@ -330,6 +352,11 @@ class TeacherInput(BaseModel):
     first_name: str = Field(default="", max_length=60)
     patronymic: str = Field(default="", max_length=60)
     subject: str = Field(default="", max_length=100)
+
+
+class TeacherShootInput(BaseModel):
+    title: str = Field(default="Учителя", min_length=1, max_length=100)
+    shot_on: str = Field(default="", max_length=10)
 
 
 class AssignInput(BaseModel):
@@ -371,7 +398,9 @@ def install(app, s):
             (SELECT COUNT(*) FROM teachers WHERE school_id=? AND archived=0) AS teachers,
             (SELECT COUNT(*) FROM order_terms WHERE school_id=?) AS orders""", (row["id"], row["id"])).fetchone()
         return {"id": row["id"], "name": row["name"], "short_name": row["short_name"], "city": row["city"],
-                "teacher_count": counts["teachers"], "order_count": counts["orders"]}
+                "teacher_count": counts["teachers"], "order_count": counts["orders"],
+                "previews": [teacher_view(t) for t in con.execute(
+                    "SELECT * FROM teachers WHERE school_id=? AND archived=0 AND portrait_path!='' ORDER BY portrait_at DESC LIMIT 3", (row["id"],))]}
 
     def same_school(con, name, city, skip=None):
         for row in con.execute("SELECT * FROM schools WHERE studio_id=?", (mvp._studio(),)):
@@ -436,6 +465,8 @@ def install(app, s):
             paths = [row[0] for row in con.execute("SELECT portrait_path FROM teachers WHERE school_id=?", (school_id,))]
             paths += [f"photos/tphoto-{row[0]}.jpg" for row in con.execute("SELECT id FROM teacher_photos WHERE school_id=?", (school_id,))]
             paths += [r[0] for r in con.execute("SELECT portrait_path FROM teacher_assignments WHERE school_id=? UNION SELECT previous_path FROM teacher_assignments WHERE school_id=?", (school_id, school_id))]
+            con.execute("DELETE FROM teacher_frame_choices WHERE group_id IN (SELECT group_id FROM teacher_photos WHERE school_id=?)", (school_id,))
+            con.execute("DELETE FROM teacher_shoots WHERE school_id=?", (school_id,))
             con.execute("DELETE FROM teacher_assignments WHERE school_id=?", (school_id,))
             con.execute("DELETE FROM teacher_uploads WHERE school_id=?", (school_id,))
             con.execute("DELETE FROM teacher_photos WHERE school_id=?", (school_id,))
@@ -545,6 +576,7 @@ def install(app, s):
             con.execute("UPDATE teachers SET portrait_path=?,portrait_by=?,portrait_at=? WHERE id=?",
                         (event["previous_path"], event["previous_by"], event["previous_at"], teacher["id"]))
             con.execute("UPDATE teacher_photos SET status='ready' WHERE school_id=? AND group_id=? AND status='signed'", (event["school_id"], event["group_id"]))
+            con.execute("DELETE FROM teacher_frame_choices WHERE group_id=?", (event["group_id"],))
             con.execute("UPDATE teacher_assignments SET undone=1 WHERE id=?", (assignment_id,))
         return {"ok": True}
 
@@ -600,11 +632,11 @@ def install(app, s):
     # then each one is given to a teacher and becomes that teacher's portrait.
     def photo_view(row):
         return {"id": row["id"], "filename": row["filename"], "order_id": row["order_id"], "created_at": row["created_at"],
-                "status": row["status"], "group_id": row["group_id"]}
+                "status": row["status"], "group_id": row["group_id"], "shoot_id": row["shoot_id"]}
 
-    def require_photo(con, photo_id):
+    def require_photo(con, photo_id, include_signed=False):
         row = con.execute("""SELECT p.* FROM teacher_photos p JOIN schools s ON s.id=p.school_id
-            WHERE p.id=? AND s.studio_id=? AND p.status!='signed'""", (photo_id, mvp._studio())).fetchone()
+            WHERE p.id=? AND s.studio_id=? AND (p.status!='signed' OR ?)""", (photo_id, mvp._studio(), include_signed)).fetchone()
         if row is None:
             raise HTTPException(404, "Фотография не найдена")
         return row
@@ -614,19 +646,104 @@ def install(app, s):
         with s.db() as con:
             require_school(con, school_id)
             groups = photo_groups(con, school_id)
-            return {"groups": [{"id": key, "photos": [photo_view(row) for row in rows]} for key, rows in groups.items()],
+            signed = {}
+            for row in con.execute("SELECT * FROM teacher_photos WHERE school_id=? AND status='signed' ORDER BY created_at", (school_id,)):
+                signed.setdefault(row["group_id"], []).append(row)
+            signed_groups = []
+            for key, rows in signed.items():
+                assignment = con.execute("SELECT a.*,t.last_name,t.first_name,t.patronymic FROM teacher_assignments a JOIN teachers t ON t.id=a.teacher_id WHERE a.group_id=? AND a.undone=0 ORDER BY a.created_at DESC LIMIT 1", (key,)).fetchone()
+                choice = con.execute("SELECT photo_id FROM teacher_frame_choices WHERE group_id=?", (key,)).fetchone()
+                signed_groups.append({"id": key, "photos": [photo_view(r) for r in rows], "signed": True,
+                                      "selected_photo_id": choice[0] if choice else rows[0]["id"],
+                                      "teacher_id": assignment["teacher_id"] if assignment else None,
+                                      "name": full_name(assignment) if assignment else "Учитель"})
+            return {"signed_groups": signed_groups, "groups": [{"id": key, "photos": [photo_view(row) for row in rows],
+                                "selected_photo_id": frame_choice(con, rows)[0]["id"] if frame_choice(con, rows)[0] else None,
+                                "published": frame_choice(con, rows)[1]} for key, rows in groups.items()],
+                    "shoots": [dict(r) for r in con.execute("""SELECT ts.*,
+                      (SELECT COUNT(*) FROM teacher_photos WHERE shoot_id=ts.id) AS photo_count,
+                      (SELECT id FROM teacher_photos WHERE shoot_id=ts.id ORDER BY created_at LIMIT 1) AS preview_id
+                      FROM teacher_shoots ts WHERE school_id=? ORDER BY created_at DESC""", (school_id,))],
                     "pending": sum(row["status"] == "pending" for rows in groups.values() for row in rows),
                     "assignments": [dict(row) for row in con.execute("""SELECT a.id,a.created_at,t.last_name,t.first_name,t.patronymic
                         FROM teacher_assignments a JOIN teachers t ON t.id=a.teacher_id
                         WHERE a.school_id=? AND a.undone=0 AND a.portrait_path=t.portrait_path
                         ORDER BY a.created_at DESC LIMIT 20""", (school_id,))]}
 
+    @app.post("/api/schools/{school_id}/teacher-shoots", status_code=201)
+    def create_teacher_shoot(school_id: str, payload: TeacherShootInput):
+        title = clean(payload.title)
+        if not title:
+            raise HTTPException(422, "Укажите название съёмки")
+        if payload.shot_on:
+            from datetime import date
+            try:
+                date.fromisoformat(payload.shot_on)
+            except ValueError:
+                raise HTTPException(422, "Некорректная дата съёмки")
+        with s.db() as con:
+            require_school(con, school_id)
+            shoot_id = s.uid()
+            con.execute("INSERT INTO teacher_shoots VALUES (?,?,?,?,?)", (shoot_id, school_id, title, payload.shot_on, s.now()))
+            return dict(con.execute("SELECT * FROM teacher_shoots WHERE id=?", (shoot_id,)).fetchone())
+
+    @app.patch("/api/schools/{school_id}/teacher-shoots/{shoot_id}")
+    def edit_teacher_shoot(school_id: str, shoot_id: str, payload: TeacherShootInput):
+        title = clean(payload.title)
+        if not title:
+            raise HTTPException(422, "Укажите название съёмки")
+        if payload.shot_on:
+            from datetime import date
+            try:
+                date.fromisoformat(payload.shot_on)
+            except ValueError:
+                raise HTTPException(422, "Некорректная дата съёмки")
+        with s.db() as con:
+            require_school(con, school_id)
+            if not con.execute("SELECT 1 FROM teacher_shoots WHERE school_id=? AND id=?", (school_id, shoot_id)).fetchone():
+                raise HTTPException(404, "Съёмка не найдена")
+            con.execute("UPDATE teacher_shoots SET title=?,shot_on=? WHERE id=?", (title, payload.shot_on, shoot_id))
+        return {"ok": True}
+
+    @app.post("/api/teacher-photos/{photo_id}/select")
+    def select_teacher_frame(photo_id: str):
+        with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
+            photo = require_photo(con, photo_id, include_signed=True)
+            if photo["status"] == "signed":
+                event = con.execute("SELECT teacher_id FROM teacher_assignments WHERE group_id=? AND undone=0 ORDER BY created_at DESC LIMIT 1", (photo["group_id"],)).fetchone()
+                if event is None:
+                    raise HTTPException(409, "Не найдена карточка учителя")
+                con.execute("UPDATE teacher_photos SET status='ready' WHERE school_id=? AND group_id=?", (photo["school_id"], photo["group_id"]))
+                photo = require_photo(con, photo_id)
+                sign_photo(s, con, photo, event["teacher_id"], "photographer")
+                return {"ok": True}
+            if photo["status"] != "ready":
+                raise HTTPException(409, "Дождитесь обработки фотографии")
+            con.execute("INSERT INTO teacher_frame_choices VALUES (?,?,0) ON CONFLICT(group_id) DO UPDATE SET photo_id=excluded.photo_id,published=0", (photo["group_id"], photo_id))
+        return {"ok": True}
+
+    @app.post("/api/schools/{school_id}/teacher-photos/publish")
+    def publish_teacher_frames(school_id: str):
+        with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
+            require_school(con, school_id)
+            released = 0
+            for group_id, rows in photo_groups(con, school_id).items():
+                selected, published = frame_choice(con, rows)
+                if selected and not published and all(r["status"] == "ready" for r in rows):
+                    con.execute("INSERT INTO teacher_frame_choices VALUES (?,?,1) ON CONFLICT(group_id) DO UPDATE SET photo_id=excluded.photo_id,published=1", (group_id, selected["id"]))
+                    released += 1
+            return {"published": released}
+
     @app.post("/api/schools/{school_id}/teacher-photos", status_code=201)
-    async def upload_teacher_photo(school_id: str, request: Request, filename: str, order_id: str | None = None):
+    async def upload_teacher_photo(school_id: str, request: Request, filename: str, order_id: str | None = None, shoot_id: str | None = None):
         if len(filename) > 240 or not filename.strip():
             raise HTTPException(422, "Некорректное имя файла")
         with s.db() as con:
             require_school(con, school_id)
+            if shoot_id and not con.execute("SELECT 1 FROM teacher_shoots WHERE id=? AND school_id=?", (shoot_id, school_id)).fetchone():
+                raise HTTPException(422, "Съёмка относится к другой школе")
             if order_id:
                 s.require_order(con, order_id)
                 if order_school_id(con, order_id) != school_id:
@@ -640,6 +757,8 @@ def install(app, s):
         with s.db() as con:
             existing = con.execute("SELECT id FROM teacher_uploads WHERE school_id=? AND sha=?", (school_id, sha)).fetchone()
             if existing:
+                if order_id:
+                    upload_runs.arrived(con, order_id)
                 return {"id": existing["id"], "duplicate": True}
         photo_id = s.uid()
         s.prepare_photo_files(bytes(body), "tphoto-" + photo_id)
@@ -648,14 +767,18 @@ def install(app, s):
                 con.execute("BEGIN IMMEDIATE")
                 require_school(con, school_id)
                 con.execute("INSERT INTO teacher_uploads VALUES (?,?,?)", (school_id, sha, photo_id))
-                con.execute("""INSERT INTO teacher_photos (id,school_id,order_id,filename,sha,created_at,group_id,status)
-                    VALUES (?,?,?,?,?,?,?,'pending')""", (photo_id, school_id, order_id, Path(filename).name, sha, s.now(), photo_id))
+                con.execute("""INSERT INTO teacher_photos (id,school_id,order_id,filename,sha,created_at,group_id,status,shoot_id)
+                    VALUES (?,?,?,?,?,?,?,'pending',?)""", (photo_id, school_id, order_id, Path(filename).name, sha, s.now(), photo_id, shoot_id))
+                if order_id:
+                    upload_runs.arrived(con, order_id)
             except sqlite3.IntegrityError:
                 con.rollback()
                 remove_portrait_files(f"photos/tphoto-{photo_id}.jpg")
                 existing = con.execute("SELECT id FROM teacher_uploads WHERE school_id=? AND sha=?", (school_id, sha)).fetchone()
                 if existing is None:
                     raise
+                if order_id:
+                    upload_runs.arrived(con, order_id)
                 return {"id": existing["id"], "duplicate": True}
             except Exception:
                 remove_portrait_files(f"photos/tphoto-{photo_id}.jpg")
@@ -668,7 +791,7 @@ def install(app, s):
         if variant not in {"thumb", "full"}:
             raise HTTPException(404, "Фотография не найдена")
         with s.db() as con:
-            require_photo(con, photo_id)
+            require_photo(con, photo_id, include_signed=True)
         path = s.DATA / "photos" / (f"tphoto-{photo_id}" + (".thumb.jpg" if variant == "thumb" else ".jpg"))
         if not path.is_file():
             raise HTTPException(404, "Фотография не найдена")
@@ -677,7 +800,8 @@ def install(app, s):
     @app.delete("/api/teacher-photos/{photo_id}")
     def delete_teacher_photo(photo_id: str):
         with s.db() as con:
-            require_photo(con, photo_id)
+            photo = require_photo(con, photo_id)
+            con.execute("DELETE FROM teacher_frame_choices WHERE group_id=?", (photo["group_id"],))
             con.execute("DELETE FROM teacher_uploads WHERE id=?", (photo_id,))
             con.execute("DELETE FROM teacher_photos WHERE id=?", (photo_id,))
         remove_portrait_files(f"photos/tphoto-{photo_id}.jpg")
@@ -690,7 +814,10 @@ def install(app, s):
             raise HTTPException(422, "Выберите учителя или добавьте нового")
         with s.db() as con:
             con.execute("BEGIN IMMEDIATE")
-            photo = require_photo(con, photo_id)
+            photo = require_photo(con, photo_id, include_signed=True)
+            if photo["status"] == "signed":
+                con.execute("UPDATE teacher_photos SET status='ready' WHERE school_id=? AND group_id=?", (photo["school_id"], photo["group_id"]))
+                photo = require_photo(con, photo_id)
             teacher_id = insert_teacher(con, photo["school_id"], payload.teacher) if payload.teacher else payload.teacher_id
             require_teacher(con, teacher_id)
             assignment_id = sign_photo(s, con, photo, teacher_id, "photographer")
@@ -706,9 +833,10 @@ def install(app, s):
             if photo["status"] != "ready":
                 raise HTTPException(409, "Дождитесь обработки фотографии")
             group = payload.group_id or s.uid()
-            if payload.group_id and not con.execute("SELECT 1 FROM teacher_photos WHERE school_id=? AND group_id=? AND status='ready'",
-                                                    (photo["school_id"], group)).fetchone():
+            if payload.group_id and not con.execute("SELECT 1 FROM teacher_photos WHERE school_id=? AND group_id=? AND shoot_id IS ? AND status='ready'",
+                                                    (photo["school_id"], group, photo["shoot_id"])).fetchone():
                 raise HTTPException(404, "Группа не найдена")
+            con.execute("DELETE FROM teacher_frame_choices WHERE group_id IN (?,?)", (photo["group_id"], group))
             con.execute("UPDATE teacher_photos SET group_id=? WHERE id=?", (group, photo_id))
         return {"group_id": group}
 
@@ -747,6 +875,11 @@ def install(app, s):
         mvp.require_level(con, request, order["id"], "entry")
         photo = con.execute("SELECT * FROM teacher_photos WHERE id=? AND status='ready' AND school_id IS ?",
                             (photo_id, order_school_id(con, order["id"]))).fetchone()
+        if photo is not None:
+            rows = con.execute("SELECT * FROM teacher_photos WHERE school_id=? AND group_id=? AND status!='signed'", (photo["school_id"], photo["group_id"])).fetchall()
+            selected, published = frame_choice(con, rows)
+            if not published or selected["id"] != photo_id:
+                photo = None
         if photo is None:
             raise HTTPException(404, "Фотография уже подписана или удалена. Обновите страницу.")
         return photo
@@ -759,11 +892,10 @@ def install(app, s):
             school_id = order_school_id(con, order["id"])
             if school_id is None:
                 return {"groups": [], "teachers": []}
-            groups = photo_groups(con, school_id, ready_only=True)
+            groups = client_groups(con, school_id)
             waiting = [{"id": row["id"], "name": full_name(row), "subject": row["subject"]}
                        for row in school_teachers(con, school_id) if not row["portrait_path"]]
-            return {"groups": [{"id": key, "photos": [row["id"] for row in rows]} for key, rows in groups.items()],
-                    "teachers": waiting}
+            return {"groups": groups, "teachers": waiting}
 
     @app.get("/client-api/{token}/teacher-photos/{photo_id}/{variant}")
     def client_teacher_photo_file(token: str, photo_id: str, variant: str, request: Request):

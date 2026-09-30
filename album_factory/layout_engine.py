@@ -75,7 +75,7 @@ class ReportLabMeasurer:
         if underline:
             body = f"<u>{body}</u>"
         style = ParagraphStyle("AF", fontName=self._font(font), fontSize=size, leading=leading,
-                               textColor=HexColor(color), splitLongWords=True,
+                               textColor=HexColor(color), splitLongWords=True, allowOrphans=1, allowWidows=1,
                                alignment={"left": 0, "center": 1, "right": 2, "justify": 4}[align])
         char_space = size * float(letter or 0) / 100
         # Faux italic as in InDesign: each line leans around its own baseline, so lines do not drift apart.

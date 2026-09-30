@@ -30,6 +30,6 @@ const review=context.window.GeneralReview;
   assert(people.includes('coverage-item missing'));
   assert(people.includes('data-faces="f1,f2"'));
   assert(people.includes('1 лицо встречается'));
-  assert(review.section(context.state.order.shoots[0]).includes('data-photo-filter="pending"'));
+  assert(review.filters().some(([key])=>key==='pending'),'pending chip appears while photos are analysed');
   console.log('General shoot filters, series and people review: OK');
 })().catch(error=>{console.error(error);process.exit(1);});

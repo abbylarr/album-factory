@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Literal
-from . import shoots, order_stages
+from . import shoots, order_stages, upload_runs
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .faces import FaceEngine
@@ -80,6 +80,10 @@ def init_db():
         init_client_portal(con)
         from .layout_workspace import init as init_layout_workspace
         init_layout_workspace(con)
+        from .layout_queue import init as init_layout_queue
+        init_layout_queue(con)
+        from .upload_runs import init as init_upload_runs
+        init_upload_runs(con)
         from .mvp import init as init_mvp
         init_mvp(con)
         from .client_portal import reconcile_selections
@@ -97,6 +101,8 @@ def init_db():
         init_masters(con)
         from .general_photos import init as init_general
         init_general(con)
+        from .notifications import init as init_notifications
+        init_notifications(con)
         order_stages.migrate(con)
         if "master_template_id" not in {r[1] for r in con.execute("PRAGMA table_info(orders)")}:
             con.execute("ALTER TABLE orders ADD COLUMN master_template_id TEXT")
@@ -183,7 +189,7 @@ def process_pending():
                 con.execute("BEGIN IMMEDIATE")
                 first = con.execute("SELECT order_id,shoot_id FROM photos WHERE status='pending' ORDER BY created_at,id LIMIT 1").fetchone()
                 if first is None:
-                    return
+                    break
                 rows = [dict(r) for r in con.execute("SELECT * FROM photos WHERE order_id=? AND shoot_id IS ? AND status='pending' ORDER BY created_at,id", (first['order_id'], first['shoot_id']))]
                 shoot = con.execute('SELECT kind FROM shoots WHERE id=?', (first['shoot_id'],)).fetchone()
                 for row in rows:
@@ -199,6 +205,7 @@ def process_pending():
                     log.exception("General batch failed")
                     with db() as con:
                         con.executemany("UPDATE photos SET status='error',error='Не удалось проанализировать снимок. Повторите обработку.' WHERE id=? AND status='processing'", [(r['id'],) for r in rows])
+                notify_processed(first['order_id'])
                 continue
             try:
                 if engine is None:
@@ -208,6 +215,16 @@ def process_pending():
                 log.exception("V3 batch failed")
                 with db() as con:
                     con.executemany("UPDATE photos SET status='error',error='Не удалось обработать снимок. Повторите обработку.' WHERE id=? AND status='processing'", [(r['id'],) for r in rows])
+            notify_processed(first['order_id'])
+        from .layout_queue import run_ready
+        run_ready(_sys.modules[__name__])
+
+
+def notify_processed(order_id):
+    from . import notifications
+    with db() as con:
+        if con.execute('SELECT 1 FROM orders WHERE id=?', (order_id,)).fetchone():
+            notifications.photos_check(con, order_id)
 
 
 @asynccontextmanager
@@ -320,6 +337,9 @@ def list_orders():
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id) AS photo_count,
           (SELECT COUNT(*) FROM persons p WHERE p.order_id=o.id) AS person_count,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status IN ('pending','processing')) AS pending,
+          (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status='error') AS error_count,
+          (SELECT COUNT(*) FROM teacher_photos t WHERE t.order_id=o.id) AS teacher_total,
+          (SELECT COUNT(*) FROM teacher_photos t WHERE t.order_id=o.id AND t.status='pending') AS teacher_pending,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status NOT IN ('pending','processing') AND NOT EXISTS (SELECT 1 FROM shoots s WHERE s.id=p.shoot_id AND s.kind='general') AND (p.status!='ready' OR p.uncertain=1 OR p.person_id IS NULL)) AS review_count,
           COALESCE((SELECT photo_id FROM order_covers WHERE order_id=o.id), (SELECT id FROM photos p WHERE p.order_id=o.id ORDER BY created_at,id LIMIT 1)) AS cover_id,
           (SELECT json_extract(l.document, '$.revision') FROM order_layouts l WHERE l.order_id=o.id) AS layout_revision,
@@ -332,10 +352,14 @@ def list_orders():
         progress = progress_by_order(con)
         from .client_portal import open_counts
         fixes = open_counts(con)
+        from .client_portal import total_counts
+        fix_totals = total_counts(con)
+        uploads = upload_runs.by_order(con)
         result = []
         for row in rows:
             result.append(dict(row, preview_photo_ids=order_preview_photos(con, row["id"], row["cover_id"]),
-                               client_progress=progress[row["id"]], corrections_open=fixes.get(row["id"], 0)))
+                               client_progress=progress[row["id"]], corrections_open=fixes.get(row["id"], 0),
+                               corrections_total=fix_totals.get(row["id"], 0), upload=uploads.get(row["id"])))
         return result
 
 
@@ -460,7 +484,14 @@ def get_order(order_id: str):
         order["approved"] = bool(con.execute(f"SELECT {APPROVED} FROM orders o WHERE o.id=?", (order_id,)).fetchone()[0])
         order["published"] = con.execute("SELECT 1 FROM publications WHERE order_id=?", (order_id,)).fetchone() is not None
         order["photos"] = [dict(row) for row in con.execute("SELECT p.id,p.shoot_id,s.kind AS shoot_type,p.filename,p.status,p.person_id,p.uncertain,p.error,a.algorithm AS analysis_version,a.source AS assignment_source FROM photos p LEFT JOIN shoots s ON s.id=p.shoot_id LEFT JOIN photo_analysis a ON a.photo_id=p.id WHERE p.order_id=? ORDER BY p.created_at,p.id", (order_id,))]
-        order["shoots"] = [dict(r) for r in con.execute("SELECT id,title,kind,shot_on FROM shoots WHERE order_id=? ORDER BY created_at,id", (order_id,))]
+        # Normalised face box of portraits, used to zoom small previews onto the face. The table is optional.
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='photo_frames'").fetchone():
+            faces = {r["photo_id"]: [round(r["x"], 4), round(r["y"], 4), round(r["w"], 4), round(r["h"], 4)] for r in con.execute(
+                "SELECT f.* FROM photo_frames f JOIN photos p ON p.id=f.photo_id WHERE p.order_id=?", (order_id,))}
+            for photo in order["photos"]:
+                if photo["id"] in faces:
+                    photo["face"] = faces[photo["id"]]
+        order["shoots"] = [dict(r) for r in con.execute("SELECT id,title,kind,shot_on,in_layout FROM shoots WHERE order_id=? ORDER BY created_at,id", (order_id,))]
         order["persons"] = [dict(row) for row in con.execute("SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id", (order_id,))]
         from .client_portal import progress_by_order, people_progress
         order["client_progress"] = progress_by_order(con, order_id)[order_id]
@@ -468,7 +499,14 @@ def get_order(order_id: str):
         from .client_portal import open_corrections
         order["corrections"] = open_corrections(con, order_id)
         order["corrections_open"] = len(order["corrections"])
+        from .client_portal import revision_corrections
+        order["corrections_total"] = len(revision_corrections(con, order_id))
+        order["upload"] = upload_runs.state(con, order_id)
+        teachers = con.execute("SELECT COUNT(*), COALESCE(SUM(status='pending'),0) FROM teacher_photos WHERE order_id=?", (order_id,)).fetchone()
+        order["teacher_total"], order["teacher_pending"] = teachers[0], teachers[1]
         order["max_photos"] = MAX_PHOTOS
+        from .layout_queue import state as layout_queue_state
+        order["layout_queue"] = layout_queue_state(con, order_id)
         order["cover_id"] = next((r[0] for r in con.execute("SELECT photo_id FROM order_covers WHERE order_id=?", (order_id,))), None)
         durations = [r[0] for r in con.execute("SELECT seconds FROM processing_times ORDER BY finished_at DESC LIMIT 40")]
         pending = con.execute("SELECT COUNT(*) FROM photos WHERE order_id=? AND status IN ('pending','processing')", (order_id,)).fetchone()[0]
@@ -523,6 +561,20 @@ def edit_shoot(order_id: str, shoot_id: str, payload: ShootEdit):
     with db() as con:
         require_shoot(con, order_id, shoot_id)
         con.execute('UPDATE shoots SET title=?, shot_on=? WHERE id=?', (title, shot_on, shoot_id))
+    return {'ok': True}
+
+
+class ShootInLayout(BaseModel):
+    value: bool
+
+
+@app.put('/api/orders/{order_id}/shoots/{shoot_id}/in-layout')
+def shoot_in_layout(order_id: str, shoot_id: str, payload: ShootInLayout):
+    with db() as con:
+        require_shoot(con, order_id, shoot_id)
+        if con.execute('SELECT kind FROM shoots WHERE id=?', (shoot_id,)).fetchone()['kind'] != 'general':
+            raise HTTPException(422, 'Портретная съёмка всегда входит в макет')
+        con.execute('UPDATE shoots SET in_layout=? WHERE id=?', (int(payload.value), shoot_id))
     return {'ok': True}
 
 
@@ -609,6 +661,7 @@ async def upload_photo(order_id: str, request: Request, filename: str, shoot_id:
             if existing:
                 if existing['shoot_id'] != shoot_id:
                     raise HTTPException(409, "Эта фотография уже загружена в другую съёмку заказа")
+                upload_runs.arrived(con, order_id)
                 return {"id": existing["id"], "duplicate": True}
             count = con.execute("SELECT COUNT(*) FROM photos WHERE order_id=?", (order_id,)).fetchone()[0]
             if count >= MAX_PHOTOS:
@@ -632,6 +685,7 @@ async def upload_photo(order_id: str, request: Request, filename: str, shoot_id:
                     path.unlink(missing_ok=True)
                 if existing['shoot_id'] != shoot_id:
                     raise HTTPException(409, "Эта фотография уже загружена в другую съёмку заказа")
+                upload_runs.arrived(con, order_id)
                 return {"id": existing["id"], "duplicate": True}
             count = con.execute("SELECT COUNT(*) FROM photos WHERE order_id=?", (order_id,)).fetchone()[0]
             if count >= MAX_PHOTOS:
@@ -643,6 +697,7 @@ async def upload_photo(order_id: str, request: Request, filename: str, shoot_id:
                 (photo_id, order_id, Path(filename).name, sha, "pending", now(), shoot_id),
             )
             order_stages.advance(con, order_id, 'photos')
+            upload_runs.arrived(con, order_id)
     executor.submit(process_pending)
     return {"id": photo_id, "duplicate": False}
 
@@ -787,11 +842,16 @@ def delete_order(order_id: str):
             remove_photo_rows(con, order_id, ids, deleting_order=True)
         con.execute("DELETE FROM persons WHERE order_id=?", (order_id,))
         con.execute("DELETE FROM order_covers WHERE order_id=?", (order_id,))
+        con.execute("DELETE FROM layout_queue WHERE order_id=?", (order_id,))
+        upload_runs.forget(con, order_id)
         con.execute("DELETE FROM shoots WHERE order_id=?", (order_id,))
         from . import mvp
         mvp.forget(con, order_id)
         con.execute("DELETE FROM orders WHERE id=?", (order_id,))
     remove_photo_files(ids)
+    import shutil
+    for folder in (DATA/"production"/order_id, DATA/"exports"/order_id):
+        shutil.rmtree(folder, ignore_errors=True)
     return {"ok": True}
 
 
@@ -846,6 +906,9 @@ _install_client_portal(app, _sys.modules[__name__])
 
 from .layout_workspace import install as _install_layout_workspace
 _install_layout_workspace(app, _sys.modules[__name__])
+from .layout_queue import install as _install_layout_queue
+_install_layout_queue(app, _sys.modules[__name__])
+upload_runs.install(app, _sys.modules[__name__])
 
 from .mvp import install as _install_mvp
 _install_mvp(app, _sys.modules[__name__])
@@ -858,6 +921,9 @@ _install_masters(app, _sys.modules[__name__])
 
 from .general_photos import install as _install_general
 _install_general(app, _sys.modules[__name__])
+
+from .notifications import install as _install_notifications
+_install_notifications(app, _sys.modules[__name__])
 
 @app.get('/master-editor.html')
 def master_editor_entry():

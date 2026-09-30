@@ -4,8 +4,11 @@ function renderInspector() {
   const l = selectedLayer(),
     sec = section();
   let html = '';
-  if (l) {
+  syncCardEdit();
+  if (l && cardLayer()) html = cardPanel(l);
+  else if (l) {
     const multi = selected.length > 1;
+    if (!multi && l.type === 'grid') html += vignetteListLink();
     html += block(
       'Положение',
       `<div class="align-tools">${[
@@ -29,7 +32,7 @@ function renderInspector() {
     );
     if (!multi && l.type === 'text')
       html +=
-        block('Текст', autoTextField(l)) +
+        block('Текст', autoTextField(l) + '<div class="text-overflow-note" data-text-overflow role="status" hidden><p data-overflow-message></p><button type="button" data-choice="fit">Уменьшать, чтобы влезло</button></div>') +
         `<section class="inspector-section typography-section"><div class="typography-heading"><h3>Типографика</h3></div>${textPanel(l)}</section>`;
     if (!multi && l.type === 'photo') html += photoContentPanel(l, { title: 'Что в кадре', key: l.id });
     if (!multi && l.type === 'grid') html += vignettePanel(l);
@@ -48,7 +51,8 @@ function renderInspector() {
               '<p class="section-note">Нажмите на кадр коллажа, чтобы выбрать, что в нём будет.</p>',
             ));
     }
-    html += ['rect', 'ellipse', 'line', 'svg'].includes(l.type)
+    if (l.type !== 'grid')
+      html += ['rect', 'ellipse', 'line', 'svg'].includes(l.type)
       ? vectorPanel(l)
       : block(
           'Оформление',
@@ -100,6 +104,7 @@ function renderInspector() {
     scrollTop;
   inspector.dataset.photoLayer = contentKey;
   inspector.inert = preview;
+  syncTextOverflow();
   $$('[data-inspector]').forEach(b => b.classList.toggle('active', b.dataset.inspector === inspectorTab));
 }
 /* Rotation as in Figma: the angle, then rotate by 90° and mirror. Vignettes and collages are not mirrored. */

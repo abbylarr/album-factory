@@ -1,10 +1,14 @@
 /* School catalogue and teacher choice. */
-.school-search-box{display:flex;align-items:center;gap:8px;max-width:420px;margin-bottom:20px;background:#fff;border:1px solid #e4e5de;border-radius:9px;padding:0 12px;color:#8a8c83}
-.school-search-box input{border:0!important;background:transparent!important;margin:0!important;padding:12px 0!important;font-size:13px;flex:1;min-width:0;outline:none}
+#school-filter-bar[hidden]{display:none}
+.schools-page.registry .queue-head{margin-bottom:8px}
+.schools-page.registry .queue-head h1{margin:0}
+.school-catalog-description{margin:0 0 26px;font-size:14px}
+.schools-page.registry .queue-tools{flex-wrap:wrap;justify-content:flex-end}
+.schools-page #school-city-chip .chip-label{max-width:150px}
+.schools-page.registry .queue-tools{flex:none}
 .school-list{display:grid;gap:10px}
 .school-card{display:flex;align-items:center;gap:16px;padding:18px 20px;background:#fff;border:1px solid #e4e5de;border-radius:14px;transition:border-color .15s}
 .school-card:hover{border-color:#c9cbbf}
-.school-card-icon{width:40px;height:40px;border-radius:10px;background:#f1f2ea;display:grid;place-items:center;color:#6d7260;flex-shrink:0}
 .school-card-text{flex:1;min-width:0;display:grid;gap:4px}
 .school-card-text strong{font-size:15px;line-height:1.35;overflow-wrap:anywhere}
 .school-card-text small,.school-card-meta small{font-size:12px;color:#8a8c83}
@@ -97,6 +101,69 @@
 .tgroup-body>small{font-size:11px}
 .teacher-by{color:#6f8a4a!important}
 
-.school-heading-actions{flex-wrap:wrap}.school-tabs{margin-bottom:24px}.school-tabs button{background:none;padding:12px 16px;border-bottom:2px solid transparent}.school-tabs button[aria-selected=true]{border-color:#35382d;font-weight:600}.teacher-toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:20px}.teacher-toolbar label:first-child{flex:1;min-width:180px}.teacher-toolbar label{margin:0}.teacher-toolbar input,.teacher-toolbar select{margin-bottom:0!important}.teacher-preview{display:block;width:100%;max-height:75vh;object-fit:contain}.teacher-history{margin-top:20px}.teacher-history>div{display:flex;gap:14px;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e4e5de}.teacher-choice{flex-wrap:wrap}.teacher-subject{font-size:11px;width:180px}.teacher-subject input{width:100%;margin:4px 0 0!important}.school-picker>label{display:block}.school-picker .school-options{position:relative;top:auto;max-height:220px;overflow:auto}.school-picker .school-options[hidden]{display:none}.school-tabs{display:flex;gap:8px}.schools-page [data-school-panel][hidden]{display:none}
+.school-heading-actions{flex-wrap:wrap}.school-tabs{margin-bottom:24px}.school-tabs button{background:none;padding:12px 16px;border-bottom:2px solid transparent}.school-tabs button[aria-selected=true]{border-color:#35382d;font-weight:600}.teacher-toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:20px}.teacher-toolbar label:first-child{flex:1;min-width:180px}.teacher-toolbar label{margin:0}.teacher-toolbar input,.teacher-toolbar select{margin-bottom:0!important}.teacher-preview{display:block;width:100%;max-height:75vh;object-fit:contain}.teacher-history{margin-top:20px}.teacher-history>div{display:flex;gap:14px;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e4e5de}.teacher-choice{flex-wrap:wrap}.teacher-subject{font-size:11px;width:180px}.teacher-subject input{width:100%;margin:4px 0 0!important}.school-picker>label{display:block}.school-picker{position:relative}.school-picker .school-options{position:absolute;top:auto;margin-top:-10px;max-height:220px;overflow:auto}.school-picker .school-options[hidden]{display:none}.school-tabs{display:flex;gap:8px}.schools-page [data-school-panel][hidden]{display:none}
 
 [data-assign-save][hidden]{display:none}.teacher-subject input:disabled{opacity:.7}
+
+.req{color:#d6453d;font-style:normal;margin-left:2px}
+
+/* Reuse the order cards and shoot folders, with the same quiet motion. */
+.v2 #school-list.school-list{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px}
+.school-tile-name{font-size:17px;font-weight:650;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.school-tile-meta{display:flex;gap:16px;padding:0 16px 16px;color:var(--muted);font-size:12px}
+.school-tile-meta>span{display:flex;gap:6px;align-items:center}
+.school-tile .order-preview-fan img{transition:transform .35s ease,height .35s ease}
+.school-tile:hover .order-preview-fan img:first-child{transform:rotate(-10deg) translate(-5px,-4px)}
+.school-tile:hover .order-preview-fan img:last-child{transform:rotate(10deg) translate(5px,-4px)}
+.school-tile:hover .order-preview-fan.count-1 img{transform:rotate(-3deg) translateY(-5px)}
+.teacher-workspace-tabs{margin:20px 0 14px}.teacher-shoots{margin-bottom:16px}
+.teacher-workspace-tabs button,.teacher-frame-status{display:inline-flex;align-items:center;gap:6px}
+.teacher-groups{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+.teacher-group .folder-open>img{aspect-ratio:3/4;max-height:260px}
+.teacher-frame-status{margin:6px 14px 0;font-size:11px;color:var(--muted)}
+.teacher-frame-status.ready{color:#608053}
+.teacher-group,.teacher-card{transition:transform .2s,border-color .2s,box-shadow .2s}
+.teacher-group:hover,.teacher-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px #28212f0b}
+.teacher-review{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(240px,1fr);gap:24px}
+.teacher-review-image{position:relative;height:55vh;min-height:280px;overflow:auto;background:#f0f0f2;border-radius:14px}
+.teacher-review-image>img{display:block;width:100%;height:100%;object-fit:contain}
+.teacher-review-image>img.zoomed{width:180%;max-width:none;height:auto;object-fit:initial}
+.teacher-zoom-toggle{position:sticky;bottom:12px;left:12px;margin-top:-48px}
+.teacher-filmstrip{display:flex;gap:8px;overflow:auto;margin:12px 0;padding:3px}
+.teacher-filmstrip button{flex:none;width:58px;height:76px;padding:0;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#efedf0}
+.teacher-filmstrip button.chosen{border-color:#c39428;box-shadow:0 0 0 2px #f9eed5}
+.teacher-filmstrip img{width:100%;height:100%;object-fit:cover}
+.teacher-review-form{display:flex;flex-direction:column;gap:12px}.teacher-review-form>p{margin:0;line-height:1.5}
+.teacher-review-form button{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.teacher-review-form [hidden],.teacher-group-edit[hidden]{display:none}
+.teacher-group-edit{display:grid;gap:8px}.teacher-group-edit label{font-size:12px;overflow-wrap:anywhere}
+.tphoto-panel.dragging{outline:2px dashed #c39428;outline-offset:8px;border-radius:16px}
+.tphoto-panel .shoot-head h2{display:flex;align-items:center;gap:8px}
+.teacher-history{color:var(--muted);font-size:12px}
+.fk-teachers h3{display:flex;align-items:center;gap:8px;margin-top:0}
+@media(max-width:700px){.teacher-review{grid-template-columns:1fr}.teacher-review-image{height:45vh}.teacher-groups{grid-template-columns:repeat(2,minmax(0,1fr))}.tphoto-panel .shoot-bar{flex-wrap:wrap;gap:12px}}
+@media(prefers-reduced-motion:reduce){.school-tile .order-preview-fan img,.teacher-group,.teacher-card{transition:none}.school-tile:hover .order-preview-fan img,.teacher-group:hover,.teacher-card:hover{transform:none}}
+.v2 #action-dialog.wide-dialog:has(.teacher-review){width:min(1000px,calc(100vw - 48px));max-width:1000px}
+.teacher-folder-preview{position:relative;overflow:hidden}.v2 .teacher-folder-preview .order-preview-fan{inset:12px 0}.teacher-folder-preview .order-preview-fan img{transition:transform .25s}.folder:hover .teacher-folder-preview .order-preview-fan img:first-child{transform:rotate(-9deg) translateY(-3px)}.folder:hover .teacher-folder-preview .order-preview-fan img:last-child{transform:rotate(9deg) translateY(-3px)}
+@media(prefers-reduced-motion:reduce){.teacher-folder-preview .order-preview-fan img{transition:none}.folder:hover .teacher-folder-preview .order-preview-fan img{transform:none}}
+.teacher-card{border-color:var(--line);border-radius:16px}.teacher-card .teacher-photo{background:#f0f0f2}.teacher-text small,.teacher-initials{color:var(--muted)}.teacher-actions .text-button,.teacher-upload{color:var(--ink)}
+.teacher-selection-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.teacher-selection-summary .text-button{margin-left:auto;display:inline-flex;align-items:center;gap:6px}
+
+.school-tile.editing{z-index:2}
+.school-tile.editing .order-tile-main{pointer-events:none}
+.school-tile.editing .design-menu[hidden]{display:none}
+
+.school-card-edit{z-index:3}
+
+.v2 .school-preview-paper strong{font-size:22px;line-height:1.1;letter-spacing:-.5px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+
+.school-rows .school-table-head,.school-rows .school-row{grid-template-columns:minmax(180px,1.4fr) minmax(160px,1fr) 110px 100px 34px}
+.school-table-head span:nth-child(2){text-align:left}
+.school-rows .order-tile-main{position:static;padding:0;min-width:0}
+.school-row-name{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.school-row-city{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.school-row-menu{position:relative;z-index:2}
+.v2 .school-row-menu .design-menu-toggle{background:transparent;box-shadow:none;width:28px;height:28px}
+.school-row .school-card-edit{position:relative;grid-column:1/-1;box-shadow:none;padding:0 0 12px;max-width:420px;width:100%}
+.school-row.editing .queue-name::after{display:none}
+@media(max-width:760px){.school-rows .school-row{grid-template-columns:minmax(0,1fr) auto auto 28px;gap:8px 12px}.school-row .school-row-count{display:block;font-size:12px}.school-row-city{grid-column:1;grid-row:2}.school-row-menu{grid-column:4;grid-row:1/3}.school-row .school-card-edit{grid-column:1/-1}}

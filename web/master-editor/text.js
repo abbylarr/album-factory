@@ -2,7 +2,7 @@
 'use strict';
 /* Opacity and corner radius as drag-to-change fields, shown next to the layer's size. */
 function layerMetrics(l) {
-  const rounded = !['ellipse', 'line', 'svg'].includes(l.type),
+  const rounded = !['ellipse', 'line', 'svg', 'grid'].includes(l.type),
     opacity = scrubField(
       'Непрозрачность',
       'opacity',
@@ -33,18 +33,19 @@ let chipRange = null,
 function chipHtml(field, mods = []) {
   return `<span class="text-chip" contenteditable="false" data-field="${esc(field)}" data-mods="${esc(mods.join('|'))}">${esc(AutoText.label(field, mods))}</span>`;
 }
-function autoTextField(l) {
-  const groups = AutoText.GROUPS.map(
+function chipMenuGroups() {
+  return AutoText.GROUPS.map(
     ([title, rows]) =>
       `<p class="menu-label">${esc(title)}</p>${rows.map(([field, label]) => `<button type="button" class="chip-row" role="menuitem" data-insert-chip="${esc(field)}"><span class="text-chip">${esc(label)}</span></button>`).join('')}`,
   ).join('');
-  return `<div class="auto-text-field"><div class="auto-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Текст" spellcheck="false" data-auto-text>${AutoText.parts(
-    l.text,
-  )
+}
+function autoTextHtml(text) {
+  return AutoText.parts(text)
     .map(part => (part.field ? chipHtml(part.field, part.mods) : esc(part.text)))
-    .join(
-      '',
-    )}</div><button type="button" class="auto-text-add" data-chip-menu aria-haspopup="menu" aria-expanded="false" title="Вставить данные заказа">＋ Данные</button><div class="chip-menu" role="menu" aria-label="Данные заказа" hidden>${groups}</div></div><p class="section-note">Чипы заменяются данными каждого альбома; пустое значение не печатается.</p>`;
+    .join('');
+}
+function autoTextField(l) {
+  return `<div class="auto-text-field"><div class="auto-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Текст" spellcheck="false" data-auto-text>${autoTextHtml(l.text)}</div><button type="button" class="auto-text-add" data-chip-menu aria-haspopup="menu" aria-expanded="false" title="Вставить данные заказа">＋ Данные</button><div class="chip-menu" role="menu" aria-label="Данные заказа" hidden>${chipMenuGroups()}</div></div><p class="section-note">Чипы заменяются данными каждого альбома; пустое значение не печатается.</p>`;
 }
 function autoTextValue(box) {
   let out = '';
@@ -60,7 +61,8 @@ function autoTextValue(box) {
     }
   };
   walk(box);
-  return out.replace(/\u200b/g, '').slice(0, 2000);
+  /* A break left at the end is an empty line nobody sees; it would only take height from the frame. */
+  return out.replace(/\u200b/g, '').replace(/\n+$/, '').slice(0, 2000);
 }
 function autoTextInput(box) {
   const layer = selectedLayer();
@@ -68,14 +70,26 @@ function autoTextInput(box) {
   if (!slide) slide = { start: clone(doc) };
   layer.text = autoTextValue(box);
   clearTimeout(autoTextTimer);
-  autoTextTimer = setTimeout(renderScene, 200);
+  /* On the canvas the frame itself is the editor; the rendered text comes back when editing ends. */
+  if (!box.closest('#text-edit-ui')) autoTextTimer = setTimeout(renderScene, 200);
+}
+/* A click on a chip selects its label (a chip is one whole piece); a new chip then goes right after it, never inside. */
+function outsideChips(range) {
+  const chip = node => (node.nodeType === 1 ? node : node.parentElement)?.closest('.text-chip');
+  const start = chip(range.startContainer),
+    end = chip(range.endContainer);
+  if (!start && !end) return range;
+  const out = range.cloneRange();
+  if (start) out.setStartAfter(start);
+  if (end) out.setEndAfter(end);
+  return out;
 }
 function insertChip(field) {
-  const box = $('#inspector [data-auto-text]');
+  const box = chipBox();
   if (!box || !(field in AutoText.FIELDS)) return;
   const range =
     chipRange && box.contains(chipRange.startContainer)
-      ? chipRange
+      ? outsideChips(chipRange)
       : (() => {
           const r = document.createRange();
           r.selectNodeContents(box);
@@ -98,7 +112,6 @@ function insertChip(field) {
   box.focus();
 }
 function bindAutoText() {
-  const host = $('#inspector');
   document.addEventListener('selectionchange', () => {
     const sel = getSelection();
     if (!sel.rangeCount) return;
@@ -107,7 +120,7 @@ function bindAutoText() {
     if (el?.closest('[data-auto-text]')) chipRange = sel.getRangeAt(0).cloneRange();
   });
   const closeChips = () =>
-    host.querySelectorAll('.chip-menu:not([hidden])').forEach(menu => {
+    document.querySelectorAll('.auto-text-field .chip-menu:not([hidden])').forEach(menu => {
       menu.hidden = true;
       menu.parentElement.querySelector('[data-chip-menu]')?.setAttribute('aria-expanded', 'false');
     });
@@ -117,6 +130,12 @@ function bindAutoText() {
       if (!e.target.closest?.('.auto-text-field')) closeChips();
       if (chipPop && !chipPop.element.contains(e.target) && !e.target.closest?.('[data-auto-text] .text-chip'))
         closeChipPop();
+      if (
+        textEdit &&
+        !e.target.closest?.('#text-edit-ui') &&
+        e.target.closest?.('.canvas-main,.left-panel,.editor-header,#inspector [data-auto-text]')
+      )
+        finishTextEdit();
     },
     true,
   );
@@ -131,63 +150,205 @@ function bindAutoText() {
     },
     true,
   );
-  host.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && e.target.closest?.('.auto-text-field')) {
-      closeChips();
+  /* Enter on a selected text frame starts typing in it, as a double click does. */
+  document.addEventListener('keydown', e => {
+    if (
+      e.key !== 'Enter' ||
+      e.target !== document.body ||
+      textEdit ||
+      selected.length !== 1 ||
+      document.querySelector('dialog[open]')
+    )
       return;
-    }
-    if (e.target.closest?.('[data-auto-text]') && e.key === 'Enter') {
-      e.preventDefault();
-      document.execCommand('insertText', false, '\n');
-    }
-  });
-  host.addEventListener('paste', e => {
-    if (!e.target.closest?.('[data-auto-text]')) return;
+    const l = selectedLayer();
+    if (l?.type !== 'text') return;
     e.preventDefault();
-    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+    startTextEdit(l);
   });
-  host.addEventListener('input', e => {
-    const box = e.target.closest?.('[data-auto-text]');
-    if (box) autoTextInput(box);
-  });
-  host.addEventListener('focusout', e => {
+  for (const host of [$('#inspector'), $('#text-edit-ui')]) {
+    host.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && e.target.closest?.('.auto-text-field')) {
+        const open = host.querySelector('.chip-menu:not([hidden])');
+        closeChips();
+        if (!open && host.id === 'text-edit-ui') {
+          e.preventDefault();
+          e.stopPropagation();
+          finishTextEdit();
+        }
+        return;
+      }
+      if (e.target.closest?.('[data-auto-text]') && e.key === 'Enter') {
+        e.preventDefault();
+        if ((e.metaKey || e.ctrlKey) && host.id === 'text-edit-ui') finishTextEdit();
+        else document.execCommand('insertText', false, '\n');
+      }
+    });
+    host.addEventListener('paste', e => {
+      if (!e.target.closest?.('[data-auto-text]')) return;
+      e.preventDefault();
+      document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+    });
+    host.addEventListener('input', e => {
+      const box = e.target.closest?.('[data-auto-text]');
+      if (box) autoTextInput(box);
+    });
+    host.addEventListener('pointerdown', e => {
+      if (e.target.closest('[data-insert-chip],[data-chip-menu]')) e.preventDefault();
+    });
+    host.addEventListener(
+      'click',
+      e => {
+        const toggle = e.target.closest('[data-chip-menu]');
+        if (toggle) {
+          e.stopPropagation();
+          const menu = toggle.parentElement.querySelector('.chip-menu'),
+            open = menu.hidden;
+          menu.hidden = !open;
+          toggle.setAttribute('aria-expanded', String(open));
+          if (open && host.id === 'text-edit-ui') fitChipMenu(menu);
+          return;
+        }
+        const item = e.target.closest('[data-insert-chip]');
+        if (item) {
+          e.stopPropagation();
+          item.closest('.chip-menu').hidden = true;
+          insertChip(item.dataset.insertChip);
+          return;
+        }
+        const chip = e.target.closest('[data-auto-text] .text-chip');
+        if (chip) {
+          e.stopPropagation();
+          const box = chip.closest('[data-auto-text]'),
+            index = [...box.querySelectorAll('.text-chip')].indexOf(chip);
+          if (chipPop?.index === index) closeChipPop();
+          else openChipPop(index);
+        }
+      },
+      true,
+    );
+  }
+  $('#inspector').addEventListener('focusout', e => {
     if (!e.target.closest?.('[data-auto-text]') || e.relatedTarget?.closest?.('.auto-text-field')) return;
     clearTimeout(autoTextTimer);
     if (slide) finishSlide();
   });
-  host.addEventListener('pointerdown', e => {
-    if (e.target.closest('[data-insert-chip],[data-chip-menu]')) e.preventDefault();
+  const editHost = $('#text-edit-ui');
+  /* A click in the empty part of the frame puts the caret at the end of the text. */
+  editHost.addEventListener('pointerdown', e => {
+    if (!e.target.classList.contains('text-edit-frame')) return;
+    e.preventDefault();
+    focusTextEnd(e.target.querySelector('[data-auto-text]'), false);
   });
-  host.addEventListener(
-    'click',
+  /* The frame covers the canvas, so the wheel still pans and zooms it; the data menu scrolls itself. */
+  editHost.addEventListener(
+    'wheel',
     e => {
-      const toggle = e.target.closest('[data-chip-menu]');
-      if (toggle) {
-        e.stopPropagation();
-        const menu = toggle.parentElement.querySelector('.chip-menu'),
-          open = menu.hidden;
-        menu.hidden = !open;
-        toggle.setAttribute('aria-expanded', String(open));
-        return;
-      }
-      const item = e.target.closest('[data-insert-chip]');
-      if (item) {
-        e.stopPropagation();
-        item.closest('.chip-menu').hidden = true;
-        insertChip(item.dataset.insertChip);
-        return;
-      }
-      const chip = e.target.closest('[data-auto-text] .text-chip');
-      if (chip) {
-        e.stopPropagation();
-        const box = chip.closest('[data-auto-text]'),
-          index = [...box.querySelectorAll('.text-chip')].indexOf(chip);
-        if (chipPop?.index === index) closeChipPop();
-        else openChipPop(index);
-      }
+      if (e.target.closest('.chip-menu')) return;
+      e.preventDefault();
+      canvas.upperCanvasEl.dispatchEvent(new WheelEvent('wheel', e));
     },
-    true,
+    { passive: false },
   );
+}
+/* On the canvas the data menu opens below the frame, or above it when there is more room there, and fits the view. */
+function fitChipMenu(menu) {
+  const view = $('#canvas-host').getBoundingClientRect(),
+    frame = menu.parentElement.getBoundingClientRect(),
+    button = menu.parentElement.querySelector('[data-chip-menu]').offsetHeight + 6,
+    below = view.bottom - frame.bottom - 16,
+    above = frame.top - button - view.top - 16,
+    up = below < 240 && above > below;
+  menu.style.top = up ? 'auto' : '';
+  menu.style.bottom = up ? `calc(100% + ${button + 8}px)` : '';
+  menu.style.maxHeight = Math.max(120, Math.min(320, up ? above : below)) + 'px';
+}
+/* Text on the canvas: a double click opens the text with its chips right in the frame, set in the frame's own type. */
+let textEdit = null;
+function chipBox() {
+  return (textEdit && $('#text-edit-ui [data-auto-text]')) || $('#inspector [data-auto-text]');
+}
+function focusTextEnd(box, all) {
+  if (!box) return;
+  box.focus();
+  const range = document.createRange();
+  range.selectNodeContents(box);
+  if (!all) range.collapse(false);
+  const sel = getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+function startTextEdit(layer, selectAll = false) {
+  if (preview || !layer || layer.type !== 'text' || layer.locked) return;
+  finishTextEdit();
+  closeChipPop();
+  const host = $('#text-edit-ui');
+  textEdit = { layerId: layer.id };
+  host.hidden = false;
+  host.innerHTML = `<div class="text-edit-frame auto-text-field"><div class="text-edit-box" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Текст" spellcheck="false" data-auto-text>${autoTextHtml(layer.text)}</div><button type="button" class="auto-text-add text-edit-add" data-chip-menu aria-haspopup="menu" aria-expanded="false" title="Вставить данные заказа">＋ Данные</button><div class="chip-menu" role="menu" aria-label="Данные заказа" hidden>${chipMenuGroups()}</div></div>`;
+  placeTextEditUi();
+  focusTextEnd(host.querySelector('[data-auto-text]'), selectAll);
+}
+function finishTextEdit() {
+  if (!textEdit) return;
+  const host = $('#text-edit-ui'),
+    box = host.querySelector('[data-auto-text]'),
+    l = allLayers().find(i => i.id === textEdit.layerId);
+  textEdit = null;
+  closeChipPop();
+  clearTimeout(autoTextTimer);
+  if (l && box) {
+    const text = autoTextValue(box);
+    if (text !== l.text) {
+      if (!slide) slide = { start: clone(doc) };
+      l.text = text;
+    }
+  }
+  host.hidden = true;
+  host.innerHTML = '';
+  if (slide) finishSlide();
+  else render();
+}
+/* Follows the frame on every redraw, zoom and pan; the canvas copy of the text hides while the frame is edited. */
+function placeTextEditUi() {
+  if (!textEdit) return;
+  const l = selectedLayer();
+  if (preview || selected.length !== 1 || l?.id !== textEdit.layerId) return finishTextEdit();
+  const frame = $('#text-edit-ui .text-edit-frame'),
+    box = frame?.querySelector('[data-auto-text]'),
+    object = canvas.getObjects().find(o => o.masterId === l.id);
+  if (!box) return;
+  if (object?.visible) {
+    object.set({ visible: false, hasControls: false, hasBorders: false });
+    canvas.requestRenderAll();
+  }
+  const side = object ? object.side || 0 : Math.max(0, section().spreads[view.spread]?.pages.findIndex(p => p.layers.includes(l)) ?? 0),
+    zoom = canvas.getZoom(),
+    w = layerW(l) * zoom,
+    h = l.box.h * zoom,
+    c = sceneToHost(layerOffset(l, side) + l.box.x + layerW(l) / 2, l.box.y + l.box.h / 2);
+  Object.assign(frame.style, {
+    left: c.x - w / 2 + 'px',
+    top: c.y - h / 2 + 'px',
+    width: w + 'px',
+    height: h + 'px',
+    transform: l.angle ? `rotate(${l.angle}deg)` : '',
+    justifyContent: { middle: 'center', bottom: 'flex-end' }[l.valign] || 'flex-start',
+  });
+  Object.assign(box.style, {
+    fontFamily: `"${l.font || 'Arial'}"`,
+    fontSize: (object?.fontSize || (l.fontSize || 12) * 0.3528) * zoom + 'px',
+    fontWeight: l.bold ? 'bold' : 'normal',
+    fontStyle: l.italic ? 'italic' : 'normal',
+    textDecoration: [l.underline && 'underline', l.strike && 'line-through'].filter(Boolean).join(' ') || 'none',
+    textTransform: { upper: 'uppercase', lower: 'lowercase', title: 'capitalize' }[l.textCase] || 'none',
+    color: l.color || '#333333',
+    textAlign: l.align || 'left',
+    lineHeight: String((l.lineHeight || 1.25) * 1.13),
+    letterSpacing: (Number(l.letterSpacing) || 0) / 100 + 'em',
+    whiteSpace: l.fit ? 'pre' : 'pre-wrap',
+    transform: l.skew ? `skewX(${-l.skew}deg)` : '',
+  });
+  if (chipPop) drawChipPop();
 }
 /* Chip settings: click a chip in the text field to pick the form of its value and the letter case. */
 let chipPop = null;
@@ -198,26 +359,18 @@ function closeChipPop() {
   chipPop = null;
 }
 function chipAt(index) {
-  return $$('#inspector [data-auto-text] .text-chip')[index] || null;
+  return chipBox()?.querySelectorAll('.text-chip')[index] || null;
 }
 function chipPopHtml(field, mods) {
   const forms = AutoText.FORMS[AutoText.kind(field)] || [],
-    form = forms.find(([id]) => id && mods.includes(id))?.[0] || '',
-    mode = AutoText.CASES.find(([id]) => id && mods.includes(id))?.[0] || '',
-    row = (attr, id, name, note, on, icon = '') =>
-      `<button type="button" class="menu-row${on ? ' on' : ''}" ${attr}="${id}" role="menuitemradio" aria-checked="${on}">${icon}<span>${esc(name)}</span>${note ? `<small>${esc(note)}</small>` : ''}</button>`;
-  return (
-    (forms.length
-      ? `<p class="menu-label">${esc(AutoText.FIELDS[field])}</p>${forms.map(([id, name, note]) => row('data-chip-form', id, name, note, id === form)).join('')}`
-      : '') +
-    `<p class="menu-label">Регистр</p>${AutoText.CASES.map(([id, name, icon]) => row('data-chip-case', id, name, '', id === mode, `<b class="case-glyph" aria-hidden="true">${icon}</b>`)).join('')}`
-  );
+    form = forms.find(([id]) => id && mods.includes(id))?.[0] || '';
+  return `<p class="menu-label">${esc(AutoText.FIELDS[field])}</p>${forms.map(([id, name, note]) => `<button type="button" class="menu-row${id === form ? ' on' : ''}" data-chip-form="${id}" role="menuitemradio" aria-checked="${id === form}"><span>${esc(name)}</span>${note ? `<small>${esc(note)}</small>` : ''}</button>`).join('')}`;
 }
 function openChipPop(index) {
   closeChipPop();
   const l = selectedLayer(),
     chip = chipAt(index);
-  if (!l || l.type !== 'text' || !chip) return;
+  if (!l || l.type !== 'text' || !chip || !AutoText.FORMS[AutoText.kind(chip.dataset.field)]?.length) return;
   const element = document.createElement('div');
   element.className = 'cell-sources chip-pop';
   element.setAttribute('role', 'menu');
@@ -225,10 +378,8 @@ function openChipPop(index) {
   document.body.append(element);
   element.addEventListener('pointerdown', e => e.preventDefault());
   element.addEventListener('click', e => {
-    const form = e.target.closest('[data-chip-form]'),
-      mode = e.target.closest('[data-chip-case]');
-    if (form) setChipMods(chipPop.index, 'form', form.dataset.chipForm);
-    else if (mode) setChipMods(chipPop.index, 'case', mode.dataset.chipCase);
+    const form = e.target.closest('[data-chip-form]');
+    if (form) setChipForm(chipPop.index, form.dataset.chipForm);
   });
   chipPop = { element, index, layerId: l.id };
   drawChipPop();
@@ -248,25 +399,28 @@ function drawChipPop() {
   element.style.top =
     (rect.bottom + 6 + height > innerHeight - 8 ? Math.max(8, rect.top - height - 6) : rect.bottom + 6) + 'px';
 }
-/* One chip's form or case changes; the rest of the text stays as typed. */
-function setChipMods(index, kind, value) {
+/* Only the chip's data form changes; typography belongs to the whole text frame. */
+function setChipForm(index, value) {
   const l = selectedLayer();
   if (!l || l.type !== 'text') return;
   clearTimeout(autoTextTimer);
   if (slide) finishSlide();
-  let seen = -1;
+  let seen = -1,
+    changed = null;
   const text = AutoText.parts(l.text)
     .map(part => {
       if (!part.field) return part.text;
       if (++seen !== index) return AutoText.token(part.field, part.mods);
-      const forms = (AutoText.FORMS[AutoText.kind(part.field)] || []).map(([id]) => id),
-        cases = AutoText.CASES.map(([id]) => id),
-        drop = kind === 'form' ? forms : cases,
-        form = kind === 'form' ? value : part.mods.find(m => forms.includes(m)) || '',
-        mode = kind === 'case' ? value : part.mods.find(m => cases.includes(m)) || '';
-      return AutoText.token(part.field, [...part.mods.filter(m => !drop.includes(m) && m !== form && m !== mode), form, mode]);
+      const forms = (AutoText.FORMS[AutoText.kind(part.field)] || []).map(([id]) => id);
+      changed = { field: part.field, mods: [...part.mods.filter(m => !forms.includes(m)), value].filter(Boolean) };
+      return AutoText.token(changed.field, changed.mods);
     })
     .join('');
+  const chip = chipAt(index);
+  if (chip && changed) {
+    chip.dataset.mods = changed.mods.join('|');
+    chip.textContent = AutoText.label(changed.field, changed.mods);
+  }
   if (text !== l.text) commit(() => (l.text = text));
   drawChipPop();
 }
@@ -329,8 +483,6 @@ function gridTextPanel(l, prefix = '') {
     );
   return html;
 }
-let vignetteTextTab = 'name',
-  vignetteDialogTab = 'layout';
 const vignetteGapIcon = {
   gap: '<rect x="2" y="4" width="4.5" height="12" rx="1"/><rect x="13.5" y="4" width="4.5" height="12" rx="1"/><path d="M8.5 10h3M9.5 8.5 8.3 10l1.2 1.5M10.5 8.5l1.2 1.5-1.2 1.5"/>',
   photoNameGap:
@@ -350,141 +502,23 @@ function vignetteGapField(l, key) {
     'мм',
   );
 }
+/* A vignette is a frame the block's list flows into: who and how many live in the block, the card design lives here. */
+function vignetteListLink() {
+  const list = blockList(section());
+  return `<button type="button" class="vignette-list-link" data-open-block title="Кого и сколько на странице — в настройках блока"><span class="vignette-list-icon">${kindIcon('flow')}</span><span class="vignette-list-copy"><strong>${list.source === 'teachers' ? 'Учителя' : 'Ученики'}</strong><small>${list.min}–${list.max} на странице</small></span><svg class="vignette-list-go" viewBox="0 0 8 12" aria-hidden="true"><path d="M2 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+}
+/* Outside the card: how cards are laid out. What a card looks like is edited inside it (card.js). */
 function vignettePanel(l) {
-  const teachers = l.source === 'teachers',
-    row = (name, value) => `<div>${name}<strong>${value}</strong></div>`;
+  const zone = CARD_ZONE_NAMES[l.nameAt || 'below'].toLowerCase(),
+    ratio = PHOTO_RATIOS.find(([value]) => Math.abs(value - (Number(l.photoRatio) || 0.75)) < 1e-3)?.[1] || '3:4',
+    caption = l.showDetail ? `имя и ${vignetteDetailName(l).toLowerCase()}` : 'имя';
   return (
-    `<section class="inspector-section"><div class="inspector-heading safety-heading"><h3>${teachers ? 'Виньетки учителей' : 'Виньетки учеников'}</h3><button type="button" class="safety-edit" data-open-vignette>Настроить</button></div><div class="safety-summary">${row('Карточек на странице', `${blockList(section()).min}–${blockList(section()).max}`)}${row('Ширина фото', `${round(l.minPhotoWidth)}–${round(l.photoWidth ?? 85)} мм`)}${row('Подпись', l.showDetail ? (teachers ? 'Имя и предмет' : 'Имя и цитата') : 'Только имя')}</div></section>` +
-    `<section class="inspector-section typography-section"><div class="typography-heading"><h3>Отступы</h3></div><div class="type-metrics vignette-gaps">${vignetteGapField(l, 'gap')}${vignetteGapField(l, 'photoNameGap')}${l.showDetail ? vignetteGapField(l, 'nameDetailGap') : ''}</div></section>`
+    `<section class="inspector-section typography-section"><div class="typography-heading"><h3>Раскладка</h3></div><div class="type-metrics vignette-gaps">${vignetteGapField(l, 'gap')}</div></section>` +
+    `<section class="inspector-section typography-section"><div class="typography-heading"><h3>Карточка</h3></div><button type="button" class="card-enter" data-card-enter title="Двойной клик по карточке · Enter"><span class="card-enter-copy"><strong>Фото ${ratio} · ${caption}</strong><small>${caption[0].toUpperCase() + caption.slice(1)} — ${zone}</small></span><span class="card-enter-go">Изменить</span></button></section>`
   );
 }
 function vignetteDetailName(l) {
   return l.source === 'teachers' ? 'Предмет' : 'Цитата';
-}
-function vignetteSettings(l) {
-  if (vignetteDialogTab === 'layout') {
-    const pair = (title, low, high, unit, attrs) =>
-        `<div class="vignette-pair"><span>${title}</span><label>от<input data-prop="${low}" type="number" value="${round(l[low])}" ${attrs} aria-label="${title}: от"></label><label>до<input data-prop="${high}" type="number" value="${round(l[high] ?? 85)}" ${attrs} aria-label="${title}: до"></label><em>${unit}</em></div>`,
-      list = blockList(section());
-    return `<div class="vignette-dialog-group"><div class="vignette-block-note"><span><strong>${list.source === 'teachers' ? 'Учителя' : 'Ученики'} · ${list.min}–${list.max} на странице</strong><small>Кого и сколько карточек разместить — в настройках блока.</small></span><button type="button" data-vignette-block>Изменить</button></div>${pair('Ширина фото', 'minPhotoWidth', 'photoWidth', 'мм', 'min="5" max="180"')}<p class="vignette-field-note">Если карточки не помещаются, фото уменьшается до нижней границы, а дальше карточки переходят на следующую страницу. Отступы меняются на самой странице и в правой панели.</p></div>`;
-  }
-  const name = vignetteDetailName(l),
-    show = !!l.showDetail,
-    tab = show && vignetteTextTab === 'detail' ? 'detail' : 'name';
-  return `<div class="vignette-dialog-group"><div class="vignette-detail-row"><span><strong>Показывать ${name === 'Цитата' ? 'цитаты' : 'предметы'}</strong><small>Под именем на каждой виньетке</small></span><button type="button" class="switch${show ? ' on' : ''}" data-choice="showDetail" aria-pressed="${show}" aria-label="${show ? 'Скрыть' : 'Показать'} ${name.toLowerCase()}"></button></div>${show ? `<div class="segments vignette-text-tabs" role="tablist" aria-label="Настройки подписей"><button type="button" data-vignette-type="name" role="tab" class="${tab === 'name' ? 'active' : ''}" aria-selected="${tab === 'name'}">Имя</button><button type="button" data-vignette-type="detail" role="tab" class="${tab === 'detail' ? 'active' : ''}" aria-selected="${tab === 'detail'}">${name}</button></div>` : ''}<div class="typography-section">${tab === 'detail' ? gridTextPanel(l, 'detail') : gridTextPanel(l) + `<div class="type-metrics vignette-min-size">${scrubField('Уменьшать до', 'minFontSize', l.minFontSize, 4, 120, 0.5, '<span class="type-metric-icon">A↓</span>', 'pt')}<p>Если длинное имя не помещается в две строки, кегль всех имён блока уменьшается до этого размера.</p></div>`}</div></div>`;
-}
-let vignettePage = 0,
-  vignettePreviewFrame = 0,
-  vignettePreviewToken = 0,
-  vignetteCanvas = null;
-function vignettePreview() {
-  if (vignettePreviewFrame) return;
-  vignettePreviewFrame = requestAnimationFrame(() => {
-    vignettePreviewFrame = 0;
-    drawVignettePreview();
-  });
-}
-/* The preview is the real page render at a smaller zoom, so type, effects and spacing always match the canvas. */
-async function drawVignettePreview() {
-  const l = selectedLayer(),
-    dialog = $('#vignette-dialog'),
-    stage = dialog.querySelector('.vignette-preview-stage');
-  if (!l || l.type !== 'grid' || !dialog.open || !stage || !window.fabric) return;
-  const token = ++vignettePreviewToken,
-    plan = plans.find(p => p.sectionId === section().id),
-    pages = (plan?.pages || []).filter(g => g.records),
-    issues = plan?.issues || [];
-  vignettePage = clamp(vignettePage, 0, Math.max(0, pages.length - 1));
-  const g = pages[vignettePage],
-    template = g ? planner.getTemplatePage(g.templateId) : null,
-    layer = template?.layers.find(item => item.type === 'grid' && !item.hidden) || l,
-    noun = l.source === 'teachers' ? 'учителей' : 'учеников';
-  $('#vignette-preview-head').innerHTML =
-    `<strong>Пример</strong>${pages.length > 1 ? `<div class="vignette-pages"><button type="button" data-vignette-page="-1" aria-label="Предыдущая страница"${vignettePage ? '' : ' disabled'}>‹</button><span>Страница ${vignettePage + 1} из ${pages.length}</span><button type="button" data-vignette-page="1" aria-label="Следующая страница"${vignettePage < pages.length - 1 ? '' : ' disabled'}>›</button></div>` : ''}`;
-  $('#vignette-preview-issues').innerHTML = issues
-    .map(i => `<div class="issue ${i.severity}">${esc(i.text)}</div>`)
-    .join('');
-  const built = g && g.records.length ? await vignetteChildren(layer, g, template?.background) : null;
-  if (token !== vignettePreviewToken) return;
-  const empty = $('#vignette-preview-empty'),
-    facts = $('#vignette-preview-facts');
-  if (!built?.geo) {
-    empty.hidden = false;
-    empty.textContent =
-      (g && g.records.length) || !plan
-        ? 'Карточки не помещаются. Уменьшите нижнюю границу ширины фото или отступы.'
-        : `В примере нет ${noun}. Укажите количество выше.`;
-    facts.innerHTML = '';
-    vignetteCanvas?.clear();
-    return;
-  }
-  empty.hidden = true;
-  const pw = pageWidth(),
-    ph = pageHeight(),
-    width = Math.max(160, stage.clientWidth - 2),
-    scale = Math.min(width / pw, 440 / ph);
-  if (!vignetteCanvas)
-    vignetteCanvas = new fabric.StaticCanvas('vignette-preview-canvas', { renderOnAddRemove: false });
-  const size = { width: Math.round(pw * scale), height: Math.round(ph * scale) };
-  if (vignetteCanvas.width !== size.width || vignetteCanvas.height !== size.height)
-    vignetteCanvas.setDimensions(size);
-  vignetteCanvas.setZoom(scale);
-  vignetteCanvas.clear();
-  vignetteCanvas.backgroundColor = template?.background || '#fff';
-  const b = layer.box;
-  vignetteCanvas.add(
-    boxGroup(built.children, {
-      left: b.x + b.w / 2,
-      top: b.y + b.h / 2,
-      originX: 'center',
-      originY: 'center',
-      width: b.w,
-      height: b.h,
-      angle: layer.angle || 0,
-      opacity: (layer.opacity ?? 100) / 100,
-      objectCaching: false,
-    }),
-    new fabric.Rect({
-      left: b.x,
-      top: b.y,
-      width: b.w,
-      height: b.h,
-      fill: 'transparent',
-      stroke: '#b9a6c8',
-      strokeWidth: 1 / scale,
-      strokeDashArray: [4 / scale, 3 / scale],
-      angle: layer.angle || 0,
-    }),
-  );
-  vignetteCanvas.renderAll();
-  const count = g.records.length;
-  facts.innerHTML = `<span>${count} ${count % 10 === 1 && count % 100 !== 11 ? 'карточка' : [2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100) ? 'карточки' : 'карточек'}</span><span>Фото <b>${mmLabel(built.geo.photoW)}</b></span><span>Имя <b>${round(g.actualFont || layer.fontSize)} pt</b></span>`;
-}
-function renderVignetteDialog() {
-  const l = selectedLayer();
-  if (!l || l.type !== 'grid') return;
-  $('#vignette-dialog-title').textContent =
-    l.source === 'teachers' ? 'Виньетки учителей' : 'Виньетки учеников';
-  $$('#vignette-dialog [data-vignette-dialog-tab]').forEach(b => {
-    const active = b.dataset.vignetteDialogTab === vignetteDialogTab;
-    b.classList.toggle('active', active);
-    b.setAttribute('aria-selected', String(active));
-  });
-  $('#vignette-controls').innerHTML = vignetteSettings(l);
-  const source = l.source,
-    noun = source === 'teachers' ? 'учителей' : 'учеников';
-  $('#vignette-test-count').innerHTML =
-    `<label class="vignette-sample-count">В примере<input data-vignette-test-count="${source}" type="number" min="0" max="${source === 'teachers' ? 60 : 80}" value="${view[source]}" aria-label="Количество ${noun} в примере">${noun}</label><div class="vignette-test-flags"><label class="check"><input type="checkbox" data-vignette-test-flag="long" ${view.long ? 'checked' : ''}>Длинное имя</label><label class="check"><input type="checkbox" data-vignette-test-flag="missing" ${view.missing ? 'checked' : ''}>Нет портрета</label></div>`;
-  vignettePreview();
-}
-function openVignetteDialog() {
-  if (preview || selectedLayer()?.type !== 'grid') return;
-  vignetteDialogTab = 'layout';
-  vignetteTextTab = 'name';
-  vignettePage = 0;
-  $('#vignette-dialog').append($('#color-pop'));
-  renderVignetteDialog();
-  $('#vignette-dialog').showModal();
 }
 let textStyleMenu = null;
 function closeTextStyleMenu() {
@@ -658,6 +692,18 @@ function applyTextPaint(object, l) {
   object.initDimensions?.();
   object.setCoords?.();
 }
+/* Explain the corner marker using the text actually rendered, after resolving data chips. */
+function syncTextOverflow() {
+  const panel = $('#inspector [data-text-overflow]');
+  if (!panel) return;
+  const object = canvas.getObjects().find(o => o.masterId === selectedLayer()?.id),
+    reason = object?.overflowDetails?.();
+  panel.hidden = !reason;
+  if (!reason) return;
+  panel.querySelector('[data-overflow-message]').textContent = reason.height
+    ? `Не хватает высоты: текст занимает ${Math.ceil(object.contentHeight * 10) / 10} мм, рамка — ${round(object.height)} мм.${reason.width ? ' Есть и строка шире рамки.' : ''}`
+    : 'Есть строка шире рамки. Увеличьте ширину или уменьшите текст.';
+}
 /* A text layer is a frame of fixed size, as in InDesign: the text lays out inside it and aligns to its top,
    middle or bottom. With «shrink to fit» explicit lines never wrap and the whole text shrinks by one factor. */
 let frameTextClass = null;
@@ -742,21 +788,39 @@ function FrameText() {
       return lines;
     }
     /* Text past the frame is hidden, as in InDesign, and a red «+» at the corner says some of it does not fit. */
+    overflowDetails() {
+      if (this.fit || !this.text?.trim() || !this._textLines) return null;
+      const height = (this.contentHeight ?? 0) > this.height + 0.05,
+        width = this._textLines.some((_, n) => this.getLineWidth(n) > this.width + 0.05);
+      return height || width ? { height, width } : null;
+    }
     overflows() {
-      if (this.fit || !this._textLines) return false;
-      return (
-        (this.contentHeight ?? 0) > this.height + 0.05 ||
-        this._textLines.some((_, n) => this.getLineWidth(n) > this.width + 0.05)
-      );
+      return !!this.overflowDetails();
+    }
+    /* Overset text as in InDesign: it starts at the top of the frame and only whole lines that fit are shown. */
+    fittingHeight() {
+      if (this.fit || !this._textLines || (this.contentHeight ?? 0) <= this.height + 0.05) return null;
+      let top = 0,
+        bottom = 0;
+      for (let i = 0; i < this._textLines.length; i++) {
+        const line = this.getHeightOfLine(i),
+          glyphs = top + line / this.lineHeight;
+        if (glyphs > this.height + 0.05) break;
+        bottom = glyphs;
+        top += line;
+      }
+      return bottom;
     }
     _render(ctx) {
       const w = this.width,
         h = this.height,
         pad = this.strokeWidth || 0;
       if (this.isEditing) return super._render(ctx);
+      const fitting = this.fittingHeight();
       ctx.save();
       ctx.beginPath();
-      ctx.rect(-w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2);
+      if (fitting === null) ctx.rect(-w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2);
+      else ctx.rect(-w / 2 - pad, -h / 2 - pad, w + pad * 2, fitting + pad);
       ctx.clip();
       super._render(ctx);
       ctx.restore();
@@ -779,7 +843,7 @@ function FrameText() {
       ctx.restore();
     }
     _getTopOffset() {
-      const free = this.height - (this.contentHeight ?? this.height);
+      const free = Math.max(0, this.height - (this.contentHeight ?? this.height));
       return -this.height / 2 + free * ({ middle: 0.5, bottom: 1 }[this.valign] || 0);
     }
     _set(key, value) {

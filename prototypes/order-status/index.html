@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Плашка заказа · стенд</title>
+<!-- Real service styles: the prototype is judged against what ships. -->
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/v2.css">
+<link rel="stylesheet" href="../../web/board.css">
+<link rel="stylesheet" href="../../web/photo-tools.css">
+<style>
+body.v2{display:block;min-height:100vh;margin:0;background:#f5f5f3}
+.proto{display:grid;grid-template-columns:300px minmax(0,1fr);min-height:100vh}
+.proto-side{position:sticky;top:0;height:100vh;overflow:auto;box-sizing:border-box;padding:20px 18px 40px;background:#fcfcfa;border-right:1px solid #e6e7e1;font-size:13px}
+.proto-side h1{margin:0 0 4px;font-size:17px}
+.proto-side h3{margin:22px 0 8px;font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#8d8992}
+.proto-scn{display:grid;gap:4px}
+.proto-scn button{display:block;width:100%;padding:8px 10px;border:1px solid transparent;border-radius:9px;background:none;text-align:left;font:inherit;color:#3c3a40;cursor:pointer}
+.proto-scn button:hover{background:#f1f0f3}
+.proto-scn button.on{background:#fff;border-color:#e3e1e6;box-shadow:0 1px 3px #28212f14;font-weight:600}
+.proto-ctl{display:grid;gap:9px}
+.proto-ctl label{margin:0;font-size:13px;font-weight:400;display:grid;grid-template-columns:118px minmax(0,1fr);align-items:center;gap:8px;color:#5f5c64}
+.proto-ctl label.chk{grid-template-columns:18px 1fr}
+.proto-ctl select,.proto-ctl input[type=number]{margin:0;min-height:0;width:100%;box-sizing:border-box;height:30px;padding:0 8px;border:1px solid #e0dfe3;border-radius:8px;background:#fff;font:inherit}
+.proto-main{padding:26px 34px 60px;min-width:0}
+.proto-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;margin:0 0 10px;font-size:13px;font-weight:600;color:#8d8992}
+.proto-h b{color:#242522}
+.proto-block{max-width:1060px;margin-bottom:34px}
+.proto-block .order-head{margin-bottom:0}
+.proto-cards{display:flex;gap:28px;flex-wrap:wrap}
+.proto-cards>div{width:280px}
+.proto-cards .board-card{width:280px}
+.proto-seg{display:inline-flex;padding:3px;background:#efeef1;border-radius:9px}
+.proto-seg button{padding:5px 10px;border:0;border-radius:7px;background:none;font:inherit;color:#5f5c64;cursor:pointer}
+.proto-seg button.on{background:#fff;color:#242522;box-shadow:0 1px 2px #28212f1a}
+@media(max-width:900px){.proto{grid-template-columns:1fr}.act{flex-wrap:wrap}.act-bar{flex-basis:100%;max-width:none;order:9}.proto-side{position:static;height:auto;border-right:0;border-bottom:1px solid #e6e7e1}.proto-main{padding:18px 16px 40px}}
+.proto-toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);padding:10px 16px;border-radius:10px;background:#242522;color:#fff;font-size:13px;opacity:0;transition:.25s;pointer-events:none}
+.proto-toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ── Proposal: activities under the main step ───────────────────────── */
+.act-list{display:grid;gap:0;margin:8px 22px 0;padding:4px 0}
+.act{display:flex;align-items:center;gap:12px;min-height:40px;padding:4px 18px 4px 12px;border-radius:12px;font-size:13px;color:#5f5c64;transition:background .2s}
+.act{animation:act-in .3s ease-out}
+@keyframes act-in{from{opacity:0;transform:translateY(-4px)}}
+.act+.act{border-top:1px solid #f0eff2;border-radius:0}
+.act-ico{position:relative;flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#f3f2f4;color:#6f6b74}
+.act-ico .act-spin{position:absolute;inset:0;width:100%;height:100%;animation:pill-spin 1.4s linear infinite}
+.act-spin circle{fill:none;stroke:currentColor;stroke-opacity:.7;stroke-width:1.6;stroke-linecap:round;stroke-dasharray:20 70}
+.act-ico.rise .ico{animation:act-rise 1.2s ease-in-out infinite}
+@keyframes act-rise{0%{transform:translateY(3px);opacity:.3}50%{opacity:1}100%{transform:translateY(-3px);opacity:.3}}
+.act-label{flex:none;font-weight:650;color:#242522}
+.act-detail{flex:none;font-variant-numeric:tabular-nums;white-space:nowrap}
+.act-bar{flex:1 1 auto;min-width:60px;max-width:280px;height:4px;border-radius:4px;background:#ecebee;overflow:hidden}
+.act-bar i{display:block;height:100%;border-radius:4px;background:#8d8992;transition:width .5s}
+.act-eta{flex:none;color:#8d8992;white-space:nowrap}
+.act-fill{flex:1}
+.act-tag{flex:none;padding:2px 8px;border-radius:6px;background:#f3f2f4;color:#6f6b74;font-size:11px;white-space:nowrap}
+.act-action{flex:none;margin:0 0 0 auto;padding:4px 0;border:0;background:none;font:inherit;font-weight:650;color:#242522;white-space:nowrap;cursor:pointer}
+.act-action:hover{background:none;text-decoration:underline;text-underline-offset:3px}
+.act-action+.act-action{margin-left:14px}
+.act.alert .act-ico{background:#fcecea;color:#d2493b}
+.act.alert .act-label,.act.alert .act-action{color:#8a2a22}
+.act.task .act-ico{background:#fcf1da;color:#b07d10}
+.act.done .act-ico{background:#e9f5ec;color:#3aa655}
+.act.done{animation:act-fade 4s forwards}
+@keyframes act-fade{0%{opacity:0}8%,75%{opacity:1}100%{opacity:.25}}
+/* Sections variant: the same items as cells glued under the plate. */
+.act-list.cells{display:flex;flex-wrap:wrap;gap:6px;padding:0}
+.act-list.cells .act{flex:1 1 220px;flex-wrap:wrap;gap:6px 10px;min-height:0;padding:10px 12px;border:0;border-radius:12px;background:#f7f6f8}
+.act-list.cells .act.alert{background:#fcecea}
+.act-list.cells .act.task{background:#fcf6e8}
+.act-list.cells .act-bar{flex:1 0 100%;max-width:none;order:9}
+.act-list.cells .act-eta{margin-left:auto}
+/* Board card: running things as tiny marks next to the plate text. */
+.act-mini{display:flex;flex-wrap:wrap;gap:4px 10px;margin:-2px 12px 9px;font-size:11px;color:#6f6b74;font-variant-numeric:tabular-nums}
+.act-mini span{display:inline-flex;align-items:center;gap:4px}
+.act-mini .alert{color:#b3261e}
+.act-mini .mini-spin{animation:pill-spin 1.4s linear infinite}
+@media(prefers-reduced-motion:reduce){.act-ico .act-spin,.act-ico.rise .ico,.act-mini .mini-spin{animation:none}}
+</style>
+</head>
+<body class="v2">
+<div class="proto">
+  <aside class="proto-side">
+    <h1>Плашка заказа</h1>
+    <div class="muted small">Стенд состояний. Не продакшен.</div>
+    <h3>Сценарии</h3>
+    <div class="proto-scn" id="scenarios"></div>
+    <h3>Состояние заказа</h3>
+    <div class="proto-ctl" id="controls"></div>
+    <h3>Стенд</h3>
+    <div class="proto-ctl">
+      <label class="chk"><input type="checkbox" id="live" checked><span>Живая симуляция</span></label>
+      <label class="chk"><input type="checkbox" id="tasks" checked><span>Задачи в ленте</span></label>
+    </div>
+  </aside>
+  <div class="proto-main">
+    <div class="proto-block">
+      <div class="proto-h"><b>Сейчас в сервисе</b> код stageStep() из web/v2.js</div>
+      <section class="order-head" id="now"></section>
+    </div>
+    <div class="proto-block">
+      <div class="proto-h"><b>Предложение</b> главный шаг + отдельная строка на каждый процесс
+        <span class="proto-seg" id="variant"><button data-v="rows" class="on">Строки</button><button data-v="cells">Секции</button></span></div>
+      <section class="order-head" id="next"></section>
+    </div>
+    <div class="proto-block">
+      <div class="proto-h"><b>Карточка на доске</b> сейчас → предложение</div>
+      <div class="proto-cards"><div id="card-now"></div><div id="card-next"></div></div>
+    </div>
+  </div>
+</div>
+<div class="proto-toast" id="toast"></div>
+<script>
+/* ── Copied from web/v2.js (helpers the plate uses) ─────────────────── */
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const count=(n,one,few,many)=>`${n} ${n%10===1&&n%100!==11?one:n%10>=2&&n%10<=4&&(n%100<12||n%100>14)?few:many}`;
+const STAGES=[['new','Загрузить фото','#7712b3'],['photos','Проверить фото','#4d6ff0'],['forms','Собрать анкеты','#50b7f1'],['layout','Сверстать макет','#28cec5'],['approval','Согласовать макет','#f29b38'],['print','Напечатать','#e2458a'],['delivery','Доставить','#3aa655'],['archive','Архив','#8a8b85']];
+const SHORT={new:'Новые',photos:'Фото',forms:'Анкеты',layout:'Макет',approval:'Согласование',print:'Печать',delivery:'Доставка',archive:'Архив'};
+const stageOf=key=>STAGES.find(s=>s[0]===key)||STAGES[0];
+const stageNumber=o=>`Этап ${STAGES.findIndex(s=>s[0]===o.stage)+1} из ${STAGES.length} · ${SHORT[o.stage]}`;
+const ICONS={pin:'<path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Z"/><circle cx="12" cy="10" r="2.5"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',upload:'<path d="M12 15V3m-5 5 5-5 5 5M5 21h14"/>',loader:'<path d="M21 12a9 9 0 1 1-6.2-8.56"/>',alert:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5m0 3h.01"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',layout:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 12h9"/>',print:'<path d="M6 9V3h12v6M6 17H4V9h16v8h-2"/><rect x="6" y="14" width="12" height="7"/>',truck:'<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M10 12h4"/>',photo:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>',forms:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v3H9zM9 12h6M9 16h4"/>',approve:'<path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="m9 12 2 2 4-4"/>',users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.3A6.5 6.5 0 0 1 21.5 20"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  /* new for the proposal */
+  scan:'<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="11" r="3"/><path d="M7.5 17a5 5 0 0 1 9 0"/>',
+  package:'<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>',
+  download:'<path d="M12 3v12m-5-5 5 5 5-5M5 21h14"/>',
+  eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>'};
+const STAGE_ICONS={new:'upload',photos:'photo',forms:'forms',layout:'layout',approval:'approve',print:'print',delivery:'truck',archive:'archive'};
+const svgIcon=(name,size=14)=>`<svg class="ico ico-${name}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+function stageRing(stage,size,color=stageOf(stage)[2]){const n=STAGES.length,at=STAGES.findIndex(x=>x[0]===stage)+1,c=size/2,w=Math.max(2.5,size/11),r=c-w/2-1,len=2*Math.PI*r,seg=len/n,gap=Math.max(1.5,size/22);return `<span class="stage-ring" style="width:${size}px;height:${size}px;--turn:${color}" aria-hidden="true"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${STAGES.map((_,k)=>`<circle cx="${c}" cy="${c}" r="${r.toFixed(2)}" class="${k<at?'on':''}" stroke-width="${w.toFixed(1)}" stroke-dasharray="${(seg-gap).toFixed(2)} ${len.toFixed(2)}" stroke-dashoffset="${(-k*seg).toFixed(2)}" transform="rotate(-90 ${c} ${c})"/>`).join('')}</svg>${svgIcon(STAGE_ICONS[stage],Math.round(size*.4))}</span>`;}
+const state={view:'persons'};
+function stats(o){return {total:o.photo_count,pending:o.pending,review:o.review_count};}
+function etaText(o){const sec=o.processing?.eta_seconds;return sec==null?'Оцениваем оставшееся время…':sec<60?'Осталось меньше минуты':`Осталось примерно ${Math.max(1,Math.floor(sec/60*.8))}–${Math.max(2,Math.ceil(sec/60*1.2))} мин`;}
+function correctionsHtml(list){return `<ul class="corrections">${list.map(c=>`<li><div><strong>${esc(c.where)}</strong><span>${esc(c.text)}</span></div></li>`).join('')}</ul>`;}
+const daysIn=o=>o.days;
+const isMine=st=>st.kind==='todo'||st.kind==='done'||!!st.stale;
+const tileTurn=st=>st.urgent||st.stale?'alert':isMine(st)?'mine':'wait';
+const STALE_DAYS=14;
+function orderMeta(o){return [['pin',o.school_city],['calendar',`Выпуск ${o.graduation_year}`],['layout',count(o.copies,'альбом','альбома','альбомов')]].map(([i,t])=>`<span>${svgIcon(i,14)}${esc(t)}</span>`).join('');}
+const tabs=o=>`<div class="workspace-tabs">${[['Фото',o.photo_count],['Персоны',16],['Анкеты',''],['Учителя',''],['Макет','']].map(([l,n],i)=>`<a class="${i===1?'active':''}">${l}${n!==''?` <small>${n}</small>`:''}</a>`).join('')}</div>`;
+const headTop=o=>`<div class="order-head-top"><div class="stage-path"><button type="button" class="stage-path-toggle">${stageRing(o.stage,56)}</button></div><div class="order-head-info"><span class="order-head-stage">${esc(stageNumber(o))}</span><h1>${esc(o.school)} · ${esc(o.class_name)}</h1><div class="order-head-meta">${orderMeta(o)}</div></div><div class="order-head-menu design-menu"><button class="design-menu-toggle">${svgIcon('more',16)}</button></div></div>`;
+
+/* LayoutStart.stage from web/layout-start.js, with the browser upload read from the stand. */
+function queuedStage(o){const q=o.layout_queue;if(!q)return null;
+  if(q.error)return {title:'Макет не собран',text:q.error,actions:'<button class="secondary">Убрать из очереди</button><button class="primary">Создать макет</button>',mine:true};
+  const files=o.upload.state==='running'?o.upload.total-o.upload.done:0,stalled=q.uploading&&o.upload.state!=='running';
+  return {title:'Макет в очереди',text:stalled?'Загрузка прервана. Догрузите фото или соберите без них.':[files?`Загружается ${files}`:'',o.pending?`Обрабатывается ${o.pending}`:''].filter(Boolean).join(' · ')||'Собираем…',
+    actions:`<button class="secondary">Отменить</button>${stalled?'<button class="primary">Собрать сейчас</button>':''}`,mine:stalled};}
+
+/* stageStep / stageStatus / cardStatus — verbatim logic from web/v2.js. */
+function stageStep(o){const queued=queuedStage(o);if(queued)return queued;const s=stats(o),c=o.client_progress,b=(v,label,cls='primary')=>`<button class="${cls}" data-v2="${v}">${label}</button>`,a=(tab,label,cls='secondary')=>state.view===tab?'':`<a class="${cls}">${label}</a>`,processing=s.pending?`Обработано ${s.total-s.pending} из ${s.total}. ${etaText(o)}`:'';switch(o.stage){case'new':return {title:'Загрузите первую съёмку',text:'Создайте съёмку, укажите дату и добавьте фотографии.',actions:b('add-photos','Загрузить фотографии'),mine:true};case'photos':return s.pending?{title:'Фотографии обрабатываются',text:processing,progress:[s.total-s.pending,s.total]}:{title:s.review?`${s.review} фото требуют проверки`:'Фотографии готовы',text:s.review?'Проверьте снимки или отправьте анкеты как есть.':'Проверьте персоны и отправьте классу анкеты для выбора портретов.',actions:s.review?a('review','Проверить','primary')+b('send-forms','Отправить как есть','secondary'):b('send-forms','Отправить на анкеты'),mine:true};case'forms':{const done=c?.status==='complete';return {title:done?'Все заполнили анкеты':'Класс заполняет анкеты',text:[c?.enabled?`Заполнено ${c.completed} из ${c.total}.`:'',processing].filter(Boolean).join(' '),progress:c?.enabled&&!done?[c.completed,c.total||1]:null,actions:a('client','Ссылка и коды')+b('make-layout','Создать макет'),mine:done};}case'layout':return {title:'Проверьте макет',text:'Когда макет готов, отправьте его классу на согласование.',actions:a('layout','Открыть макет')+b('publish-layout','Отправить на согласование'),mine:true};case'approval':if(!o.approved&&o.corrections?.length)return {title:`Класс прислал правки: ${o.corrections.length}`,text:'Исправьте макет и отправьте его заново — класс увидит новую версию. Выполненные правки можно отметить.',extra:correctionsHtml(o.corrections),actions:a('layout','Открыть макет')+b('publish-layout','Отправить заново'),mine:true};return o.approved?{title:'Класс согласовал макет',text:'После отправки в печать макет больше не редактируется.',actions:b('allow-production','Отправить в печать'),mine:true}:{title:'Макет у класса',text:'Ждём согласования ответственного. Если нужно поправить макет, измените его и отправьте заново.',actions:a('layout','Открыть макет')+b('publish-layout','Отправить заново','secondary')+b('force-production','В печать без согласования','secondary')};case'print':return {title:'В печати',text:'Файлы для печати — во вкладке «Анкеты», в разделе «Заказ класса».',actions:b('stage-delivery','Передано в доставку')};case'delivery':return {title:'Доставка',actions:b('stage-archive','Перенести в архив')};default:return {title:'В архиве',actions:b('stage-delivery','Вернуть в доставку','secondary')};}}
+function stageStatus(o){const s=stats(o),c=o.client_progress;switch(o.stage){case'new':return {text:'Нет фотографий',kind:'todo',action:['add-photos','Загрузить фото']};case'photos':return s.pending?{text:`Обработано ${s.total-s.pending} из ${s.total}`,kind:'working',progress:[s.total-s.pending,s.total]}:s.review?{text:`${s.review} фото на проверку`,kind:'todo',action:['review','Проверить фото']}:{text:'Фото готовы',kind:'done',action:['send-forms','Отправить анкеты']};case'forms':return c?.status==='complete'?{text:'Все заполнили',kind:'done',action:['make-layout','Создать макет']}:{text:`Заполнили ${c.completed} из ${c.total}`,kind:'waiting',progress:[c.completed,c.total]};case'layout':return {text:'Макет готов к проверке',kind:'todo',action:['layout','Открыть макет']};case'approval':return o.approved?{text:'Согласовано',kind:'done',action:['allow-production','В печать']}:o.corrections?.length?{text:`Правки от класса: ${o.corrections.length}`,kind:'todo',urgent:true,action:['layout','Исправить макет']}:{text:'Макет у класса',kind:'waiting'};case'print':return {text:'В печати',kind:'working',action:['stage-delivery','Передано в доставку']};case'delivery':return {text:'В доставке',kind:'working',action:['stage-archive','В архив']};default:return {text:'Заказ завершён',kind:'waiting'};}}
+function cardStatus(o){const st=stageStatus(o),d=daysIn(o);return st.kind==='waiting'&&['forms','approval'].includes(o.stage)&&d>=STALE_DAYS?{...st,stale:true,note:`Стоит напомнить · ${count(d,'день','дня','дней')}`}:st;}
+const tileAction=st=>st.action?`<button type="button" class="order-plate-action">${esc(st.action[1])} →</button>`:'';
+const cardHead=o=>`<a class="board-card-main"><span class="order-tile-heading"><strong class="order-tile-school">${esc(o.school)}</strong><span class="order-tile-separator">·</span><strong class="order-tile-class">${esc(o.class_name)}</strong></span></a>`;
+
+function renderNow(o){const st=cardStatus(o),step=stageStep(o);if(st.stale)step.text=[step.text,`Прошло ${count(daysIn(o),'день','дня','дней')} — стоит напомнить классу.`].filter(Boolean).join(' ');
+  morph($('#now'),headTop(o)+`<div class="order-plate order-head-plate turn-${tileTurn(st)}"><div class="order-plate-body"><span class="order-plate-title">${esc(step.title)}</span>${step.text?`<p>${esc(step.text)}</p>`:''}${step.progress?`<progress max="${step.progress[1]}" value="${step.progress[0]}"></progress>`:''}${step.extra||''}</div><div class="step-actions">${step.actions||''}</div></div>`+tabs(o));
+  morph($('#card-now'),`<article class="board-card">${cardHead(o)}<div class="order-plate board-plate turn-${tileTurn(st)}"><span class="order-plate-text">${esc(st.note||st.text)}</span>${tileAction(st)}${st.progress?`<progress max="${st.progress[1]}" value="${st.progress[0]}"></progress>`:''}</div></article>`);}
+
+/* ── Proposal ───────────────────────────────────────────────────────── */
+// Main step: only "what is the next move and whose". Nothing running in the background leaks into its text.
+function mainStep(o){
+  const q=o.layout_queue,c=o.client_progress,b=(label,cls='primary')=>`<button class="${cls}">${label}</button>`,a=(label)=>`<a class="secondary">${label}</a>`;
+  if(q?.error)return {turn:'alert',title:'Макет не собран',text:q.error,actions:b('Убрать из очереди','secondary')+b('Собрать заново')};
+  if(q)return {turn:'wait',title:'Макет соберётся сам',text:'Когда догрузятся и обработаются фото',actions:b('Отменить','secondary')};
+  const st=cardStatus(o);let m;
+  switch(o.stage){
+    case'new':m=o.upload.state==='none'?{title:'Загрузите первую съёмку',actions:b('Загрузить фото')}:{title:'Первая съёмка загружается'};break;
+    case'photos':m=o.pending?{title:'Фото обрабатываются',text:'Проверить персоны можно будет после обработки'}:o.review_count?{title:`${o.review_count} фото на проверку`,actions:a('Отправить как есть')+b('Проверить')}:{title:'Фото готовы',actions:b('Отправить на анкеты')};break;
+    case'forms':m=c.status==='complete'?{title:'Все заполнили анкеты',text:`${c.completed} из ${c.total}`,actions:a('Ссылка и коды')+b('Создать макет')}:{title:'Класс заполняет анкеты',text:`${c.completed} из ${c.total}`,progress:[c.completed,c.total],actions:a('Ссылка и коды')};break;
+    case'layout':m={title:'Проверьте макет',actions:a('Открыть макет')+b('Отправить на согласование')};break;
+    case'approval':{const n=o.corrections.length,fixed=o.corrections.filter(x=>x.done).length;
+      m=!o.approved&&n?(fixed<n?{title:`Правки от класса: ${n}`,text:`Исправлено ${fixed} из ${n}`,progress:[fixed,n],actions:a('Отправить заново')+b('Открыть правки')}:{title:'Все правки исправлены',text:`${n} из ${n}`,actions:a('Открыть макет')+b('Отправить заново')})
+        :o.approved?{title:'Класс согласовал макет',actions:b('Отправить в печать')}:{title:'Макет у класса',text:'Ждём согласования',actions:a('Открыть макет')};break;}
+    case'print':m={title:'В печати',actions:b('Передано в доставку')};break;
+    case'delivery':m={title:'Доставка',actions:b('Перенести в архив')};break;
+    default:m={title:'В архиве',actions:b('Вернуть в доставку','secondary')};}
+  if(st.stale){const d=count(o.days,'день','дня','дней');
+    m=o.stage==='forms'?{title:'Класс заполняет анкеты',text:`${c.completed} из ${c.total} · ${d} без движения`,progress:[c.completed,c.total],actions:a('Ссылка и коды')+b('Напомнить')}
+      :{title:'Макет у класса',text:`${d} без ответа`,actions:a('Открыть макет')+b('Напомнить')};}
+  const allFixed=o.corrections.length&&o.corrections.every(x=>x.done),turn=allFixed?'mine':o.stage==='new'&&o.upload.state!=='none'?'wait':o.stage==='photos'&&o.pending?'wait':tileTurn(st);
+  return {turn,...m};}
+
+// Everything that runs alongside the main step. One row per process, each with its own mark and control.
+function activities(o,withTasks){
+  const list=[],now=Date.now(),waitsFor=o.layout_queue&&!o.layout_queue.error?'<span class="act-tag">макет ждёт</span>':'';
+  const u=o.upload;
+  if(u.state==='running')list.push({kind:'upload',icon:'upload',motion:'rise',label:'Загрузка',detail:`${u.done} из ${u.total}`,bar:u.done/u.total,eta:`~${Math.max(1,Math.ceil((u.total-u.done)/40))} мин`,tag:waitsFor,actions:['Остановить']});
+  if(u.state==='stopped')list.push({kind:'upload',tone:'alert',icon:'upload',label:'Загрузка прервана',detail:`не загружено ${u.total-u.done}`,tag:waitsFor,actions:['Догрузить']});
+  if(u.state==='done'&&now-u.at<5000)list.push({key:'upload-done',tone:'done',icon:'check',label:'Загружено',detail:count(u.total,'фото','фото','фото')});
+  if(o.pending)list.push({kind:'processing',icon:'scan',motion:'spin',label:'Обработка',detail:`${o.photo_count-o.pending} из ${o.photo_count}`,bar:(o.photo_count-o.pending)/o.photo_count,eta:o.pending*0.12<60?'меньше минуты':`~${Math.ceil(o.pending*0.12/60)} мин`,tag:waitsFor});
+  else if(now-o.processedAt<5000)list.push({key:'processing-done',tone:'done',icon:'check',label:'Фото обработаны',detail:count(o.photo_count,'снимок','снимка','снимков')});
+  if(o.errors)list.push({tone:'alert',icon:'alert',label:'Не обработались',detail:count(o.errors,'фото','фото','фото'),actions:['Показать','Повторить']});
+  if(o.export.state==='running')list.push({kind:'export',icon:'package',motion:'spin',label:'Файлы для печати',detail:'собираем комплект',bar:o.export.p/100,eta:`${Math.round(o.export.p)}%`});
+  if(o.export.state==='ready')list.push({key:'export-ready',icon:'download',label:'Файлы для печати готовы',detail:'PDF и JPEG',actions:['Скачать']});
+  if(withTasks){
+    if(o.review_count&&o.stage!=='photos')list.push({tone:'task',icon:'eye',label:'Фото на проверку',detail:count(o.review_count,'снимок','снимка','снимков'),actions:['Проверить']});
+    if(o.teachers_proposed)list.push({tone:'task',icon:'users',label:'Класс предложил учителей',detail:String(o.teachers_proposed),actions:['Посмотреть']});
+  }
+  return list;}
+const spin='<svg class="act-spin" viewBox="0 0 28 28"><circle cx="14" cy="14" r="12.5"/></svg>';
+function actRow(x){return `<div class="act ${x.tone||''}" data-key="${esc(x.key||x.kind||x.label)}"><span class="act-ico ${x.motion==='rise'?'rise':''}">${x.motion==='spin'?spin:''}${svgIcon(x.icon,15)}</span><span class="act-label">${esc(x.label)}</span><span class="act-detail">${esc(x.detail||'')}</span>${x.bar!=null?`<span class="act-bar"><i style="width:${Math.round(x.bar*100)}%"></i></span>`:'<span class="act-fill"></span>'}${x.eta?`<span class="act-eta">${esc(x.eta)}</span>`:''}${x.tag||''}${(x.actions||[]).map(l=>`<button class="act-action">${esc(l)}</button>`).join('')}</div>`;}
+function renderNext(o){const m=mainStep(o),acts=activities(o,$('#tasks').checked);
+  morph($('#next'),headTop(o)+`<div class="order-plate order-head-plate turn-${m.turn}"><div class="order-plate-body"><span class="order-plate-title">${esc(m.title)}</span>${m.text?`<p>${esc(m.text)}</p>`:''}${m.progress?`<progress max="${m.progress[1]}" value="${m.progress[0]}"></progress>`:''}${m.extra||''}</div><div class="step-actions">${m.actions||''}</div></div>`+(acts.length?`<div class="act-list ${variant}">${acts.map(actRow).join('')}</div>`:'')+tabs(o));
+  const mini=acts.filter(x=>x.motion||x.tone==='alert').map(x=>x.tone==='alert'?`<span class="alert">${svgIcon('alert',12)}${esc(x.label)}</span>`:`<span>${svgIcon('loader',12).replace('class="ico','class="mini-spin ico')}${esc(x.label)}${x.bar!=null?' '+Math.round(x.bar*100)+'%':''}</span>`).join('');
+  // A silent class keeps the old card: the note and the fill bar, no button squeezing the text.
+  const cst=cardStatus(o),act=cst.stale?null:m.actions?.match(/<button class="primary">([^<]+)/)?.[1],bar=!o.layout_queue&&(cst.progress||m.progress);
+  morph($('#card-next'),`<article class="board-card">${cardHead(o)}<div class="order-plate board-plate turn-${m.turn}"><span class="order-plate-text">${esc(o.layout_queue||o.stage==='new'||o.stage==='photos'&&o.pending?m.title:(o.stage==='approval'&&o.corrections.some(x=>!x.done)&&!o.approved?`Правки · осталось ${o.corrections.filter(x=>!x.done).length}`:cardStatus(o).note||cardStatus(o).text))}</span>${act?`<button class="order-plate-action">${esc(act)} →</button>`:''}${bar?`<progress max="${bar[1]}" value="${bar[0]}"></progress>`:''}</div>${mini?`<div class="act-mini">${mini}</div>`:''}</article>`);}
+
+
+
+/* Patch the live DOM towards new markup instead of replacing it:
+   kept elements keep their running animations; rows are matched by data-key. */
+function morph(el,html){const t=document.createElement('div');t.innerHTML=html;patchChildren(el,t);}
+const sameNode=(x,y)=>x.nodeType===y.nodeType&&x.nodeName===y.nodeName&&(x.nodeType!==1||(x.dataset?.key||'')===(y.dataset?.key||''));
+function patchNode(a,b){
+  if(a.nodeType!==1){if(a.nodeValue!==b.nodeValue)a.nodeValue=b.nodeValue;return;}
+  for(const {name,value} of [...b.attributes])if(a.getAttribute(name)!==value)a.setAttribute(name,value);
+  for(const {name} of [...a.attributes])if(!b.hasAttribute(name))a.removeAttribute(name);
+  patchChildren(a,b);}
+function patchChildren(a,b){const next=[...b.childNodes];
+  next.forEach((nb,i)=>{const cur=a.childNodes[i];
+    if(cur&&sameNode(cur,nb)){patchNode(cur,nb);return;}
+    const key=nb.nodeType===1&&nb.dataset?.key,found=key&&[...a.childNodes].slice(i).find(n=>n.nodeType===1&&n.dataset?.key===key);
+    if(found){a.insertBefore(found,cur||null);patchNode(found,nb);}else a.insertBefore(nb,cur||null);});
+  while(a.childNodes.length>next.length)a.lastChild.remove();}
+
+/* ── Stand: scenarios, controls, simulation ────────────────────────── */
+const $=s=>document.querySelector(s);
+let variant='rows',scenario=0,o;
+const base=()=>({school:'1 школа',class_name:'11 А',school_city:'Петропавловск-Камчатский',graduation_year:2027,copies:24,stage:'forms',days:3,
+  photo_count:2219,pending:0,review_count:0,errors:0,processing:{eta_seconds:40},processedAt:0,
+  client_progress:{enabled:true,status:'complete',completed:16,total:16},
+  upload:{state:'none',done:0,total:0,at:0},layout_queue:null,corrections:[],approved:false,export:{state:'none',p:0},teachers_proposed:0});
+const SCENARIOS=[
+  ['Анкеты готовы, фото ещё обрабатываются',x=>{x.pending=278;}],
+  ['Догружаю съёмку, макет в очереди',x=>{x.upload={state:'running',done:60,total:400,at:0};x.photo_count=1879;x.pending=120;x.layout_queue={uploading:true};}],
+  ['Загрузка прервалась',x=>{x.upload={state:'stopped',done:120,total:400,at:0};x.layout_queue={uploading:true};}],
+  ['Часть фото не обработалась',x=>{x.errors=12;x.review_count=34;}],
+  ['Класс заполняет, есть мелкие задачи',x=>{x.client_progress={enabled:true,status:'active',completed:11,total:16};x.review_count=34;x.teachers_proposed=2;}],
+  ['Класс молчит 16 дней',x=>{x.client_progress={enabled:true,status:'active',completed:5,total:16};x.days=16;}],
+  ['Первая загрузка',x=>{x.stage='new';x.photo_count=0;x.upload={state:'running',done:0,total:900,at:0};x.client_progress={enabled:false,status:'',completed:0,total:0};}],
+  ['Фото: обработка идёт',x=>{x.stage='photos';x.pending=1300;x.client_progress={enabled:false,status:'',completed:0,total:0};}],
+  ['Правки от класса',x=>{x.stage='approval';x.corrections=makeCorrections(3,0);}],
+  ['20 правок, часть исправлена',x=>{x.stage='approval';x.corrections=makeCorrections(20,6);}],
+  ['Отправлено в печать, собираем файлы',x=>{x.stage='print';x.export={state:'running',p:15};}],
+  ['Макет не собрался',x=>{x.layout_queue={error:'Не хватает фото для общего разворота «Класс»'};}],
+  ['Спокойный заказ',x=>{x.stage='approval';x.days=4;}]];
+const makeCorrections=(n,fixed)=>Array.from({length:n},(_,i)=>i%3===2?{kind:'name',where:'Имя',text:'Петров → Петрова',done:i<fixed}:{kind:'spread',where:`Разворот ${i+3}`,text:'Заменить фото',done:i<fixed});
+function load(i){scenario=i;o=base();SCENARIOS[i][1](o);render();}
+const CONTROLS=[
+  ['stage','Этап','select',STAGES.map(s=>[s[0],SHORT[s[0]]])],
+  ['filled','Анкет заполнено','number'],
+  ['days','Дней на этапе','number'],
+  ['upload','Загрузка','select',[['none','нет'],['running','идёт'],['stopped','прервана'],['done','завершена']]],
+  ['pending','Ждут обработки','number'],
+  ['errors','С ошибкой','number'],
+  ['review_count','На проверку','number'],
+  ['teachers_proposed','Предложено учит.','number'],
+  ['queue','Макет в очереди','select',[['no','нет'],['yes','ждёт'],['err','ошибка']]],
+  ['corrections','Правок','number'],
+  ['fixed','Исправлено','number'],
+  ['approved','Согласовано','select',[['0','нет'],['1','да']]],
+  ['export','Файлы печати','select',[['none','нет'],['running','собираем'],['ready','готовы']]]];
+function getCtl(k){switch(k){case'filled':return o.client_progress.completed;case'upload':return o.upload.state;case'queue':return o.layout_queue?(o.layout_queue.error?'err':'yes'):'no';case'corrections':return o.corrections.length;case'fixed':return o.corrections.filter(x=>x.done).length;case'approved':return o.approved?'1':'0';case'export':return o.export.state;default:return o[k];}}
+function setCtl(k,v){switch(k){
+  case'filled':{const n=Math.max(0,Math.min(16,+v));o.client_progress={enabled:true,completed:n,total:16,status:n===16?'complete':'active'};break;}
+  case'upload':o.upload=v==='none'?{state:'none',done:0,total:0,at:0}:{state:v,done:v==='done'?400:Math.min(o.upload.done||80,399),total:400,at:Date.now()};break;
+  case'queue':o.layout_queue=v==='no'?null:v==='err'?{error:'Не хватает фото для общего разворота «Класс»'}:{uploading:o.upload.state!=='none'};break;
+  case'corrections':o.corrections=makeCorrections(+v,Math.min(+v,o.corrections.filter(x=>x.done).length));break;
+  case'fixed':o.corrections=makeCorrections(o.corrections.length,Math.min(o.corrections.length,+v));break;
+  case'approved':o.approved=v==='1';break;
+  case'export':o.export={state:v,p:v==='running'?10:100};break;
+  case'pending':o.pending=Math.max(0,+v);if(o.pending>o.photo_count)o.photo_count=o.pending;break;
+  default:o[k]=typeof o[k]==='number'?Math.max(0,+v):v;}
+  render();}
+function buildControls(){$('#controls').innerHTML=CONTROLS.map(([k,l,t,opts])=>`<label>${l}${t==='select'?`<select data-k="${k}">${opts.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select>`:`<input type="number" min="0" data-k="${k}">`}</label>`).join('');
+  $('#controls').addEventListener('change',e=>{const k=e.target.dataset.k;if(k)setCtl(k,e.target.value);});
+  $('#scenarios').innerHTML=SCENARIOS.map(([t],i)=>`<button data-i="${i}">${t}</button>`).join('');
+  $('#scenarios').onclick=e=>{const b=e.target.closest('button');if(b)load(+b.dataset.i);};
+  $('#variant').onclick=e=>{const b=e.target.closest('button');if(!b)return;variant=b.dataset.v;$('#variant').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));render();};
+  $('#tasks').onchange=render;
+  $('#next').addEventListener('click',e=>{if(e.target.closest('button')?.textContent==='Напомнить')toast('Текст напоминания скопирован');});}
+function render(){renderNow(o);renderNext(o);
+  document.querySelectorAll('#controls [data-k]').forEach(el=>{if(el!==document.activeElement)el.value=getCtl(el.dataset.k);});
+  document.querySelectorAll('#scenarios button').forEach((b,i)=>b.classList.toggle('on',i===scenario));}
+function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),2200);}
+// One tick: the browser pushes files, the server analyses them, the queue builds when both are done.
+function tick(){if(!$('#live').checked)return;const u=o.upload;
+  if(u.state==='running'){const n=Math.min(9,u.total-u.done);u.done+=n;o.photo_count+=n;o.pending+=n;if(u.done>=u.total){u.state='done';u.at=Date.now();if(o.layout_queue)o.layout_queue.uploading=false;}}
+  if(o.pending){o.pending=Math.max(0,o.pending-(o.pending>600?40:14));o.processing.eta_seconds=Math.round(o.pending*0.12);if(!o.pending){o.processedAt=Date.now();if(o.stage==='new')o.stage='photos';}}
+  if(o.export.state==='running'){o.export.p+=3;if(o.export.p>=100)o.export={state:'ready',p:100};}
+  const q=o.layout_queue;if(q&&!q.error&&!q.uploading&&!o.pending&&u.state!=='running'){o.layout_queue=null;o.stage='layout';toast('Макет собран');}
+  render();}
+buildControls();load(0);setInterval(tick,500);
+</script>
+</body>
+</html>

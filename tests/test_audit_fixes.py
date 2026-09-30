@@ -21,7 +21,8 @@ class AuditFixTests(unittest.TestCase):
         return base, pins
 
     def publish(self, photo=None, revision='audit-rev'):
-        document = {'revision': revision, 'issues': [], 'variants': [{'owner': 'person', 'name': 'Ученик', 'sequence': ['page']}],
+        document = {'revision': revision, 'issues': [], 'variants': [{'owner': 'person', 'name': 'Ученик', 'sequence': ['page']}, {'owner': 'teacher_variant', 'name': 'Учителю', 'sequence': ['page']}],
+                    'spread_size_mm': [30, 20], 'print': {'dpi': 72, 'files': 'spreads'},
                     'shared_spreads': {'page': {'key': 'page', 'elements': []}}, 'covers': {}, 'variant_spreads': {}}
         if photo:
             document['shared_spreads']['page']['elements'].append({'type': 'photo', 'photo': photo, 'box': [0, 0, 10, 10]})

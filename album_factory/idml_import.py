@@ -25,6 +25,8 @@ from collections import Counter
 from urllib.parse import unquote
 import xml.etree.ElementTree as ET
 
+from .master_plan import PHOTO_RATIOS
+
 PT = 25.4 / 72  # mm per point
 PKG = '{http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging}'
 FRAME_TAGS = {'Rectangle', 'Oval', 'Polygon', 'GraphicLine', 'TextFrame', 'Group'}
@@ -764,8 +766,11 @@ class Draft:
         if details:
             d = details[0]
             grid.update(showDetail=True, detailFont=d['font'], detailFontSize=d['fontSize'], detailColor=d['color'], detailBold=d['bold'],
-                        detailItalic=d['italic'], detailLineHeight=d['lineHeight'], detailLetterSpacing=d['letterSpacing'])
-            self.note('warning', 'Предмет учителя стоял над фото — в виньетке он под именем.')
+                        detailItalic=d['italic'], detailLineHeight=d['lineHeight'], detailLetterSpacing=d['letterSpacing'], detailAt='above')
+        ratio = pw / cards[0]['box']['h'] if cards[0]['box']['h'] else .75
+        near = min(PHOTO_RATIOS, key=lambda r: abs(r - ratio))
+        if abs(near - ratio) / near < .03 and near != .75:
+            grid['photoRatio'] = near
         used = {id(l) for l in area_items}
         rest = [l for l in page['layers'] if id(l) not in used]
         for l in rest:

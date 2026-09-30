@@ -17,16 +17,16 @@ function layoutSummary(data){
   const publishState=!publication?'Не опубликован':publication.current?'Опубликован':`Есть неопубликованные правки (${publication.changed.length})`;
   const next=variants.find(v=>!reviews[v.owner]?.current)?.owner;
   return `<div class="layout-summary">
-    <div class="layout-summary-head"><div><span class="status-badge ${errors?'attention':done===variants.length?'ready':'neutral'}">${errors?'Есть ошибки':done===variants.length?'Проверен':'Идёт проверка'}</span><h2>Макет альбома</h2><p class="muted">${count(variants.length,'вариант','варианта','вариантов')} · ${spreadRange(variants)}</p></div>
-      <a class="primary" href="${editorUrl(state.order.id,next)}">${done?'Продолжить проверку →':'Открыть редактор макета →'}</a></div>
+    <div class="layout-summary-head"><div><span class="status-badge ${errors?'attention':done===variants.length?'ready':'neutral'}">${status.locked?'Зафиксирован для печати':errors?'Есть ошибки':done===variants.length?'Проверен':'Идёт проверка'}</span><h2>Макет альбома</h2><p class="muted">${count(variants.length,'вариант','варианта','вариантов')} · ${spreadRange(variants)}</p></div>
+      <a class="primary" href="${editorUrl(state.order.id,next)}">${status.locked?'Просмотреть макет →':done?'Продолжить проверку →':'Открыть редактор макета →'}</a></div>
     <div class="layout-stats">
       <div><strong>${done} / ${variants.length}</strong><span>проверено</span><progress max="${variants.length||1}" value="${done}"></progress></div>
       <div><strong class="${errors?'error':''}">${errors}</strong><span>${errors?'ошибок блокируют публикацию':'ошибок нет'}</span></div>
       <div><strong>${warnings}</strong><span>предупреждений</span></div>
       <div><strong>${publishState}</strong><span>${publication?'Класс видит опубликованную редакцию':'Класс пока не видит макет'}</span></div>
     </div>
-    <p class="muted small">В редакторе можно пролистать альбом каждого человека, заменить фото, поправить кадр и подписи, отметить вариант проверенным и опубликовать редакцию классу.</p>
-    <div class="layout-summary-actions"><button class="secondary" data-layout="generate" title="Подставить новые фото и подписи из заказа">Обновить из данных заказа</button><p id="layout-error" class="error" role="alert"></p></div>
+    <p class="muted small">${status.locked?'Макет зафиксирован для печати. Можно просмотреть разрешённую редакцию и скачать её файлы; правки недоступны.':'В редакторе можно пролистать альбом каждого человека, заменить фото, поправить кадр и подписи, отметить вариант проверенным и опубликовать редакцию классу.'}</p>
+    <div class="layout-summary-actions"><button class="secondary" data-layout="generate" ${status.locked?'disabled':''} title="Подставить новые фото и подписи из заказа">Обновить из данных заказа</button><p id="layout-error" class="error" role="alert"></p></div>
   </div>`;
 }
 function renderLayout(){

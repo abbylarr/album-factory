@@ -74,15 +74,16 @@ function spinePanel() {
   const cover = coverSection();
   if (!cover || !(coverSpine() > 0)) return '';
   const volume = doc.sheetThickness
-      ? `<div class="safety-summary spine-rows"><div>Тестовый объём<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${editorVolume().spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.${infoTip('Только чтобы посмотреть обложку на тонкой и толстой книге. В заказе корешок посчитается по числу разворотов.')}</div></div>`
+      ? `<div class="safety-summary spine-rows"><div>Тестовый объём${infoTip('Примерить обложку на тонкую и толстую книгу. В заказе корешок посчитается сам.')}<span class="spine-volume"><button type="button" data-cover-volume="-1" aria-label="Меньше разворотов">−</button><output>${editorVolume().spreads}</output><button type="button" data-cover-volume="1" aria-label="Больше разворотов">+</button></span>разв.</div><div>Корешок<strong>${coverSpine()} мм</strong></div></div>`
       : '',
-    source = view.coverSource ? `${esc(view.coverSource.label)}${view.coverSource.document !== JSON.stringify(doc) ? ' · объём устарел, обновите предпросмотр' : ''}` : view.coverSpreads ? 'Задан вручную' : 'По разворотам блоков',
-    paint = cover.spineColor
-      ? `<div class="spine-color">${colorControl('Цвет корешка', 'cover.spineColor', cover.spineColor)}<button type="button" class="link-button" data-spine-color="off" title="Корешок снова продолжает фон страниц">Как у страниц</button></div>`
-      : `<button type="button" class="wide-button" data-spine-color="on">Покрасить корешок</button>`;
+    bg = cover.spreads[0].pages[0].background;
   return block(
     'Корешок',
-    `${volume}${doc.sheetThickness ? `<p class="section-note">${source}<br>Корешок на холсте: ${coverSpine()} мм<br>В заказе рассчитывается для каждого альбома.</p>` : ''}${paint}<button type="button" class="wide-button" data-spine-text>Текст на корешке</button>`,
+    `${volume}<div class="spine-color">${
+      cover.spineColor
+        ? `${colorControl('Цвет корешка', 'cover.spineColor', cover.spineColor)}<button type="button" class="spine-color-off" data-spine-color-off title="Убрать цвет корешка" aria-label="Убрать цвет корешка">−</button>`
+        : `<label>Цвет корешка<button type="button" class="color-swatch no-color" data-color-key="cover.spineColor" data-color-value="${/^#[0-9a-fA-F]{6}$/.test(bg) ? bg : '#ffffff'}" aria-label="Цвет корешка: нет своего"><i></i><em>—</em></button></label>`
+    }</div><button type="button" class="spine-add-text" data-spine-text><span aria-hidden="true">+</span>Текст на корешке</button>`,
   );
 }
 /* A text along the spine, reading bottom to top as on Russian books; it shrinks to fit the spine width. */
@@ -524,16 +525,32 @@ function liveProperty(key, value) {
     }
     if (style) paintLinkedText(style);
   });
+  syncTextOverflow();
   canvas.requestRenderAll();
 }
 
 function layersPanel() {
   if (preview) return '';
-  const sec = section(), spread = sec.spreads[view.spread],
-    layers = spreadStack(spread), painted = sec.cover && sec.spineColor && spineGap() > 0,
-    spineText = l => painted && isSpineContent(l),
+  const sec = section(), spread = sec.spreads[view.spread], groups = stackGroups(spread, sec),
+    painted = sec.cover && sec.spineColor && spineGap() > 0,
     names = {text:'Текст',photo:'Фото',rect:'Фигура',ellipse:'Круг',line:'Линия',grid:'Виньетка',collage:'Коллаж',svg:'SVG'},
-    row = l => `<button type="button" class="layer-row" data-layer-select="${esc(l.id)}"><span>${esc(l.name || (l.type === 'text' ? l.text : names[l.type]) || 'Объект')}</span><small>${names[l.type] || ''}${l.hidden ? ' · скрыт' : ''}${l.locked ? ' · закреплён' : ''}</small></button>`,
-    system = label => `<div class="layer-system">${label}</div>`;
-  return block('Слои', `<p class="section-note">Верхние объекты — первыми. Порядок меняется правой кнопкой на объекте.</p><div class="layer-list">${layers.filter(spineText).reverse().map(row).join('')}${painted ? system('Заливка корешка') : ''}${layers.filter(l => !spineText(l)).reverse().map(row).join('')}${system('Фон страниц')}</div>`);
+    icons = {text:'text-box',photo:'photo',rect:'rect',ellipse:'ellipse',line:'line',grid:'vignette',collage:'collage',svg:'svg'};
+  /* Text layers are named by what they print, like in Photoshop. */
+  const title = l => {
+    const words = l.type === 'text' ? AutoText.applyCase(planner.resolvedText(l, {}), l.textCase).replace(/\s+/g, ' ').trim() : '';
+    return words || l.name || names[l.type] || 'Объект';
+  };
+  const row = l => {
+    const name = title(l),
+      toggle = (action, label, icon, on) => `<button type="button" class="editor-layer-${action}" data-layer-action="${action}" data-layer-id="${esc(l.id)}" title="${label}" aria-label="${label}: ${esc(name)}" aria-pressed="${on}">${menuGlyph(icon)}</button>`;
+    return `<div class="editor-layer${l.hidden ? ' is-hidden' : ''}${l.locked ? ' is-locked' : ''}" draggable="true" data-layer-row="${esc(l.id)}">
+      ${toggle('visibility', l.hidden ? 'Показать' : 'Скрыть', l.hidden ? 'hide' : 'show', !!l.hidden)}
+      <button type="button" class="editor-layer-select" data-layer-select="${esc(l.id)}" title="${esc(name)}"><img src="assets/editor/${icons[l.type] || 'rect'}.svg" alt=""><span>${esc(name)}</span></button>
+      ${toggle('lock', l.locked ? 'Разблокировать' : 'Заблокировать', l.locked ? 'lock' : 'unlock', !!l.locked)}
+      <button type="button" class="editor-layer-delete" data-layer-action="delete" data-layer-id="${esc(l.id)}" title="Удалить" aria-label="Удалить: ${esc(name)}">${menuGlyph('delete')}</button>
+    </div>`;
+  };
+  const rows = order => [...order].reverse().map(row).join(''),
+    system = label => `<div class="editor-layer-system"><span>${label}</span>${menuGlyph('lock')}</div>`;
+  return `<section class="inspector-section inspector-layers"><h3>Слои</h3><div class="editor-layer-list">${painted ? rows(groups[1] || []) + system('Заливка корешка') : groups.slice(1).reverse().map(rows).join('')}${rows(groups[0])}${system('Фон страниц')}</div></section>`;
 }

@@ -108,8 +108,9 @@ def format_value(field, raw, mods=()):
 
 
 def resolve(text, values):
-    """Replace every chip with its value; a missing value leaves nothing behind."""
-    return TOKEN.sub(lambda m: format_value(m.group(1), values.get(m.group(1)), modifiers(m.group(2))), text or '')
+    """Replace every chip with its value; a missing value leaves nothing behind.
+    Line breaks at the end are not printed: an empty last line would only take height from the frame."""
+    return TOKEN.sub(lambda m: format_value(m.group(1), values.get(m.group(1)), modifiers(m.group(2))), text or '').rstrip('\n')
 
 
 def shoot_date(value):

@@ -185,7 +185,7 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertTrue((s.DATA / 'photos' / (first_version + '.jpg')).exists())
         self.assertEqual(self.client.get(f'/api/teachers/{known["id"]}/portrait/full').status_code, 200)
         self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['groups'], [])
-        self.assertEqual(self.client.get(f'/api/teacher-photos/{spare["id"]}/thumb').status_code, 404)
+        self.assertEqual(self.client.get(f'/api/teacher-photos/{spare["id"]}/thumb').status_code, 200)
 
         other = TestClient(self.client.app)
         other.headers['origin'] = 'http://testserver'
@@ -218,10 +218,22 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertEqual(sorted(sorted(p['id'] for p in g['photos']) for g in pool['groups']), sorted([sorted(red), sorted(blue)]))
         self.assertEqual(pool['pending'], 0)
 
-        # Any pupil (or the teacher) with the entry code can sign; no manage code needed.
+        # The class only sees the photographer's chosen and released frame.
+        guest, base = self.portal(order)
+        self.assertEqual(guest.get(base + '/teacher-photos').json()['groups'], [])
+        self.assertEqual(guest.get(base + f'/teacher-photos/{red[1]}/thumb').status_code, 404)
+        for photo in (red[1], blue[0]):
+            self.assertEqual(self.client.post(f'/api/teacher-photos/{photo}/select').status_code, 200)
+        released = self.client.post(f'/api/schools/{school["id"]}/teacher-photos/publish').json()
+        self.assertEqual(released['published'], 2)
+        self.assertEqual(self.client.post(f'/api/schools/{school["id"]}/teacher-photos/publish').json()['published'], 0)
+        # Any pupil can name the selected frame; no manage code needed.
         guest, base = self.portal(order)
         view = guest.get(base + '/teacher-photos').json()
         self.assertEqual(len(view['groups']), 2)
+        self.assertEqual(sorted(g['photos'] for g in view['groups']), sorted([[red[1]], [blue[0]]]))
+        self.assertEqual(guest.get(base + f'/teacher-photos/{red[0]}/full').status_code, 404)
+        self.assertEqual(guest.post(base + f'/teacher-photos/{red[0]}/sign', json={'teacher_id': waiting['id']}).status_code, 404)
         self.assertEqual([t['name'] for t in view['teachers']], ['Петрова Анна Ивановна'])
         self.assertEqual(guest.get(base + f'/teacher-photos/{red[1]}/thumb').status_code, 200)
         self.assertEqual(guest.get(base + '/').json()['teachers']['unsigned'], 2)
@@ -513,6 +525,59 @@ class SchoolCatalogTests(unittest.TestCase):
         fixed = self.client.post('/api/orders', json={'school_id': school['id'], 'school_city': 'Казань', 'class_name': '11А', 'copies': 1})
         self.assertEqual(fixed.status_code, 201)
         self.assertEqual(self.client.get(f'/api/schools/{school["id"]}').json()['city'], 'Казань')
+
+    def test_selected_frame_is_independent_of_name_and_shared_by_school(self):
+        school = self.school()
+        first_order, second_order = self.order_for(school['id']), self.order_for(school['id'])
+        guests = [self.portal(oid) for oid in (first_order, second_order)]
+        shoot = self.client.post(f'/api/schools/{school["id"]}/teacher-shoots', json={'title': 'Съёмка учителей', 'shot_on': '2026-09-30'}).json()
+        photos = [self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename={i}.jpg&order_id={first_order}&shoot_id={shoot["id"]}', content=jpeg(c)).json()['id'] for i,c in enumerate(('#bb0000','#cc0000'))]
+        self.assertEqual(self.client.post(f'/api/teacher-photos/{photos[0]}/select').status_code, 409)
+        with s.db() as con:
+            con.execute("UPDATE teacher_photos SET status='ready',group_id=? WHERE school_id=?", (photos[0], school['id']))
+        pool = self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()
+        self.assertIsNone(pool['groups'][0]['selected_photo_id'])
+        self.assertEqual(pool['shoots'][0]['photo_count'], 2)
+        self.assertEqual(self.client.post(f'/api/schools/{school["id"]}/teacher-photos/publish').json()['published'], 0)
+        self.client.post(f'/api/teacher-photos/{photos[1]}/select')
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}').json()['teachers'], [])
+        self.client.post(f'/api/schools/{school["id"]}/teacher-photos/publish')
+        for guest,base in guests:
+            self.assertEqual(guest.get(base+'/teacher-photos').json()['groups'][0]['photos'], [photos[1]])
+            self.assertEqual(guest.get(base+f'/teacher-photos/{photos[0]}/full').status_code, 404)
+        # Changing a selected frame revokes naming access until it is released again.
+        self.client.post(f'/api/teacher-photos/{photos[0]}/select')
+        for guest,base in guests:
+            self.assertEqual(guest.get(base+'/teacher-photos').json()['groups'], [])
+        self.client.post(f'/api/schools/{school["id"]}/teacher-photos/publish')
+        guest,base = guests[0]
+        named = guest.post(base+f'/teacher-photos/{photos[0]}/sign', json={'teacher': {'last_name': 'Учитель', 'first_name': 'Анна'}}).json()
+        self.assertEqual(guests[1][0].get(guests[1][1]+'/teachers').json()['teachers'][0]['id'], named['id'])
+        # The studio can later choose a different frame in the same signed shoot.
+        changed = self.client.post(f'/api/teacher-photos/{photos[1]}/select')
+        self.assertEqual(changed.status_code, 200, changed.text)
+        teacher = self.client.get(f'/api/schools/{school["id"]}').json()['teachers'][0]
+        self.assertEqual(self.client.get(f'/api/teachers/{teacher["id"]}/portrait/full').status_code, 200)
+        pool = self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()
+        self.assertEqual(pool['signed_groups'][0]['selected_photo_id'], photos[1])
+
+    def test_single_frame_auto_selection_and_shoot_isolation(self):
+        school, other = self.school(), self.school('Другая школа')
+        shoot = self.client.post(f'/api/schools/{school["id"]}/teacher-shoots', json={'title':'Учителя'}).json()
+        self.assertEqual(self.client.post(f'/api/schools/{other["id"]}/teacher-photos?filename=a.jpg&shoot_id={shoot["id"]}', content=jpeg()).status_code, 422)
+        photo = self.client.post(f'/api/schools/{school["id"]}/teacher-photos?filename=a.jpg&shoot_id={shoot["id"]}', content=jpeg()).json()['id']
+        with s.db() as con:
+            con.execute("UPDATE teacher_photos SET status='ready' WHERE id=?", (photo,))
+        pool = self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()
+        self.assertEqual(pool['groups'][0]['selected_photo_id'], photo)
+        self.assertFalse(pool['groups'][0]['published'])
+        self.assertEqual(self.client.post(f'/api/schools/{school["id"]}/teacher-photos/publish').json()['published'], 1)
+        self.assertEqual(self.client.post(f'/api/schools/{school["id"]}/teacher-shoots', json={'title':'Учителя','shot_on':'yesterday'}).status_code, 422)
+        edited = self.client.patch(f'/api/schools/{school["id"]}/teacher-shoots/{shoot["id"]}', json={'title':'Новые портреты','shot_on':'2026-09-30'})
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(self.client.get(f'/api/schools/{school["id"]}/teacher-photos').json()['shoots'][0]['title'], 'Новые портреты')
+        self.assertEqual(self.client.patch(f'/api/schools/{other["id"]}/teacher-shoots/{shoot["id"]}', json={'title':'Чужая'}).status_code, 404)
+
 
 
 if __name__ == '__main__':

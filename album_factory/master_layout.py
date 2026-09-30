@@ -4,7 +4,7 @@ import math
 import re
 from itertools import permutations
 from .layout_engine import canonical_hash
-from .master_plan import ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people, personal_take
+from .master_plan import CARD_ZONES, ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people, personal_take
 from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, categories_of, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
 from . import auto_text
@@ -153,31 +153,80 @@ def flex_frames(w, h, aspects, gap_x=4, gap_y=4):
     return result
 
 
+def card_frame(layer):
+    """Sizes of a vignette card that do not depend on the photo width. Mirrors cardFrame in web/master-planner.js.
+
+    Each caption sits in a zone around the photo (above, below, left, right) or over it; one zone stacks name first."""
+    ratio = float(layer.get('photoRatio') or .75)
+    gap = float(layer.get('photoNameGap', 3))
+    between = float(layer.get('nameDetailGap', 2))
+    side = float(layer.get('captionWidth') or 40)
+    name_h = layer['fontSize']*.3528*float(layer.get('lineHeight') or 1.25)*2
+    detail_h = layer.get('detailFontSize', 9)*.3528*float(layer.get('detailLineHeight') or 1.25)*2 if layer.get('showDetail') else 0
+    zone_of = lambda key: layer.get(key) if layer.get(key) in CARD_ZONES else 'below'
+    texts = [('name', zone_of('nameAt'), name_h)] + ([('detail', zone_of('detailAt'), detail_h)] if layer.get('showDetail') else [])
+    zones = {}
+    for zone in CARD_ZONES:
+        items = [t for t in texts if t[1] == zone]
+        zones[zone] = sum(t[2] for t in items) + between*(len(items)-1) if items else 0
+    return dict(ratio=ratio, gap=gap, between=between, side=side, name_h=name_h, detail_h=detail_h, texts=texts, zones=zones,
+                top=zones['above']+gap if zones['above'] else 0, bottom=zones['below']+gap if zones['below'] else 0,
+                left=side+gap if zones['left'] else 0, right=side+gap if zones['right'] else 0,
+                side_h=max(zones['left'], zones['right']))
+
+
+def card_parts(photo_w, frame):
+    """Photo and caption boxes [x, y, w, h] in card coordinates; caption boxes reserve two lines. Mirrors cardParts."""
+    f = frame
+    photo_h = photo_w/f['ratio']
+    body = max(photo_h, f['side_h'])
+    pad = min(f['gap'], photo_w/4)
+    parts = {'photo': [f['left'], f['top'], photo_w, photo_h]}
+    zones = {}
+    for zone in CARD_ZONES:
+        items = [t for t in f['texts'] if t[1] == zone]
+        if not items:
+            continue
+        h = f['zones'][zone]
+        x, w = f['left'], photo_w
+        if zone == 'above':
+            y = 0
+        elif zone == 'below':
+            y = f['top']+body+f['gap']
+        elif zone == 'over':
+            x, w, y = f['left']+pad, max(1, photo_w-2*pad), f['top']+photo_h-pad-h
+        else:
+            x, w, y = (0 if zone == 'left' else f['left']+photo_w+f['gap']), f['side'], f['top']+max(0, (photo_h-h)/2)
+        for key, _, text_h in items:
+            parts[key] = [x, y, w, text_h]
+            zones[key] = zone
+            y += text_h+f['between']
+    return dict(w=f['left']+photo_w+f['right'], h=f['top']+body+f['bottom'], photo_h=photo_h, parts=parts, zones=zones)
+
+
 def geometry(count, layer):
     best = None
     gap = float(layer['gap'])
-    photo_name_gap = float(layer.get('photoNameGap', 3))
-    name_detail_gap = float(layer.get('nameDetailGap', 2))
-    name_h = layer['fontSize']*.3528*float(layer.get('lineHeight') or 1.25)*2
-    detail_h = layer.get('detailFontSize', 9)*.3528*float(layer.get('detailLineHeight') or 1.25)*2 if layer.get('showDetail') else 0
-    caption_h = photo_name_gap + name_h + (name_detail_gap + detail_h if layer.get('showDetail') else 0)
+    frame = card_frame(layer)
     for cols in range(1, min(6, count) + 1):
         rows = math.ceil(count / cols)
         slot_w = (layer['box']['w'] - (cols-1)*gap) / cols
         slot_h = (layer['box']['h'] - (rows-1)*gap) / rows
-        pw = min(slot_w, (slot_h-caption_h)*.75, float(layer.get('photoWidth') or 85))
+        room = slot_h-frame['top']-frame['bottom']
+        if room < frame['side_h']:
+            continue
+        pw = min(slot_w-frame['left']-frame['right'], room*frame['ratio'], float(layer.get('photoWidth') or 85))
         if pw < layer['minPhotoWidth']:
             continue
-        card_h = pw/.75 + caption_h
-        offset_x = (layer['box']['w'] - cols*pw - (cols-1)*gap)/2
-        offset_y = (layer['box']['h'] - rows*card_h - (rows-1)*gap)/2
+        card = card_parts(pw, frame)
+        offset_x = (layer['box']['w'] - cols*card['w'] - (cols-1)*gap)/2
+        offset_y = (layer['box']['h'] - rows*card['h'] - (rows-1)*gap)/2
         score = pw*pw*count - (cols*rows-count)*pw*.01
         if best is None or score > best['score']:
-            best = dict(score=score, cols=cols, cell_w=pw, cell_h=card_h,
-                        photo_w=pw, photo_h=pw/.75, name_h=name_h,
-                        detail_h=detail_h, photo_name_gap=photo_name_gap,
-                        name_detail_gap=name_detail_gap, offset_x=offset_x,
-                        offset_y=offset_y)
+            best = dict(score=score, cols=cols, cell_w=card['w'], cell_h=card['h'],
+                        photo_w=pw, photo_h=card['photo_h'], parts=card['parts'], zones=card['zones'],
+                        name_h=frame['name_h'], detail_h=frame['detail_h'], photo_name_gap=frame['gap'],
+                        name_detail_gap=frame['between'], offset_x=offset_x, offset_y=offset_y)
     return best
 
 
@@ -605,28 +654,37 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                     # Corners, stroke and shadow belong to each portrait, not to the vignette area.
                     photo_style={'radius':layer.get('radius',0),**frame_style}
                     if isinstance(layer.get('shadow'),dict): photo_style.update(shadow=layer['shadow'],shadowGroup=key)
-                    cols=geo['cols']; cw=geo['cell_w']; ch=geo['cell_h']; pw=geo['photo_w']
-                    size=layer['fontSize']
+                    cols=geo['cols']; cw=geo['cell_w']; ch=geo['cell_h']; pw=geo['photo_w']; parts=geo['parts']; zones=geo['zones']
+                    size=layer['fontSize']; leading=float(layer.get('lineHeight') or 1.25)
                     # Shared reduction for the complete source, not individual cards.
                     all_people=snapshot[layer['source']]
-                    while size>layer['minFontSize'] and any(measurer.height(name(p),font,size,size*float(layer.get('lineHeight') or 1.25),cw*.97, layer.get('letterSpacing') or 0)>geo['name_h']+.1 for p in all_people): size=max(layer['minFontSize'],size-.5)
+                    while size>layer['minFontSize'] and any(measurer.height(name(p),font,size,size*leading,parts['name'][2]*.97, layer.get('letterSpacing') or 0)>geo['name_h']+.1 for p in all_people): size=max(layer['minFontSize'],size-.5)
+                    detail_style={'font':layer.get('detailFont',layer['font']),'bold':layer.get('detailBold',False),'italic':layer.get('detailItalic',False)}
+                    detail_size=layer.get('detailFontSize',9); detail_leading=detail_size*layer.get('detailLineHeight',1.25)
                     for i,person in enumerate(records):
                         x=bounds[0]+geo['offset_x']+(i%cols)*(cw+layer['gap']); y=bounds[1]+geo['offset_y']+(i//cols)*(ch+layer['gap'])
                         pk=key+'/card['+('student:' if layer['source']=='students' else 'teacher:')+person['id']+']'
-                        add({**photo_element(pk+'/photo',[x,y,pw,geo['photo_h']],photo_for(person)),**photo_style},False)
-                        name_y=y+geo['photo_h']+geo['photo_name_gap']
-                        name_height=measurer.height(name(person),font,size,size*float(layer.get('lineHeight') or 1.25),cw,layer.get('letterSpacing') or 0)
-                        add(text_element(pk+'/name',[x,name_y,cw,geo['name_h']],name(person),size),False)
-                        if layer.get('showDetail'):
-                            detail = person.get('quote','') if layer['source']=='students' else person.get('school_subject','')
-                            if detail:
-                                detail_style={'font':layer.get('detailFont',layer['font']),'bold':layer.get('detailBold',False),'italic':layer.get('detailItalic',False)}
-                                detail_size=layer.get('detailFontSize',9)
-                                detail_element={'key':pk+'/detail','type':'text','box':[x,name_y+name_height+geo['name_detail_gap'],cw,geo['detail_h']],'text':detail,'font':font_key(detail_style),'size':detail_size,'leading':detail_size*layer.get('detailLineHeight',1.25),'align':layer.get('detailAlign','center'),'valign':'top','color':layer.get('detailColor',layer['color']),'opacity':layer.get('opacity',100)}
-                                if layer.get('detailLetterSpacing'): detail_element['letterSpacing']=layer['detailLetterSpacing']
-                                if layer.get('detailUnderline'): detail_element['underline']=True
-                                if layer.get('detailStrike'): detail_element['strike']=True
-                                add(detail_element,False)
+                        px,py=parts['photo'][:2]
+                        add({**photo_element(pk+'/photo',[x+px,y+py,pw,geo['photo_h']],photo_for(person)),**photo_style},False)
+                        detail=(person.get('quote','') if layer['source']=='students' else person.get('school_subject','')) if layer.get('showDetail') else ''
+                        nx,ny,nw,_=parts['name']
+                        name_height=measurer.height(name(person),font,size,size*leading,nw,layer.get('letterSpacing') or 0)
+                        dx=dy=dw=detail_height=None
+                        if detail:
+                            dx,dy,dw,_=parts['detail']
+                            detail_height=measurer.height(detail,font_key(detail_style),detail_size,detail_leading,dw,layer.get('detailLetterSpacing') or 0)
+                        # Captions of one zone hug each other; over the photo they rest on its bottom edge.
+                        pad=min(geo['photo_name_gap'],pw/4); floor=py+geo['photo_h']-pad
+                        if detail and zones['detail']=='over': dy=floor-detail_height
+                        if zones['name']=='over': ny=(dy-geo['name_detail_gap'] if detail and zones['detail']=='over' else floor)-name_height
+                        elif detail and zones['detail']==zones['name']: dy=ny+name_height+geo['name_detail_gap']
+                        add(text_element(pk+'/name',[x+nx,y+ny,nw,geo['name_h']],name(person),size),False)
+                        if detail:
+                            detail_element={'key':pk+'/detail','type':'text','box':[x+dx,y+dy,dw,geo['detail_h']],'text':detail,'font':font_key(detail_style),'size':detail_size,'leading':detail_leading,'align':layer.get('detailAlign','center'),'valign':'top','color':layer.get('detailColor',layer['color']),'opacity':layer.get('opacity',100)}
+                            if layer.get('detailLetterSpacing'): detail_element['letterSpacing']=layer['detailLetterSpacing']
+                            if layer.get('detailUnderline'): detail_element['underline']=True
+                            if layer.get('detailStrike'): detail_element['strike']=True
+                            add(detail_element,False)
                 elif layer['type']=='svg':
                     add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d')})
                 else:

@@ -25,7 +25,7 @@ function date(value){if(!value)return '';const d=new Date(value);return isNaN(d)
 
 /* ---------------------------------------------------------------- document model */
 const doc=()=>P.mode==='published'&&P.pub?P.pub.document:P.data?.document;
-const editable=()=>P.mode==='work'&&!!P.data;
+const editable=()=>P.mode==='work'&&!!P.data&&!P.data.status?.locked;
 const ownerWildcard=key=>{const i=key.indexOf('/'),head=i<0?key:key.slice(0,i);return head.replace(/\[student:[^\]]*\]/g,'[*]')+(i<0?'':key.slice(i));};
 function spreadFor(d,owner,key){if(!key)return null;return String(key).startsWith('cover[')?d.covers?.[owner]:d.shared_spreads?.[key]||d.variant_spreads?.[owner]?.[key];}
 const variant=()=>doc()?.variants.find(v=>v.owner===P.owner);
@@ -207,7 +207,8 @@ function renderHeader(){
   const d=P.data?.document,status=P.data?.status,info=P.info,state=$('#doc-state');
   const publication=status?.publication,approval=status?.approval;
   let label='',kind='';
-  if(P.mode==='published'){label=`Опубликована ${date(P.pub?.published_at)}`;kind='published';}
+  if(status?.locked){label='В печати · макет зафиксирован';kind='ok';}
+  else if(P.mode==='published'){label=`Опубликована ${date(P.pub?.published_at)}`;kind='published';}
   else if(!publication){label='Черновик · не опубликован';kind='draft';}
   else if(publication.current){label=approval&&approval.revision===publication.revision?'Опубликован · согласован':'Опубликован';kind='ok';}
   else{label=`Есть неопубликованные правки · ${plural(publication.changed.length,'вариант','варианта','вариантов')}`;kind='changed';}
@@ -221,8 +222,9 @@ function renderHeader(){
   const print=$('#print');
   print.classList.toggle('disabled',!!blocked);print.href=blocked?'#':`/api/orders/${encodeURIComponent(P.order)}/layout/print/${encodeURIComponent(P.owner||'')}`;
   print.title=info?.errors?'Исправьте ошибки, чтобы скачать файлы для печати':`${d?.print?.name?d.print.name+' · ':''}${d?.print?.files==='pages'?'JPEG на каждую страницу':'JPEG на каждый разворот'}, ${d?.print?.dpi||300} dpi`;
-  $('#publish').disabled=!d||P.mode!=='work'||P.busy;
-  $('#refresh').disabled=P.busy;
+  $('#publish').disabled=!editable()||P.busy;
+  $('#refresh').disabled=P.busy||!!status?.locked;
+  if(status?.locked)$('#order-title').textContent=`${P.orderInfo.school} / ${P.orderInfo.class_name} · Только просмотр`;
   $('#toggle-marks').textContent=P.marks?'Скрыть подсветку замечаний':'Показать подсветку замечаний';
   const count=$('#check-count');count.textContent=info?(info.errors||info.warnings||'')+'':'';count.className='tab-count'+(info?.errors?' error':info?.warnings?' warning':'');
 }
@@ -279,7 +281,7 @@ function renderReviewBar(){
   const el=$('#review-bar'),v=variant();
   if(!v||P.mode!=='work'){el.innerHTML='';return;}
   const review=reviewOf(v.owner),s=P.info.perOwner.get(v.owner)||{errors:0},last=P.spread>=v.sequence.length-1;
-  el.innerHTML=`<span class="review-hint">${review?.current?`Проверен ${date(review.reviewed_at)}`:review?'Изменён после проверки':last?'Последний разворот':`Разворот ${P.spread+1} из ${v.sequence.length}`}</span>${s.errors?`<span class="review-errors">${plural(s.errors,'ошибка','ошибки','ошибок')}</span>`:''}<button type="button" id="mark-reviewed" class="${review?.current?'':'primary'}" aria-pressed="${!!review?.current}" title="⌘/Ctrl+Enter">${review?.current?'✓ Проверен':'Отметить проверенным'}</button><button type="button" id="next-person" title="Следующий непроверенный">Дальше →</button>`;
+  el.innerHTML=`<span class="review-hint">${review?.current?`Проверен ${date(review.reviewed_at)}`:review?'Изменён после проверки':last?'Последний разворот':`Разворот ${P.spread+1} из ${v.sequence.length}`}</span>${s.errors?`<span class="review-errors">${plural(s.errors,'ошибка','ошибки','ошибок')}</span>`:''}<button type="button" id="mark-reviewed" ${!editable()?'disabled':''} class="${review?.current?'':'primary'}" aria-pressed="${!!review?.current}" title="⌘/Ctrl+Enter">${review?.current?'✓ Проверен':'Отметить проверенным'}</button><button type="button" id="next-person" title="Следующий непроверенный">Дальше →</button>`;
 }
 
 /* ---------------------------------------------------------------- rendering: inspector */
@@ -449,7 +451,7 @@ function commitCrop(e,delay=0){
 /* ---------------------------------------------------------------- mutations */
 function scopeFor(e){const scope=elementScope(e);return scope.choice?P.scope:'variant';}
 async function mutate(label,request,{undoable=true}={}){
-  if(P.busy)return false;P.busy=true;saveState('Сохраняем…','saving');renderHeader();
+  if(P.busy||!editable())return false;P.busy=true;saveState('Сохраняем…','saving');renderHeader();
   const before=P.data.overrides||[];
   try{
     const data=await request();adopt(data);

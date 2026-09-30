@@ -6,7 +6,7 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from . import mvp, order_stages, school_catalog
+from . import mvp, notifications, order_stages, school_catalog
 
 
 DEFAULT_TEMPLATES = {
@@ -94,6 +94,19 @@ def open_corrections(con, order_id):
     return [dict(r) for r in con.execute('''SELECT c.id,c.kind,c.person_id,c.old_name,c.new_name,c.variant,c.spread_label,
         c.comment,c.created_at FROM layout_corrections c JOIN publications p ON p.order_id=c.order_id AND p.revision=c.revision
         WHERE c.order_id=? AND c.status='open' ORDER BY c.created_at,c.id''', (order_id,))]
+
+
+def revision_corrections(con, order_id):
+    """Every request for the currently published layout, closed ones included, so the photographer sees X of N fixed."""
+    return [dict(r) for r in con.execute('''SELECT c.id,c.kind,c.person_id,c.old_name,c.new_name,c.variant,c.spread_label,
+        c.comment,c.created_at,c.status FROM layout_corrections c JOIN publications p ON p.order_id=c.order_id AND p.revision=c.revision
+        WHERE c.order_id=? ORDER BY c.created_at,c.id''', (order_id,))]
+
+
+def total_counts(con):
+    """Requests per order for its currently published layout, open or closed."""
+    return dict(con.execute('''SELECT c.order_id, COUNT(*) FROM layout_corrections c
+        JOIN publications p ON p.order_id=c.order_id AND p.revision=c.revision GROUP BY c.order_id''').fetchall())
 
 
 def open_counts(con):
@@ -281,6 +294,7 @@ def install(app, s):
             con.execute('UPDATE persons SET name=? WHERE id=?', (first + ' ' + last, person_id))
             con.execute('''INSERT INTO selection_state (person_id, photo_id, submitted) VALUES (?,?,0)
                 ON CONFLICT(person_id) DO UPDATE SET photo_id=excluded.photo_id WHERE submitted=0''', (person_id, payload.photo_id))
+            notifications.forms_check(con, order['id'])
         return {'ok': True}
 
     @app.get('/client-api/{token}/photos/{photo_id}/{variant}')
@@ -328,6 +342,7 @@ def install(app, s):
             con.execute('''INSERT INTO layout_corrections (id,order_id,revision,kind,person_id,old_name,new_name,comment,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?)''', (fix_id, order['id'], revision, 'name', person['id'], person['name'] or '',
                 new_name, payload.comment.strip(), s.now()))
+            notifications.emit(con, order['id'], 'corrections')
         return {'id': fix_id}
 
     @app.post('/client-api/{token}/corrections/spread', status_code=201)
@@ -349,6 +364,7 @@ def install(app, s):
             con.execute('''INSERT INTO layout_corrections (id,order_id,revision,kind,variant,spread_key,spread_label,comment,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?)''', (fix_id, order['id'], revision, 'spread', variant['name'], str(spread.get('key') or ''),
                 f"Разворот {payload.index + 1} из {len(variant['spreads'])}", comment, s.now()))
+            notifications.emit(con, order['id'], 'corrections')
         return {'id': fix_id}
 
     @app.delete('/client-api/{token}/corrections/{fix_id}')
@@ -359,6 +375,7 @@ def install(app, s):
             gone = con.execute("DELETE FROM layout_corrections WHERE id=? AND order_id=? AND status='open'", (fix_id, order['id'])).rowcount
             if not gone:
                 raise HTTPException(404, 'Правка не найдена')
+            notifications.retract(con, order['id'], 'corrections')
         return {'ok': True}
 
     @app.post('/client-api/{token}/manage/logout')
@@ -374,15 +391,23 @@ def install(app, s):
         return response
 
     @app.get('/api/orders/{order_id}/corrections')
-    def corrections(order_id: str):
+    def corrections(order_id: str, all: bool = False):
         with s.db() as con:
             s.require_order(con, order_id)
-            return open_corrections(con, order_id)
+            return revision_corrections(con, order_id) if all else open_corrections(con, order_id)
 
     @app.post('/api/orders/{order_id}/corrections/{fix_id}/resolve')
     def resolve(order_id: str, fix_id: str):
         with s.db() as con:
             s.require_order(con, order_id)
             if not con.execute("UPDATE layout_corrections SET status='resolved' WHERE id=? AND order_id=?", (fix_id, order_id)).rowcount:
+                raise HTTPException(404, 'Правка не найдена')
+        return {'ok': True}
+
+    @app.post('/api/orders/{order_id}/corrections/{fix_id}/reopen')
+    def reopen(order_id: str, fix_id: str):
+        with s.db() as con:
+            s.require_order(con, order_id)
+            if not con.execute("UPDATE layout_corrections SET status='open' WHERE id=? AND order_id=?", (fix_id, order_id)).rowcount:
                 raise HTTPException(404, 'Правка не найдена')
         return {'ok': True}

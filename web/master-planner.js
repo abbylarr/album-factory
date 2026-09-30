@@ -8,7 +8,40 @@ let planning=[];
   const getLayer = layerId => documentModel.sections.flatMap(section=>section.spreads.flatMap(item=>item.pages.flatMap(p=>p.layers))).find(item=>item.id===layerId);
   function people(source){const count=source==='teachers'?view.teachers:view.students,names=source==='teachers'?TEACHERS:STUDENTS;return Array.from({length:count},(_,i)=>({id:(source==='teachers'?'t':'s')+i,name:view.long&&i===1?'Александра Константиновна Рождественская-Воскресенская':names[i%names.length]+(i>=names.length?` ${Math.floor(i/names.length)+1}`:''),role:source==='teachers'?(i===0?SUBJECTS[0]:SUBJECTS[1+(i-1)%9]):'11 «А»',detail:source==='teachers'?(i===0?SUBJECTS[0]:SUBJECTS[1+(i-1)%9]):'Наши лучшие моменты впереди',missing:view.missing&&i===1}));}
   function templatePages(section){return section.spreads.flatMap(item=>item.pages);}
-  function gridGeometry(count,settings){if(count<=0)return null;const {w,h}=settings.box,gap=Number(settings.gap)||0,photoNameGap=Number(settings.photoNameGap??3),nameDetailGap=Number(settings.nameDetailGap??2),nameH=settings.fontSize*.3528*(settings.lineHeight||1.25)*2,detailH=settings.showDetail?(settings.detailFontSize||9)*.3528*(settings.detailLineHeight||1.25)*2:0,captionH=photoNameGap+nameH+(settings.showDetail?nameDetailGap+detailH:0);let best=null;for(let cols=1;cols<=Math.min(6,count);cols++){const rows=Math.ceil(count/cols),slotW=(w-(cols-1)*gap)/cols,slotH=(h-(rows-1)*gap)/rows,photoW=Math.min(slotW,(slotH-captionH)*.75,Number(settings.photoWidth)||85);if(photoW<(Number(settings.minPhotoWidth)||5))continue;const cardH=photoW/.75+captionH,offsetX=(w-cols*photoW-(cols-1)*gap)/2,offsetY=(h-rows*cardH-(rows-1)*gap)/2,score=photoW*photoW*count-(cols*rows-count)*photoW*.01;if(!best||score>best.score)best={cols,rows,cellW:photoW,cellH:cardH,photoW,photoH:photoW/.75,nameH,detailH,photoNameGap,nameDetailGap,offsetX,offsetY,score};}return best;}
+  /* A vignette card: the photo and its captions. Each caption sits in a zone around the photo (above, below, left, right) or over it; captions of one zone stack name first. Mirrors master_layout.card_frame. */
+  const CARD_ZONES=['above','below','left','right','over'];
+  function cardFrame(settings){
+    const ratio=Number(settings.photoRatio)||.75,gap=Number(settings.photoNameGap??3),between=Number(settings.nameDetailGap??2),side=Number(settings.captionWidth)||40,
+      nameH=settings.fontSize*.3528*(settings.lineHeight||1.25)*2,
+      detailH=settings.showDetail?(settings.detailFontSize||9)*.3528*(settings.detailLineHeight||1.25)*2:0,
+      texts=[{key:'name',zone:CARD_ZONES.includes(settings.nameAt)?settings.nameAt:'below',h:nameH}].concat(settings.showDetail?[{key:'detail',zone:CARD_ZONES.includes(settings.detailAt)?settings.detailAt:'below',h:detailH}]:[]),
+      stack=zone=>{const items=texts.filter(t=>t.zone===zone);return items.length?items.reduce((sum,t)=>sum+t.h,0)+between*(items.length-1):0;},
+      zones=Object.fromEntries(CARD_ZONES.map(zone=>[zone,stack(zone)]));
+    return {ratio,gap,between,side,nameH,detailH,texts,zones,
+      top:zones.above?zones.above+gap:0,bottom:zones.below?zones.below+gap:0,
+      left:zones.left?side+gap:0,right:zones.right?side+gap:0,sideH:Math.max(zones.left,zones.right)};
+  }
+  /* Boxes of the photo and captions in card coordinates for a photo width. Caption boxes reserve two lines. */
+  function cardParts(photoW,frame){
+    const f=frame,photoH=photoW/f.ratio,body=Math.max(photoH,f.sideH),parts={photo:{x:f.left,y:f.top,w:photoW,h:photoH}},pad=Math.min(f.gap,photoW/4);
+    for(const zone of CARD_ZONES){
+      const items=f.texts.filter(t=>t.zone===zone);if(!items.length)continue;
+      const h=f.zones[zone];let x=f.left,w=photoW,y;
+      if(zone==='above')y=0;
+      else if(zone==='below')y=f.top+body+f.gap;
+      else if(zone==='over'){x=f.left+pad;w=Math.max(1,photoW-2*pad);y=f.top+photoH-pad-h;}
+      else{x=zone==='left'?0:f.left+photoW+f.gap;w=f.side;y=f.top+Math.max(0,(photoH-h)/2);}
+      for(const t of items){parts[t.key]={x,y,w,h:t.h,zone};y+=t.h+f.between;}
+    }
+    return {w:f.left+photoW+f.right,h:f.top+body+f.bottom,photoW,photoH,parts};
+  }
+  function gridGeometry(count,settings){if(count<=0)return null;const {w,h}=settings.box,gap=Number(settings.gap)||0,frame=cardFrame(settings);let best=null;
+    for(let cols=1;cols<=Math.min(6,count);cols++){const rows=Math.ceil(count/cols),slotW=(w-(cols-1)*gap)/cols,slotH=(h-(rows-1)*gap)/rows,room=slotH-frame.top-frame.bottom;
+      if(room<frame.sideH)continue;
+      const photoW=Math.min(slotW-frame.left-frame.right,room*frame.ratio,Number(settings.photoWidth)||85);if(photoW<(Number(settings.minPhotoWidth)||5))continue;
+      const card=cardParts(photoW,frame),offsetX=(w-cols*card.w-(cols-1)*gap)/2,offsetY=(h-rows*card.h-(rows-1)*gap)/2,score=photoW*photoW*count-(cols*rows-count)*photoW*.01;
+      if(!best||score>best.score)best={cols,rows,cellW:card.w,cellH:card.h,photoW,photoH:card.photoH,parts:card.parts,nameH:frame.nameH,detailH:frame.detailH,photoNameGap:frame.gap,nameDetailGap:frame.between,offsetX,offsetY,score};}
+    return best;}
   function capacity(settings){let result=0;for(let n=1;n<=settings.max;n++)if(gridGeometry(n,settings))result=n;return result;}
   function distribute(count,max,preferred,min){if(count===0)return [];const slots=Math.max(Math.ceil(count/max),Math.min(preferred,Math.max(1,Math.floor(count/min)))),base=Math.floor(count/slots),extra=count%slots;return Array.from({length:slots},(_,i)=>base+(i<extra?1:0));}
   const measure=document.createElement('canvas').getContext('2d');
@@ -35,7 +68,7 @@ let planning=[];
     if(rest.some(person=>person.missing))issues.push({severity:'error',text:'У участника отсутствует обязательный портрет.'});
     const chunks=[];let offset=0;for(const count of counts){chunks.push(rest.slice(offset,offset+count));offset+=count;}
     const layout=layoutCount&&grids[0]?gridGeometry(layoutCount,settings):null;let actualFont=settings.fontSize;
-    if(layout){const fits=size=>rest.every(person=>{const lines=nameLines(person.name,layout.cellW*.97,size,settings.font,settings);return lines&&lines.length<=2;});while(actualFont>settings.minFontSize&&!fits(actualFont))actualFont=Math.max(settings.minFontSize,actualFont-.5);if(!fits(actualFont))issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
+    if(layout){const fits=size=>rest.every(person=>{const lines=nameLines(person.name,layout.parts.name.w*.97,size,settings.font,settings);return lines&&lines.length<=2;});while(actualFont>settings.minFontSize&&!fits(actualFont))actualFont=Math.max(settings.minFontSize,actualFont-.5);if(!fits(actualFont))issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
     for(const spread of result.spreads)for(const item of spread.pages){const template=getTemplatePage(item.page),grid=template.layers.some(l=>l.type==='grid');generated.push(item.part==null?{templateId:item.page,records:grid?[]:null,source:grid?source:'fixed',role:spread.role,actualFont,layoutCount}:{templateId:item.page,records:chunks[item.part],source,actualFont,layoutCount,part:item.part+1,parts:counts.length,role:spread.role});}
     return generated;
   }
@@ -81,5 +114,5 @@ let planning=[];
   const TEXT_SAMPLES={'owner.quote':'Цитата владельца альбома','item.quote':'Цитата героя разворота','lead.subject':'Русский язык','class':'11 «А»','year':'2026','school':{full:'МБОУ «Средняя общеобразовательная школа № 5»',short:'Школа № 5'},'city':'Казань','shoot.title':'Никольская сопка','shoot.date':'27.09.2020'};
   function resolvedText(item,generated){return AutoText.resolve(item.text,field=>{if(field.endsWith('.name')){const person=photoPerson(field.split('.')[0],generated.personId);if(!person)return 'Нет данных';const words=person.name.split(' ');return words.length>2?{first:words[0],middle:words[1],last:words.slice(2).join(' ')}:{first:words[0],middle:'',last:words.slice(1).join(' ')};}return TEXT_SAMPLES[field];});}
 
-return {plan,designIssues,people,gridGeometry,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
+return {plan,designIssues,people,gridGeometry,cardFrame,cardParts,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
 };

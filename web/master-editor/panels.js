@@ -1,6 +1,7 @@
-/* Master editor · Vignette dialog, photo content and collage panels. */
+/* Master editor · Vignette live values, photo content and collage panels. */
 'use strict';
-const vignetteDialog = $('#vignette-dialog');
+/* Card sizes and spacing of every vignette in the block change together while dragging. */
+const vignetteLiveKeys = new Set(['gap', 'photoNameGap', 'nameDetailGap', 'minPhotoWidth', 'photoWidth', 'minFontSize', 'captionWidth']);
 function vignetteLive(key, value, input) {
   const l = selectedLayer();
   if (!l || l.type !== 'grid' || !Number.isFinite(value)) return;
@@ -11,183 +12,19 @@ function vignetteLive(key, value, input) {
   if (key === 'minFontSize') value = Math.min(value, l.fontSize);
   for (const item of grids) {
     item[key] = value;
-    if (key === 'min' && item.max < value) item.max = value;
-    if (key === 'max' && item.min > value) item.min = value;
-    if (key === 'fontSize' && item.minFontSize > value) item.minFontSize = value;
     if (key === 'minPhotoWidth' && (item.photoWidth ?? 85) < value) item.photoWidth = value;
     if (key === 'photoWidth' && item.minPhotoWidth > value) item.minPhotoWidth = value;
   }
   if (input && Number(input.value) !== value) input.value = String(value);
-  const paired =
-    key === 'min'
-      ? 'max'
-      : key === 'max'
-        ? 'min'
-        : key === 'fontSize'
-          ? 'minFontSize'
-          : key === 'photoWidth'
-            ? 'minPhotoWidth'
-            : key === 'minPhotoWidth'
-              ? 'photoWidth'
-              : null;
+  const paired = { photoWidth: 'minPhotoWidth', minPhotoWidth: 'photoWidth' }[key];
   if (paired) {
-    const other = $(`#vignette-controls [data-prop="${paired}"],#vignette-controls [data-live="${paired}"]`);
-    if (other) other.value = l[paired];
+    const other = $(`#inspector [data-live="${paired}"]`);
+    if (other && other !== document.activeElement) other.value = String(round(l[paired] ?? 85));
   }
   planner = MasterPlanner(doc, view);
   plans = planner.plan();
-  vignettePreview();
   renderScene();
 }
-async function uploadVignetteFont(el) {
-  const file = el.files?.[0];
-  el.value = '';
-  if (!file) return;
-  if (file.size > 1500000) return notify('Шрифт больше 1,5 МБ', true);
-  if ((doc.fonts || []).length >= 12) return notify('В макете уже 12 шрифтов', true);
-  const bytes = new Uint8Array(await file.arrayBuffer()),
-    format = fontKind(bytes);
-  if (!format) return notify('Нужен файл TTF или OTF', true);
-  const name = (file.name.replace(/\.(ttf|otf)$/i, '').trim() || 'Шрифт').slice(0, 60),
-    id = 'font-' + uid(),
-    dataUrl = 'data:font/' + format + ';base64,' + bytesToBase64(bytes),
-    key = el.dataset.fontTarget || 'font';
-  commit(() => {
-    doc.fonts = [...(doc.fonts || []), { id, name, dataUrl }];
-    section()
-      .spreads.flatMap(sp => sp.pages.flatMap(p => p.layers))
-      .filter(item => item.type === 'grid')
-      .forEach(item => (item[key] = id));
-  });
-  renderVignetteDialog();
-}
-vignetteDialog.addEventListener('click', e => {
-  if (e.target.closest('#vignette-close,#vignette-done')) {
-    vignetteDialog.close();
-    return;
-  }
-  if (e.target.closest('[data-vignette-block]')) {
-    vignetteDialog.close();
-    openBlockSettings();
-    return;
-  }
-  const pageStep = e.target.closest('[data-vignette-page]');
-  if (pageStep) {
-    vignettePage += Number(pageStep.dataset.vignettePage);
-    vignettePreview();
-    return;
-  }
-  const tab = e.target.closest('[data-vignette-dialog-tab]');
-  if (tab) {
-    vignetteDialogTab = tab.dataset.vignetteDialogTab;
-    renderVignetteDialog();
-    return;
-  }
-  const type = e.target.closest('[data-vignette-type]');
-  if (type) {
-    vignetteTextTab = type.dataset.vignetteType;
-    renderVignetteDialog();
-    return;
-  }
-  const color = e.target.closest('[data-color-key]');
-  if (color) {
-    openColor(color);
-    return;
-  }
-  const remove = e.target.closest('[data-font-remove]');
-  if (remove) {
-    const id = remove.dataset.fontRemove;
-    loadedFonts.delete(id);
-    commit(() => {
-      doc.fonts = (doc.fonts || []).filter(font => font.id !== id);
-      allLayers().forEach(layer => {
-        if (layer.font === id) layer.font = 'Arial';
-        if (layer.detailFont === id) layer.detailFont = 'Arial';
-      });
-      (doc.textStyles || []).forEach(style => {
-        if (style.font === id) style.font = 'Arial';
-      });
-    });
-    renderVignetteDialog();
-    return;
-  }
-  const choice = e.target.closest('[data-choice]');
-  if (!choice) return;
-  const l = selectedLayer(),
-    key = choice.dataset.choice;
-  if (!l) return;
-  if (key === 'showDetail') {
-    vignetteTextTab = l.showDetail ? 'name' : 'detail';
-    property(key, !l.showDetail);
-  } else if (
-    [
-      'bold',
-      'italic',
-      'underline',
-      'strike',
-      'detailBold',
-      'detailItalic',
-      'detailUnderline',
-      'detailStrike',
-      'strictMin',
-      'excludeLead',
-    ].includes(key)
-  )
-    property(key, !l[key]);
-  else property(key, choice.dataset.value);
-  renderVignetteDialog();
-});
-vignetteDialog.addEventListener('input', e => {
-  const el = e.target;
-  if (el.dataset.vignetteTestCount) {
-    if (el.value !== '' && el.validity.valid) {
-      view[el.dataset.vignetteTestCount] = Number(el.value);
-      planner = MasterPlanner(doc, view);
-      plans = planner.plan();
-      vignettePreview();
-      renderScene();
-    }
-    return;
-  }
-  const key = el.dataset.live || (el.type === 'number' ? el.dataset.prop : null);
-  if (!key || el.value === '' || !el.validity.valid) return;
-  vignetteLive(key, Number(el.value), el);
-});
-vignetteDialog.addEventListener('change', e => {
-  const el = e.target;
-  if (el.dataset.vignetteTestCount) return;
-  if (el.dataset.vignetteTestFlag) {
-    view[el.dataset.vignetteTestFlag] = el.checked;
-    planner = MasterPlanner(doc, view);
-    plans = planner.plan();
-    vignettePreview();
-    renderScene();
-    return;
-  }
-  if (el.id === 'font-upload') {
-    uploadVignetteFont(el);
-    return;
-  }
-  if (el.dataset.live || (el.type === 'number' && el.dataset.prop)) {
-    finishSlide();
-    vignettePreview();
-    return;
-  }
-  const key = el.dataset.prop;
-  if (!key) return;
-  const value = ['bold', 'detailBold'].includes(key)
-    ? el.value === 'true'
-    : el.type === 'checkbox'
-      ? el.checked
-      : el.value;
-  property(key, value);
-  renderVignetteDialog();
-});
-vignetteDialog.addEventListener('close', () => {
-  if (slide) finishSlide();
-  if (colorPop) closeColor(false);
-  document.body.append($('#color-pop'));
-});
 const staticPhotoIcon = '<span class="static-photo-icon" aria-hidden="true"></span>';
 /* What fills a photo layer or a collage frame. One panel for both, so they are set up the same way. */
 function photoContentPanel(item, { title, key, cell }) {

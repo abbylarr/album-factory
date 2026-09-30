@@ -205,7 +205,7 @@ $('#inspector').oninput = e => {
     el.style.width = Math.max(1, el.value.length) + 'ch';
   if (!el.dataset?.live || el.value === '' || !el.validity.valid) return;
   const value = Number(el.value);
-  if (selectedLayer()?.type === 'grid' && el.dataset.live in vignetteGapMax)
+  if (selectedLayer()?.type === 'grid' && vignetteLiveKeys.has(el.dataset.live))
     vignetteLive(el.dataset.live, value);
   else liveProperty(el.dataset.live, value);
   const badge = el.parentElement?.querySelector('b');
@@ -353,7 +353,49 @@ function endScrub(e) {
 }
 document.addEventListener('pointerup', endScrub);
 document.addEventListener('pointercancel', endScrub);
+/* Layer rows reorder by dragging, like Photoshop; the drop line shows where the layer lands. */
+let layerDrag = null;
+const layerDropMark = (row, above) => {
+  document.querySelectorAll('#inspector .editor-layer.drop-above, #inspector .editor-layer.drop-below').forEach(el => el.classList.remove('drop-above', 'drop-below'));
+  if (row) row.classList.add(above ? 'drop-above' : 'drop-below');
+};
+const layerDropAt = e => {
+  const row = e.target.closest('[data-layer-row]');
+  if (!row || !layerDrag || row.dataset.layerRow === layerDrag) return null;
+  const box = row.getBoundingClientRect();
+  return { row, above: e.clientY < box.top + box.height / 2 };
+};
+$('#inspector').addEventListener('dragstart', e => {
+  const row = e.target.closest?.('[data-layer-row]');
+  if (!row) return;
+  layerDrag = row.dataset.layerRow;
+  row.classList.add('is-dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', layerDrag);
+});
+$('#inspector').addEventListener('dragover', e => {
+  const drop = layerDropAt(e);
+  layerDropMark(drop?.row, drop?.above);
+  if (drop) e.preventDefault();
+});
+$('#inspector').addEventListener('drop', e => {
+  const drop = layerDropAt(e), id = layerDrag;
+  layerDropMark(null);
+  if (!drop) return;
+  e.preventDefault();
+  layerPanelMove(id, drop.row.dataset.layerRow, drop.above);
+});
+$('#inspector').addEventListener('dragend', () => {
+  layerDrag = null;
+  layerDropMark(null);
+  document.querySelectorAll('#inspector .is-dragging').forEach(el => el.classList.remove('is-dragging'));
+});
 $('#inspector').onclick = e => {
+  const layerAction = e.target.closest('[data-layer-action]');
+  if (layerAction) {
+    layerPanelAction(layerAction.dataset.layerId, layerAction.dataset.layerAction);
+    return;
+  }
   const layerButton = e.target.closest('[data-layer-select]');
   if (layerButton) {
     const id = layerButton.dataset.layerSelect;
@@ -364,17 +406,7 @@ $('#inspector').onclick = e => {
     return;
   }
   if (MasterPhotos.click(e)) return;
-  const spineColor = e.target.closest('[data-spine-color]');
-  if (spineColor) {
-    const on = spineColor.dataset.spineColor === 'on';
-    commit(() => {
-      const cover = coverSection();
-      if (on) cover.spineColor = cover.spreads[0].pages[0].background || '#ffffff';
-      else delete cover.spineColor;
-    });
-    if (on) requestAnimationFrame(() => $('[data-color-key="cover.spineColor"]')?.click());
-    return;
-  }
+  if (e.target.closest('[data-spine-color-off]')) return commit(() => delete coverSection().spineColor);
   if (e.target.closest('[data-spine-text]')) return addSpineText();
   const volumeBtn = e.target.closest('[data-cover-volume]');
   if (volumeBtn) {
@@ -419,7 +451,11 @@ $('#inspector').onclick = e => {
     renderScene();
     return;
   }
-  if (e.target.closest('[data-open-vignette]')) return openVignetteDialog();
+  if (e.target.closest('[data-open-block]')) return openBlockSettings();
+  if (e.target.closest('[data-card-enter]')) return enterCard(selectedLayer());
+  if (e.target.closest('[data-card-exit]')) return exitCard();
+  const cardPick = e.target.closest('[data-card-pick]');
+  if (cardPick) return pickCardPart(cardPick.dataset.cardPick);
   const safetyButton = e.target.closest('[data-open-safety]');
   if (safetyButton) return openSafety(safetyButton.dataset.openSafety);
   const colorBtn = e.target.closest('[data-color-key]');
@@ -492,21 +528,13 @@ $('#inspector').onclick = e => {
     if (!collageButton.disabled) commit(() => collageAction(collageButton.dataset.collage));
     return;
   }
-  const vignetteTab = e.target.closest('[data-vignette-type]');
-  if (vignetteTab) {
-    vignetteTextTab = vignetteTab.dataset.vignetteType;
-    renderInspector();
-    return;
-  }
   const choice = e.target.closest('[data-choice]');
   if (choice) {
     const key = choice.dataset.choice,
       l = selectedLayer();
     if (!l) return;
-    if (key === 'showDetail') {
-      vignetteTextTab = l.showDetail ? 'name' : 'detail';
-      return property('showDetail', !l.showDetail);
-    }
+    if (key === 'showDetail') return property('showDetail', !l.showDetail);
+    if (key === 'photoRatio') return property(key, Number(choice.dataset.value));
     if (key === 'strokeOn') return property('strokeOn', !strokeOpen(l));
     if (key === 'shadowOn') return property('shadowOn', !l.shadow);
     if (key === 'lockAspect') return property('lockAspect', l.lockAspect === false);
@@ -755,7 +783,7 @@ function packageDialog(mode) {
   $('#package-dialog').showModal();
 }
 /* Settings dialogs apply changes at once, so a click on the backdrop closes them like the × button. */
-for (const dialog of $$('#album-dialog,#safety-dialog,#vignette-dialog')) {
+for (const dialog of $$('#album-dialog,#safety-dialog')) {
   let fromBackdrop = false;
   dialog.addEventListener('pointerdown', e => {
     fromBackdrop = e.target === dialog;
@@ -953,6 +981,10 @@ document.addEventListener('keydown', e => {
       closeObjectMenu();
       return;
     }
+    if (cardEdit && !colorPop) {
+      exitCard();
+      return;
+    }
     if (colorPop) {
       closeColor();
       return;
@@ -980,6 +1012,25 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (preview) return;
+  /* Inside a card the vignette stays put: Delete only hides the second caption, Enter enters the card. */
+  if (cardLayer()) {
+    if (['Delete', 'Backspace'].includes(e.key)) {
+      e.preventDefault();
+      if (cardEdit.part === 'detail' && selectedLayer().showDetail) {
+        cardEdit.part = 'photo';
+        property('showDetail', false);
+      }
+      return;
+    }
+    if (e.key.startsWith('Arrow')) {
+      e.preventDefault();
+      return;
+    }
+  } else if (e.key === 'Enter' && !e.target.closest('button,a,summary') && selectedLayer()?.type === 'grid' && selected.length === 1) {
+    e.preventDefault();
+    enterCard(selectedLayer());
+    return;
+  }
   if (['Delete', 'Backspace'].includes(e.key)) {
     e.preventDefault();
     const collage = activeCollage();

@@ -229,6 +229,13 @@ def _draw(pdf, spread, size, measurer, images):
                                                skew=element.get("skew") or 0)
                 _, used = paragraph.wrap(w * mm, 100000)
                 offset = {"top": 0, "middle": (h * mm - used) / 2, "bottom": h * mm - used}[element["valign"]]
+                if used > h * mm + 0.01:
+                    # Overset text as in InDesign and the editor: whole lines that fit, from the top of the frame.
+                    fits = paragraph.split(w * mm, h * mm)
+                    if not fits:
+                        return
+                    paragraph, offset = fits[0], 0
+                    _, used = paragraph.wrap(w * mm, 100000)
                 paragraph.drawOn(pdf, x * mm, (height - top) * mm - offset - used)
             def paint_text_shadow(color):
                 draw_text(color, 0, 1)
@@ -327,8 +334,16 @@ def export_print_files(document: dict, owner: str, snapshot: dict, root: Path,
             pdf.showPage()
             pdf.save()
             pixels = round(size[0] / 25.4 * dpi), round(size[1] / 25.4 * dpi)
-            page = pypdfium2.PdfDocument(buffer.getvalue())[0]
-            image = page.render(scale=pixels[0] / page.get_width()).to_pil().convert("RGB")
+            rendered = pypdfium2.PdfDocument(buffer.getvalue())
+            page, bitmap = rendered[0], None
+            try:
+                bitmap = page.render(scale=pixels[0] / page.get_width())
+                image = bitmap.to_pil().convert("RGB")
+            finally:
+                if bitmap is not None:
+                    bitmap.close()
+                page.close()
+                rendered.close()
             if image.size != pixels:
                 image = image.resize(pixels, Image.LANCZOS)
             if is_cover:
