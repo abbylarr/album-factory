@@ -15,7 +15,7 @@ assert.equal(vm.runInContext('cardStatus(o).kind',context),'done');
 assert.equal(vm.runInContext('cardStatus(o).action[0]',context),'make-layout');
 assert.equal(vm.runInContext('cardStatus(o).tab',context),'client');
 o.stage='photos';o.pending=40;
-assert.equal(vm.runInContext('cardStatus(o).text',context),'Обработано 60 из 100');
+assert.equal(vm.runInContext('cardStatus(o).text',context),'Распознано 60 из 100');
 o.pending=0;
 assert.equal(vm.runInContext('cardStatus(o).text',context),'3 фото на проверку');
 assert.equal(vm.runInContext('cardStatus(o).tab',context),'review');

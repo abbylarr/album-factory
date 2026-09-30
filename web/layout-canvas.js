@@ -22,7 +22,7 @@ function layoutCanvas(spread,doc,photos,interactive=true,full=interactive){
     const tag=interactive?'button':'div',attribute=interactive?` data-layout-element="${layoutEscape(e.key)}"`:'';
     if(e.type==='photo'){
       const meta=photos.find(p=>p.id===e.photo),crop=e.crop;
-      const image=meta&&crop?`<img src="${layoutEscape(meta.url||('/media/'+encodeURIComponent(e.photo)+'/'+(full?'full':'thumb')))}" alt="" style="width:${meta.width/crop[2]*100}%;height:${meta.height/crop[3]*100}%;left:${-crop[0]/crop[2]*100}%;top:${-crop[1]/crop[3]*100}%">`:'';
+      const image=meta&&crop?`<img src="${layoutEscape(meta.url||('/media/'+encodeURIComponent(e.photo)+'/'+(full?'full':'thumb')+(meta.version?'?v='+encodeURIComponent(meta.version):'')))}" alt="" style="width:${meta.width/crop[2]*100}%;height:${meta.height/crop[3]*100}%;left:${-crop[0]/crop[2]*100}%;top:${-crop[1]/crop[3]*100}%">`:'';
       const placeholder=interactive?'<img class="layout-add-icon" src="/static/assets/layout-add.svg" alt=""><span class="sr-only">Выбрать фотографию</span>':'';
       return `<${tag} class="layout-layer layout-photo${selected}${image?'':' empty'}"${attribute} style="${box};${e.mask==='ellipse'?'border-radius:50%;':''}" ${interactive?'title="Заменить фотографию" aria-label="Заменить фотографию"':''}>${image||placeholder}</${tag}>`;
     }

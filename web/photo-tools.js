@@ -88,10 +88,10 @@ window.PhotoTools=(()=>{
       +(portrait?button('data-photo-tools="move"','swap','Другой персоне','Назначить другую или новую персону','','P'):'')
       +(portrait?button('data-photo-tools="to-general"','scene','Не портрет','Перенести в общую съёмку','','N'):'')+cover+del;
   }
-  /* While something is selected the filter row shows the count instead of the chips. */
+  /* While something is selected the shoot row shows the count instead of its tools. */
   function countRow(n){
-    const bar=$('.shoot-bar');if(!bar)return;
-    bar.classList.toggle('selecting',!!n);let row=bar.querySelector('.sel-slim');
+    const head=$('.shoot-head'),bar=head?.querySelector('.shoot-tools');if(!bar)return;
+    head.classList.toggle('selecting',!!n);let row=bar.querySelector('.sel-slim');
     if(!n){row?.remove();return;}
     if(!row){row=document.createElement('div');row.className='sel-slim';bar.prepend(row);}
     const list=ids();
@@ -102,7 +102,7 @@ window.PhotoTools=(()=>{
     if(!el){el=document.createElement('div');el.id='selection-dock';el.className='selection-dock';el.setAttribute('role','toolbar');el.setAttribute('aria-label','Действия с выбранными фото');}
     const dialog=$('#person-dialog')?.open?$('#person-dialog'):null,host=dialog||document.body;
     if(el.parentElement!==host)host.append(el);
-    el.classList.toggle('in-dialog',!!dialog);if(dialog){el.style.top=el.style.left='';el.classList.remove('below','above');}
+    el.classList.toggle('in-dialog',!!dialog);
     const n=state.order?state.selected.size:0;
     document.body.classList.toggle('has-selection',!!n);
     countRow(n);
@@ -115,22 +115,31 @@ window.PhotoTools=(()=>{
     place();
     if(appearing){void el.offsetWidth;el.style.transition='';}
   }
-  /* Under the anchor photo if it fits, above otherwise, never over the sticky count row; arrow points at the photo. */
+  function dockBounds(){
+    const dialog=$('#person-dialog')?.open?$('#person-dialog'):null;
+    const area=(dialog||$('#workspace')||document.body).getBoundingClientRect(),bar=dialog?null:$('.shoot-head');
+    return {dialog,left:Math.max(0,area.left)+12,right:Math.min(innerWidth,area.right)-12,
+      top:dialog?Math.max(0,area.top)+12:Math.max(10,bar?bar.getBoundingClientRect().bottom+8:10),
+      bottom:dialog?Math.min(innerHeight,area.bottom)-12:innerHeight-10};
+  }
+  /* Same photo anchor on the page and in the person dialog, within the active surface. */
   function place(){
-    const el=$('#selection-dock');if(!el||el.hidden||el.classList.contains('in-dialog'))return;
+    const el=$('#selection-dock');if(!el||el.hidden)return;
     const all=boxes(),box=all.find(b=>b.dataset.photo===last&&state.selected.has(last))||all.find(b=>state.selected.has(b.dataset.photo));
-    const tile=box?.closest('.photo-tile'),area=($('#workspace')||document.body).getBoundingClientRect(),room=Math.min(innerWidth,area.right)-area.left-24;
+    const tile=box?.closest('.photo-tile'),bounds=dockBounds(),room=Math.max(0,bounds.right-bounds.left);
+    el.style.maxWidth=room+'px';
     // Narrow window: key hints go first, then labels; icons keep their titles.
-    el.classList.remove('no-kbd','icons');if(el.offsetWidth>room)el.classList.add('no-kbd');if(el.offsetWidth>room)el.classList.add('icons');
-    const w=el.offsetWidth,h=el.offsetHeight,bar=$('.shoot-bar'),minTop=Math.max(10,bar?bar.getBoundingClientRect().bottom+8:10),minLeft=area.left+12,maxLeft=innerWidth-w-12;
-    if(!tile){el.classList.remove('below','above');el.style.top=innerHeight-h-22+'px';el.style.left=Math.max(minLeft,Math.min(maxLeft,area.left+(Math.min(innerWidth,area.right)-area.left-w)/2))+'px';return;}
-    const r=tile.getBoundingClientRect(),below=r.bottom+10+h<=innerHeight-10||r.top-10-h<minTop;
-    const top=Math.max(minTop,Math.min(innerHeight-h-10,below?r.bottom+10:r.top-h-10)),left=Math.max(minLeft,Math.min(maxLeft,r.left+r.width/2-w/2));
+    el.classList.remove('no-kbd','icons');if(el.scrollWidth>room)el.classList.add('no-kbd');if(el.scrollWidth>room)el.classList.add('icons');
+    const list=el.querySelector('.pp-list');if(list)list.style.maxHeight=Math.max(52,Math.min(292,bounds.bottom-bounds.top-150))+'px';
+    const w=el.offsetWidth,h=el.offsetHeight,minTop=bounds.top,minLeft=bounds.left,maxLeft=Math.max(minLeft,bounds.right-w),maxTop=Math.max(minTop,bounds.bottom-h);
+    if(!tile){el.classList.remove('below','above');el.style.top=maxTop+'px';el.style.left=Math.max(minLeft,Math.min(maxLeft,minLeft+(room-w)/2))+'px';return;}
+    const r=tile.getBoundingClientRect(),below=r.bottom+10+h<=bounds.bottom||r.top-10-h<minTop;
+    const top=Math.max(minTop,Math.min(maxTop,below?r.bottom+10:r.top-h-10)),left=Math.max(minLeft,Math.min(maxLeft,r.left+r.width/2-w/2));
     el.style.top=top+'px';el.style.left=left+'px';el.style.setProperty('--tip',Math.max(18,Math.min(w-18,r.left+r.width/2-left))+'px');
-    el.style.setProperty('--arrow',r.bottom<minTop||r.top>innerHeight?'0':'1');
+    el.style.setProperty('--arrow',r.bottom<minTop||r.top>bounds.bottom?'0':'1');
     el.classList.toggle('below',below);el.classList.toggle('above',!below);
   }
-  window.addEventListener('scroll',place,{passive:true});window.addEventListener('resize',place);
+  window.addEventListener('scroll',place,{passive:true,capture:true});window.addEventListener('resize',place);
 
   function openPicker(){
     const chosen=[...state.selected].map(photo).filter(Boolean);
@@ -138,9 +147,10 @@ window.PhotoTools=(()=>{
     picking=true;query='';hot=0;hints=new Map();dock();$('#pick-q')?.focus({preventScroll:true});
     // No room on either side of the photo: scroll so the search opens below it.
     const el=$('#selection-dock'),tile=boxes().find(b=>b.dataset.photo===last)?.closest('.photo-tile');
-    if(tile&&!el.classList.contains('in-dialog')){const r=tile.getBoundingClientRect(),bar=$('.shoot-bar'),minTop=bar?bar.getBoundingClientRect().bottom+8:10,h=el.offsetHeight,need=r.bottom+10+h-(innerHeight-10);
-      // The count row sticks to the top once scrolled, so the photo may go up to just below it.
-      if(need>0&&r.top-10-h<minTop)scrollBy({top:Math.min(need,r.top-(bar?bar.offsetHeight+8:10)),behavior:'smooth'});}
+    if(tile){const r=tile.getBoundingClientRect(),bounds=dockBounds(),h=el.offsetHeight,need=r.bottom+10+h-bounds.bottom;
+      if(need>0&&r.top-10-h<bounds.top){const distance=Math.min(need,Math.max(0,r.top-bounds.top));
+        if(bounds.dialog)bounds.dialog.scrollBy({top:distance,behavior:'smooth'});
+        else scrollBy({top:distance,behavior:'smooth'});}}
     const gen=++hintGen,orderId=state.order.id;
     api(`/orders/${orderId}/person-suggestions`,json('POST',{photo_ids:chosen.map(p=>p.id)})).then(result=>{
       if(gen!==hintGen||!picking)return;
@@ -200,7 +210,7 @@ window.PhotoTools=(()=>{
     const o=state.order,matches=photos.filter(p=>p.status==='ready'&&p.person_id&&personIndex(p.person_id)>=0),errors=photos.filter(p=>p.status==='error'),unknown=photos.filter(p=>!matches.includes(p)&&!errors.includes(p));
     const groups=[...new Set(matches.map(p=>p.person_id))].sort((a,b)=>personIndex(a)-personIndex(b)).map(id=>({id,photos:matches.filter(p=>p.person_id===id)}));
     if(!photos.length)return `<div class="empty-state review-done">${svgIcon('check',40)}<h3>Всё проверено</h3><p>Все портреты распределены по персонам.</p>${o.stage==='photos'?'<button class="primary" data-v2="send-forms">Отправить на анкеты</button>':''}</div>`;
-    return `<div class="review-board">${groups.length?`<section class="review-section"><header><h3>Проверьте совпадения <span>${matches.length}</span></h3><p>Слева эталон персоны. Нажмите «Всё верно» для группы или ✕ на лишнем снимке. Снимки можно перетащить в другую группу.</p></header><div class="review-groups">${groups.map(reviewGroup).join('')}</div></section>`:''}${unknown.length?`<section class="review-section"><header><h3>Не распознано <span>${unknown.length}</span></h3><p>Лицо не найдено, несколько лиц или персона не определена. Назначьте человека, перенесите в общую съёмку или удалите.</p></header><div class="photo-grid">${unknown.map(p=>reviewTile(p,'unknown')).join('')}</div></section>`:''}${errors.length?`<section class="review-section"><header><h3>Ошибки обработки <span>${errors.length}</span></h3><button class="secondary with-icon" data-action="retry">${svgIcon('retry',15)}Повторить обработку</button></header><div class="photo-grid">${errors.map(p=>reviewTile(p,'error')).join('')}</div></section>`:''}</div>`;
+    return `<div class="review-board">${groups.length?`<section class="review-section"><header><h3>Проверьте совпадения <span>${matches.length}</span></h3><p>Слева эталон персоны. Нажмите «Всё верно» для группы или ✕ на лишнем снимке. Снимки можно перетащить в другую группу.</p></header><div class="review-groups">${groups.map(reviewGroup).join('')}</div></section>`:''}${unknown.length?`<section class="review-section"><header><h3>Не распознано <span>${unknown.length}</span></h3><p>Лицо не найдено, несколько лиц или персона не определена. Назначьте человека, перенесите в общую съёмку или удалите.</p></header><div class="photo-grid">${unknown.map(p=>reviewTile(p,'unknown')).join('')}</div></section>`:''}${errors.length?`<section class="review-section"><header><h3>Не удалось распознать <span>${errors.length}</span></h3><button class="secondary with-icon" data-action="retry">${svgIcon('retry',15)}Повторить</button></header><div class="photo-grid">${errors.map(p=>reviewTile(p,'error')).join('')}</div></section>`:''}</div>`;
   }
   async function confirm(photos,message){
     photos=photos.filter(p=>p.status==='ready'&&p.person_id);if(!photos.length)return;
@@ -262,7 +272,7 @@ window.PhotoTools=(()=>{
   const fileDrag=e=>!internalDrag&&[...(e.dataTransfer?.types||[])].includes('Files');
   const canDrop=()=>!!state.order&&location.hash.startsWith('#order/')&&!document.querySelector('dialog[open]');
   function overlay(show){let el=$('#drop-overlay');if(!el){el=document.createElement('div');el.id='drop-overlay';el.className='drop-overlay';document.body.append(el);}const shoot=state.view==='photos'&&(state.shootId==='teachers'?{title:'Учителя'}:state.order?.shoots?.find(s=>s.id===state.shootId));el.innerHTML=`<div>${svgIcon('upload',40)}<strong>${shoot?`Загрузить в «${esc(shoot.title)}»`:'Отпустите, чтобы загрузить'}</strong><small>${shoot?'Файлы и папки целиком · JPG, PNG':'Затем выберите съёмку'}</small></div>`;el.classList.toggle('show',show);}
-  document.addEventListener('dragenter',e=>{if(!fileDrag(e)||!canDrop())return;dropDepth++;overlay(true);});
+  document.addEventListener('dragenter',e=>{if(e.target.closest?.('[data-retouch-drop]'))return;if(!fileDrag(e)||!canDrop())return;dropDepth++;overlay(true);});
   document.addEventListener('dragleave',e=>{if(!fileDrag(e)||!dropDepth)return;if(!--dropDepth)overlay(false);});
   document.addEventListener('dragover',e=>{if(!fileDrag(e))return;e.preventDefault();e.dataTransfer.dropEffect=canDrop()||e.target.closest?.('.shoot-drop')?'copy':'none';});
   document.addEventListener('drop',async e=>{

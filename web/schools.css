@@ -144,8 +144,8 @@
 @media(max-width:700px){.teacher-review{grid-template-columns:1fr}.teacher-review-image{height:45vh}.teacher-groups{grid-template-columns:repeat(2,minmax(0,1fr))}.tphoto-panel .shoot-bar{flex-wrap:wrap;gap:12px}}
 @media(prefers-reduced-motion:reduce){.school-tile .order-preview-fan img,.teacher-group,.teacher-card{transition:none}.school-tile:hover .order-preview-fan img,.teacher-group:hover,.teacher-card:hover{transform:none}}
 .v2 #action-dialog.wide-dialog:has(.teacher-review){width:min(1000px,calc(100vw - 48px));max-width:1000px}
-.teacher-folder-preview{position:relative;overflow:hidden}.v2 .teacher-folder-preview .order-preview-fan{inset:12px 0}.teacher-folder-preview .order-preview-fan img{transition:transform .25s}.folder:hover .teacher-folder-preview .order-preview-fan img:first-child{transform:rotate(-9deg) translateY(-3px)}.folder:hover .teacher-folder-preview .order-preview-fan img:last-child{transform:rotate(9deg) translateY(-3px)}
-@media(prefers-reduced-motion:reduce){.teacher-folder-preview .order-preview-fan img{transition:none}.folder:hover .teacher-folder-preview .order-preview-fan img{transform:none}}
+.teacher-folder-preview{position:relative;overflow:hidden}.v2 .teacher-folder-preview .order-preview-fan{inset:12px 0}.teacher-folder-preview .order-preview-fan img{width:auto;opacity:1}
+@media(prefers-reduced-motion:reduce){.v2 .folder:hover .teacher-folder-preview .order-preview-fan img{transform:none}}
 .teacher-card{border-color:var(--line);border-radius:16px}.teacher-card .teacher-photo{background:#f0f0f2}.teacher-text small,.teacher-initials{color:var(--muted)}.teacher-actions .text-button,.teacher-upload{color:var(--ink)}
 .teacher-selection-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.teacher-selection-summary .text-button{margin-left:auto;display:inline-flex;align-items:center;gap:6px}
 

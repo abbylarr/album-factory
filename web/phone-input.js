@@ -97,8 +97,6 @@
       paint(input, local.slice(0, start) + local.slice(end), start);
     } else if (event.inputType === 'insertText' && event.data != null) {
       event.preventDefault();
-      // Accept 7/8 as the country prefix when starting a number.
-      if (!digits(input.value) && /^[78]$/.test(event.data)) return;
       insert(input, event.data);
     }
   });

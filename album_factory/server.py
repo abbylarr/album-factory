@@ -88,6 +88,8 @@ def init_db():
         init_mvp(con)
         from .client_portal import reconcile_selections
         reconcile_selections(con)
+        from .retouch import init as init_retouch
+        init_retouch(con)
         from .school_catalog import init as init_school_catalog
         init_school_catalog(con)
         # Backfill fingerprints for portraits selected before upload history existed.
@@ -492,7 +494,19 @@ def get_order(order_id: str):
                 if photo["id"] in faces:
                     photo["face"] = faces[photo["id"]]
         order["shoots"] = [dict(r) for r in con.execute("SELECT id,title,kind,shot_on,in_layout FROM shoots WHERE order_id=? ORDER BY created_at,id", (order_id,))]
-        order["persons"] = [dict(row) for row in con.execute("SELECT id,name FROM persons WHERE order_id=? ORDER BY created_at,id", (order_id,))]
+        order["persons"] = [dict(row) for row in con.execute("""SELECT p.id,p.name,
+            f.id AS selected_photo_id, CASE WHEN f.id IS NOT NULL THEN s.quote ELSE '' END AS quote
+            FROM persons p LEFT JOIN client_selections s ON s.person_id=p.id
+            LEFT JOIN photos f ON f.id=s.photo_id AND f.person_id=p.id AND f.order_id=p.order_id AND f.status='ready'
+            WHERE p.order_id=? ORDER BY p.created_at,p.id""", (order_id,))]
+        from .retouch import progress as retouch_progress
+        order["retouch"] = retouch_progress(con, order_id)
+        versions = {r["photo_id"]: r["version"] for r in con.execute("SELECT r.* FROM photo_retouch r JOIN photos p ON p.id=r.photo_id WHERE p.order_id=?", (order_id,))}
+        sources = {r["person_id"]: r["source"] for r in con.execute("SELECT r.* FROM portrait_choice_sources r JOIN persons p ON p.id=r.person_id JOIN client_selections c ON c.person_id=r.person_id AND c.photo_id=r.photo_id WHERE p.order_id=?", (order_id,))}
+        for photo in order["photos"]:
+            photo["retouch_version"] = versions.get(photo["id"], "")
+        for person in order["persons"]:
+            person["choice_source"] = sources.get(person["id"], "student")
         from .client_portal import progress_by_order, people_progress
         order["client_progress"] = progress_by_order(con, order_id)[order_id]
         order["client_people"] = people_progress(con, order_id)
@@ -715,16 +729,59 @@ def media(photo_id: str, variant: str):
 
 
 class PersonInput(BaseModel):
-    name: str = Field(max_length=100)
+    name: str = Field(default="", max_length=100)
+    first_name: str | None = Field(default=None, max_length=60)
+    last_name: str | None = Field(default=None, max_length=60)
 
 
 @app.patch("/api/orders/{order_id}/persons/{person_id}")
 def rename_person(order_id: str, person_id: str, payload: PersonInput):
+    """Separate first and last names also correct what the student entered in the form."""
+    split = payload.first_name is not None or payload.last_name is not None
+    first, last = (payload.first_name or "").strip(), (payload.last_name or "").strip()
+    name = f"{first} {last}".strip() if split else payload.name.strip()
     with db() as con:
-        require_order(con, order_id)
-        result = con.execute("UPDATE persons SET name=? WHERE id=? AND order_id=?", (payload.name.strip(), person_id, order_id))
+        con.execute("BEGIN IMMEDIATE")
+        from .production import require_editable
+        require_editable(con, require_order(con, order_id))
+        result = con.execute("UPDATE persons SET name=? WHERE id=? AND order_id=?", (name, person_id, order_id))
         if result.rowcount != 1:
             raise HTTPException(404, "Персона не найдена")
+        if split and first and last:
+            con.execute("UPDATE client_selections SET first_name=?, last_name=? WHERE person_id=?", (first, last, person_id))
+        if con.execute('SELECT 1 FROM order_layouts WHERE order_id=?', (order_id,)).fetchone():
+            from .layout_workspace import build_layout
+            build_layout(con, __import__('sys').modules[__name__], order_id)
+    return {"ok": True}
+
+
+class ChoiceInput(BaseModel):
+    photo_id: str = Field(min_length=1, max_length=64)
+
+
+@app.put("/api/orders/{order_id}/persons/{person_id}/choice")
+def choose_portrait(order_id: str, person_id: str, payload: ChoiceInput):
+    """The photographer picks the portrait instead of the student; the student's name and quote stay."""
+    with db() as con:
+        con.execute("BEGIN IMMEDIATE")
+        require_order(con, order_id)
+        from .production import require_editable
+        require_editable(con, require_order(con, order_id))
+        person = con.execute("SELECT name FROM persons WHERE id=? AND order_id=?", (person_id, order_id)).fetchone()
+        if person is None:
+            raise HTTPException(404, "Персона не найдена")
+        if con.execute("SELECT 1 FROM photos f LEFT JOIN shoots s ON s.id=f.shoot_id WHERE f.id=? AND f.order_id=? AND f.person_id=? AND f.status='ready' AND COALESCE(s.kind,'portrait')='portrait'",
+                       (payload.photo_id, order_id, person_id)).fetchone() is None:
+            raise HTTPException(409, "Этот кадр не относится к персоне")
+        first, _, last = (person["name"] or "").strip().partition(" ")
+        con.execute("""INSERT INTO client_selections (person_id, photo_id, first_name, last_name, quote) VALUES (?,?,?,?,'')
+            ON CONFLICT(person_id) DO UPDATE SET photo_id=excluded.photo_id""", (person_id, payload.photo_id, first, last.strip()))
+        con.execute("""INSERT INTO selection_state (person_id, photo_id, submitted) VALUES (?,?,0)
+            ON CONFLICT(person_id) DO UPDATE SET photo_id=excluded.photo_id""", (person_id, payload.photo_id))
+        con.execute("INSERT INTO portrait_choice_sources VALUES (?,?,'photographer') ON CONFLICT(person_id) DO UPDATE SET photo_id=excluded.photo_id,source=excluded.source", (person_id, payload.photo_id))
+        if con.execute('SELECT 1 FROM order_layouts WHERE order_id=?', (order_id,)).fetchone():
+            from .layout_workspace import build_layout
+            build_layout(con, __import__('sys').modules[__name__], order_id)
     return {"ok": True}
 
 
@@ -929,3 +986,6 @@ _install_notifications(app, _sys.modules[__name__])
 def master_editor_entry():
     from fastapi.responses import RedirectResponse
     return RedirectResponse('/static/master-editor.html?new=1')
+
+from .retouch import install as _install_retouch
+_install_retouch(app, _sys.modules[__name__])

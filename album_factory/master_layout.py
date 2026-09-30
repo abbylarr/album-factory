@@ -833,5 +833,10 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
     if book:
         document['layout'] = 'book'
     document['print'] = {'files': 'pages' if book else 'spreads', 'dpi': 300}
+    for spread in [*covers.values(), *(s for group in groups.values() for s in group.values())]:
+        for element in spread['elements']:
+            version = snapshot.get('photos', {}).get(element.get('photo'), {}).get('version')
+            if version:
+                element['asset_version'] = version
     document['revision']=canonical_hash(document)
     return document

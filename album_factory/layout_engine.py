@@ -388,6 +388,10 @@ class LayoutEngine:
             "overrides": {"applied": applied, "conflicts": conflicts},
             "issues": self._validate(shared, per_variant, covers),
         }
+        for element in index.values():
+            version = snapshot.get('photos', {}).get(element.get('photo'), {}).get('version')
+            if version:
+                element['asset_version'] = version
         document["revision"] = canonical_hash(document)
         return document
 

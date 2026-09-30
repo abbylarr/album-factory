@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Обработка выбранных · стенд</title>
+<!-- Real service styles: the prototype is judged against what ships. -->
+<link rel="stylesheet" href="../../web/style.css">
+<link rel="stylesheet" href="../../web/v2.css">
+<link rel="stylesheet" href="../../web/board.css">
+<link rel="stylesheet" href="../../web/photo-tools.css">
+<style>
+body.v2{display:block;min-height:100vh;margin:0;background:#f5f5f3}
+.proto{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}
+.proto-side{position:sticky;top:0;height:100vh;overflow:auto;box-sizing:border-box;padding:20px 18px 40px;background:#fcfcfa;border-right:1px solid #e6e7e1;font-size:13px;z-index:60}
+.proto-side h1{margin:0 0 6px;font-size:16px}
+.proto-side h3{margin:20px 0 8px;font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#8d8c86}
+.proto-side p{margin:0 0 8px;color:#77796e;line-height:1.45}
+.v2 .proto-side .side-btn{display:block;width:100%;margin:0 0 6px;padding:8px 10px;border:1px solid #e3e4de;border-radius:9px;background:#fff;color:#3c3d37;text-align:left;font-size:12px;font-weight:600}
+.v2 .proto-side .side-btn:hover{background:#f3f3ef}
+.proto-main{padding:22px 34px 120px;min-width:0;max-width:1180px}
+
+/* Order head with the retouch activity row */
+.o-head{background:#fff;border:1px solid #e6e7e1;border-radius:16px;padding:18px 22px 0;margin-bottom:22px}
+.o-top{display:flex;align-items:center;gap:14px}
+.o-ring{width:44px;height:44px;border-radius:50%;border:4px solid #e8e8e3;border-top-color:#4bb0a8;border-right-color:#4bb0a8;flex:none}
+.o-top small{display:block;color:#9a9c92;font-size:11px}
+.o-top strong{font-size:22px;letter-spacing:-.3px}
+.o-plate{display:flex;flex-direction:column;gap:0;margin:14px 0 0;background:#fdf6e3;border-radius:12px;padding:4px 16px}
+.o-row{display:flex;align-items:center;gap:14px;padding:10px 0;font-size:13px}
+.o-row+.o-row{border-top:1px solid #f0e6c8}
+.o-row .lbl{flex:1;min-width:0}
+.o-row .lbl b{display:block;font-size:13px}
+.o-row .lbl span{color:#8a7a4c;font-size:12px}
+.o-row .bar{width:160px;height:6px;border-radius:3px;background:#efe3bd;overflow:hidden;flex:none}
+.o-row .bar i{display:block;height:100%;background:#c49a12;border-radius:3px;transition:width .3s}
+.v2 .o-row .go{padding:8px 12px;border-radius:9px;background:#fff;color:#242522;font-size:12px;font-weight:600;white-space:nowrap}
+.v2 .o-row .go.main{background:#242522;color:#fff}
+.o-tabs{display:flex;gap:22px;margin-top:14px}
+.v2 .o-tabs button{flex:none;width:auto;padding:10px 0 12px;background:none;border-radius:0;border-bottom:2px solid transparent;color:#81827d;font-size:13px;font-weight:600}
+.v2 .o-tabs button.on{color:#242522;border-bottom-color:#242522}
+.o-tabs small{margin-left:5px;color:#a3a49e;font-weight:600}
+
+/* Selected / retouched marks on tiles */
+.photo-tile img{background:#dcdad6}
+.photo-tile .tile-person{display:block;padding:0 10px 9px;margin-top:-6px;font-size:11px;color:#9a9c92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pick-badge{position:absolute;top:10px;right:10px;z-index:2;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px 0 6px;border-radius:11px;background:#fffffff2;color:#242522;font-size:11px;font-weight:700;box-shadow:0 1px 4px #0003}
+.pick-badge svg{color:#d7b400}
+.pick-badge.done{background:#242522;color:#fff}
+.pick-badge.done svg{color:#ffdc20}
+.photo-tile.flash{animation:flash 1.2s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 4px #ffdc20}100%{box-shadow:0 0 0 0 #ffdc2000}}
+
+/* Tools row that appears with the «Выбраны» chip */
+.chosen-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-4px 0 16px;padding:10px 12px;background:#fff;border:1px solid #e6e7e1;border-radius:12px}
+.chosen-tools .sub{display:inline-flex;padding:3px;background:#f0f0ec;border-radius:9px;margin-right:auto}
+.v2 .chosen-tools .sub button{padding:5px 10px;border-radius:7px;background:none;color:#6c6e66;font-size:12px;font-weight:600}
+.v2 .chosen-tools .sub button.on{background:#fff;color:#242522;box-shadow:0 1px 2px #2224221a}
+.chosen-tools .sub small{margin-left:4px;opacity:.7}
+.v2 .tbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:9px;background:#f3f3ef;color:#242522;font-size:12px;font-weight:600;white-space:nowrap}
+.v2 .tbtn:hover{background:#e9e9e3}
+.v2 .tbtn.dark{background:#242522;color:#fff}
+.v2 .tbtn.dark:hover{background:#3a3b36}
+.tbtn svg{color:currentColor;opacity:.8}
+
+/* Progress of retouching inside «Выбраны» */
+.chosen-tools .prog{display:flex;align-items:center;gap:12px;margin-right:auto;font-size:13px}
+.chosen-tools .prog .bar{width:140px;height:6px;border-radius:3px;background:#ecece6;overflow:hidden}
+.chosen-tools .prog .bar i{display:block;height:100%;background:#c49a12;border-radius:3px;transition:width .3s}
+.v2 .chosen-tools .link{padding:0;background:none;color:#242522;font-size:12px;font-weight:600;text-decoration:underline;text-decoration-color:#d7b400;text-decoration-thickness:2px;text-underline-offset:3px}
+.chosen-tools .all-done{color:#2f8a4a;font-size:12px;font-weight:600}
+/* Face recognition after upload: a passing status line, not a filter */
+.recog{display:inline-flex;align-items:center;gap:8px;margin-right:14px;font-size:12px;color:#81827d}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid #d9dad4;border-top-color:#81827d;animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.photo-tile.recognising img{opacity:.45;filter:grayscale(.6)}
+.photo-tile .tile-spin{position:absolute;top:12px;left:12px;z-index:2}
+
+/* Popovers */
+.pop{position:fixed;z-index:80;width:360px;padding:14px;background:#fff;border:1px solid #e3e4de;border-radius:14px;box-shadow:0 14px 36px #22242226;font-size:13px}
+.pop[hidden]{display:none}
+.pop h4{margin:0 0 4px;font-size:14px}
+.pop p{margin:0 0 10px;color:#77796e;line-height:1.45;font-size:12px}
+.pop textarea{width:100%;box-sizing:border-box;height:84px;margin:0 0 10px;padding:8px 10px;border:1px solid #e0e1db;border-radius:9px;background:#fafaf8;font:12px/1.5 ui-monospace,Menlo,monospace;resize:none}
+.pop .row{display:flex;gap:8px;align-items:center}
+.pop .row .grow{flex:1}
+.pop label.opt{display:flex;gap:8px;align-items:flex-start;margin:0 0 8px;font-size:13px;font-weight:500}
+.pop label.opt input{margin:2px 0 0;width:auto;min-height:0}
+.pop label.opt small{display:block;color:#9a9c92;font-size:11px;font-weight:400}
+.hint-i{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:#ebebe6;color:#81827d;font-size:10px;font-weight:700;cursor:help;position:relative;vertical-align:1px}
+.hint-i:hover::after{content:attr(data-tip);position:absolute;left:50%;top:22px;transform:translateX(-50%);width:250px;padding:9px 11px;border-radius:9px;background:#29282d;color:#fff;font-size:11px;font-weight:400;line-height:1.5;z-index:5;text-align:left}
+
+/* Retouched upload zone + report */
+.back-zone{display:flex;align-items:center;gap:14px;margin:0 0 16px;padding:16px;border:1.5px dashed #dcddd7;border-radius:12px;background:#fafaf8;color:#8a8b85;font-size:13px}
+.back-zone.drag{border-color:#242522;background:#fff}
+.back-zone strong{display:block;color:#242522;font-size:14px;margin-bottom:2px}
+.back-zone .lnk{border-bottom:1px dashed currentColor;color:#242522;cursor:pointer}
+.report{margin:0 0 16px;padding:14px 16px;background:#fff;border:1px solid #e6e7e1;border-radius:12px;font-size:13px}
+.report header{display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:0;background:none;border:0;color:#242522;opacity:1;position:static}
+.report header b{font-size:14px}
+.v2 .report header button{margin-left:auto;padding:0;background:none;color:#9a9c92;font-size:12px;text-decoration:underline}
+.report .grp{display:flex;gap:10px;padding:6px 0;border-top:1px solid #f0f0ec}
+.report .grp:first-of-type{border-top:0}
+.report .n{min-width:92px;font-weight:700}
+.report .n.ok{color:#2f8a4a}.report .n.bad{color:#c2412f}.report .n.wait{color:#8a6d00}
+.report .files{color:#77796e;font:12px/1.6 ui-monospace,Menlo,monospace;word-break:break-word}
+
+/* Persons */
+.persons{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px}
+.pcard{position:relative;background:#fff;border:1px solid #e0e3d7;border-radius:12px;overflow:hidden;cursor:pointer;text-align:left}
+.pcard .cov{position:relative;aspect-ratio:4/5;background:#dcdad6;overflow:hidden}
+.pcard .cov img{width:100%;height:100%;object-fit:cover}
+.pcard .cov.none{display:grid;place-items:center;color:#9a9c92;font-size:12px;background:repeating-linear-gradient(135deg,#efeee9 0 10px,#f5f4f0 10px 20px)}
+.pcard .cov.none img{opacity:.35;filter:grayscale(1)}
+.pcard .cov.none span{position:absolute;padding:4px 10px;border-radius:10px;background:#fff;color:#8a8b85;font-weight:600}
+.pcard .meta{padding:10px 12px}
+.pcard .meta b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pcard .meta small{display:block;color:#9a9c92;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pcard .meta small.ok{color:#2f8a4a}
+.p-filter{display:flex;gap:6px;margin:0 0 16px}
+
+/* Person window */
+.pw{display:grid;grid-template-columns:260px minmax(0,1fr);gap:24px}
+.pw-head{display:flex;align-items:center;gap:6px;margin:0 0 16px}
+.pw-head h3{margin:0;font-size:20px}
+.v2 .icon-btn{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:8px;background:none;color:#a3a49e}
+.v2 .icon-btn:hover{background:#f1f1ec;color:#242522}
+.v2 .pw-head .icon-btn.close{margin-left:auto}
+.name-edit{display:flex;align-items:center;gap:6px}
+.v2 .name-edit input{width:150px;height:34px;margin:0;padding:0 10px;border:1px solid #d9dad4;border-radius:8px;font:inherit;font-size:15px;font-weight:600}
+.v2 .name-edit input:focus{outline:none;border-color:#242522}
+.v2 .name-edit .icon-btn.ok{background:#242522;color:#fff}
+.pw-choice{position:relative;aspect-ratio:4/5;border-radius:12px;overflow:hidden;background:#dcdad6}
+.pw-choice img{width:100%;height:100%;object-fit:cover}
+.pw-choice .pick-badge{top:10px;left:10px;right:auto}
+.pw-choice.none{display:grid;place-items:center;color:#8a8b85;font-size:13px;background:repeating-linear-gradient(135deg,#efeee9 0 10px,#f5f4f0 10px 20px)}
+.pw-file{margin:8px 0 14px;color:#9a9c92;font-size:12px}
+.pw-quote{position:relative;padding:12px 14px 12px 38px;background:#fafaf8;border:1px solid #ecece7;border-radius:12px;font-size:14px;line-height:1.5;color:#3c3d37}
+.pw-quote svg{position:absolute;left:12px;top:13px;color:#c9b25a}
+.pw-quote.empty{color:#a3a49e;font-size:13px}
+.pw-right header{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.pw-right header b{font-size:13px}
+.pw-right header .muted{color:#9a9c92;font-size:12px}
+.v2 .pw-right header .link{margin-left:auto;padding:0;background:none;color:#242522;font-size:12px;font-weight:600;text-decoration:underline;text-decoration-color:#d7b400;text-decoration-thickness:2px;text-underline-offset:3px}
+.replace-bar{display:flex;align-items:center;gap:10px;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#fdf6e3;font-size:12px;color:#6d5c20}
+.replace-bar span{flex:1}
+.pw-grid .photo-tile{cursor:default}
+.pw-grid.replacing .photo-tile{cursor:pointer}
+.pw-grid.replacing .photo-tile:not(.is-chosen):hover{outline:2px solid #e3d48a;outline-offset:-1px}
+.pw-grid .photo-tile.candidate{outline:3px solid #242522;outline-offset:-1px}
+.by-photog{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:8px;background:#f0f0ec;color:#77796e;font-size:11px;font-weight:600}
+
+/* Dialogs */
+.dlg{position:fixed;inset:0;z-index:90;display:grid;place-items:center;background:#2224224d}
+.dlg[hidden]{display:none}
+.dlg .box{width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 60px);overflow:auto;box-sizing:border-box;padding:22px;background:#fff;border-radius:16px;box-shadow:0 20px 50px #0003}
+.dlg .box.wide{width:min(860px,calc(100vw - 32px))}
+.dlg h3{margin:0 0 6px;font-size:18px}
+.dlg p{margin:0 0 14px;color:#77796e;font-size:13px;line-height:1.5}
+.choice{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0 18px}
+.v2 .choice button{display:block;padding:14px;border:1.5px solid #e3e4de;border-radius:12px;background:#fff;text-align:left;color:#242522;font-size:14px;font-weight:700}
+.v2 .choice button small{display:block;margin-top:4px;color:#8a8b85;font-size:12px;font-weight:400;line-height:1.4}
+.v2 .choice button.on{border-color:#242522;box-shadow:0 0 0 1px #242522}
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px}
+.pw-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.pw-grid .photo-tile.is-chosen{outline:3px solid var(--yellow,#ffdc20);outline-offset:-1px}
+
+.proto-toast{position:fixed;left:calc(50% + 130px);bottom:26px;z-index:99;transform:translate(-50%,20px);max-width:560px;padding:10px 16px;border-radius:10px;background:#242522;color:#fff;font-size:13px;line-height:1.45;opacity:0;transition:.25s;pointer-events:none}
+.proto-toast.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body class="v2">
+<div class="proto">
+  <aside class="proto-side">
+    <h1>Обработка выбранных</h1>
+    <p>Ученики выбрали по фото. Проверьте путь: решить, забрать в Lightroom, вернуть обработанные, отправить в печать.</p>
+    <h3>Сценарий</h3>
+    <button class="side-btn" data-sim="start">1 · «Собрать макет» — выбор режима</button>
+    <button class="side-btn" data-sim="batch">2 · Я обработал 8 фото (имитация)</button>
+    <button class="side-btn" data-sim="rest">3 · Обработал остальные, кроме 2</button>
+    <button class="side-btn" data-sim="send">4 · «Отправить на согласование»</button>
+    <button class="side-btn" data-sim="approved">5 · Класс согласовал</button>
+    <h3>Своими файлами</h3>
+    <p>В зону «Загрузить обработанные» можно бросить настоящие файлы — сопоставятся по имени, например <code>DSC00298-Edit.jpg</code>. Ничего не отправляется.</p>
+    <h3>Стенд</h3>
+    <button class="side-btn" data-sim="upload">Догрузить 6 кадров — распознавание</button>
+    <button class="side-btn" data-sim="reset">Начать заново</button>
+  </aside>
+
+  <main class="proto-main">
+    <section class="o-head">
+      <div class="o-top"><span class="o-ring"></span><div><small>Этап 4 из 8 · Макет</small><strong>1 школа · 11 А</strong></div></div>
+      <div class="o-plate" id="plate"></div>
+      <nav class="o-tabs" id="tabs"></nav>
+    </section>
+    <div id="view"></div>
+  </main>
+</div>
+
+<div class="pop" id="pop" hidden></div>
+<div class="dlg" id="dlg" hidden><div class="box" id="dlg-box"></div></div>
+<div class="proto-toast" id="toast"></div>
+
+<script>
+const MEDIA='http://localhost:8191/media/';
+const IDS=['06540b8876a04edc8c2e69094478d2ef','231264bb65254aaaba4ceea7e8741cd5','89adf21c69ff46ef96c218c1872eba5d','1f4e0873463f47ef84a33ce2324b16a9','d69ac92f0d834bfb952cbb6cee716b2e','f4099da2bafb4135a4176a7b4dcffb4c','dad0b4c4d35146fb97bf58920865eebf','5e48c1dba22248e59d86f7f9d98e5286','fec860938f644ddf938b13bb23671c93','088bb96c014245d0bf4db0a3f7c4fce2','fcadee03c6b3499982d27e44216492e1','71fd4453b0464a3d983c6bed195e63fd','905ba6e4de0a4bedb4198b666f228bf0','f2a2110cad4148278114e6fdb4368ecf','54b23731970e4f559a414ee5a8276934','e7e39438a23a44228b3d76700669aeff','eb99e6e08c364c1b881f9df93e2b2fa9','382c2d3ea25c491a921312732dea8549','303f4bd3fd414a7d8d917c5a8268ac36','4c67fb7d371d43da9a241da627a7179f','5c90a04913d845039110d895d3d6ba10','ae17c63267564d9c8dbbef3bdc97a647','75f13e58085e45c68d25ab9e4cd61019','31e5ad41a8e74b17adcf60c701af8610','6e1c5d7c8b70432cbc35e13b2e97c92b','9e4176ffb9cc40949bf7ad10c0ace093','0cbcf13201504db9bb95d5b0158b5e9f','143ee5e56e5b45e4938e5c964e3d1a8f','2373e720c4cf4e9c89cc810e1a0d5e11','a042ee5a477948089cc73d120dc96a47','e4eb10487c8049968cdb496e93dbe125','8450277b14c74bcdb881b6e2ec338cea','bf3afc4011a84934b4939268b2c8470a','b1e5945ea8cb47febeee4c199fb6d066','8ae0d7e1b9c9412a9c828b1dfd2841ff','20a1912b332546a1a12b5a2a0f4326b0','94f61ba7a8134d9da9c169d93655f50a','5adf4822e99441ec8a65ec517709ebe7','7ad8fdd024564f888726a8d39f29a15a','ba961bb289754209b34f98dfb9422ed0','859fe97c6fdc446eace75c636ffc2e68','2cf2fd3f1fe246cc91b82f44d31a927e','8ba928c750e6464c81a080c246cb5513','4ebc71044e694dd1a5d4d274b1fc89af','4ca86dcc35804a5db54fe3f9d4e06243','7af7878c13a74f83a640fcce226342c4','034db3e9cd474589afd67965d5b1b980','ac489f08ce1749279f63fc40bf2d4315','9e8bf70b16014d648b4d0112f7c14e65','0955459937234e3cbf17bc9167e38519','92b184b61de1408784690006a02ae69a','dd52e74348a34ce09d1ac81c90bc1be2','7344680431634274b307438218d84414','5b549555d48f4f1a80f388180ba423b7','2b51134dea9048cc9fd16298ce246380','8503938e2833476a9f65d0bab904610c','d4a2d6e9d7834a1fb1f7ad4ce8919df6','07f3031bd9c4416188a0a6b3f1a6e5fe','35a841e61606492897bc7ab3bdff6e90','cd3e1d5569a44f2889bbd222cc185e96'];
+const NAMES=['Тестов Александр','Примерова Анна','Демов Михаил','Образцова Мария','Макетов Дмитрий','Тестова Екатерина','Примеров Иван','Демова София','Образцов Артём','Макетова Полина','Пробников Максим','Пробникова Дарья','Черновиков Кирилл','Черновикова Алиса','Демонстрационов Никита','Демонстрационова Виктория','Эскизов Глеб','Эскизова Вера','Набросков Лев','Набросова Ева'];
+const QUOTES=['Спасибо всем, кто был рядом эти одиннадцать лет!','Главное — не останавливаться.','Физика — это любовь, а не предмет.','Увидимся на встрече выпускников через десять лет 😉','Лучший класс в мире, и это не обсуждается.','Мечтать можно и нужно.','Всё будет хорошо, особенно после ЕГЭ.'];
+const ICONS={pen:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/>',x:'<path d="M18 6 6 18M6 6l12 12"/>',quote:'<path d="M7 7h4v4c0 3-2 5-4 6M14 7h4v4c0 3-2 5-4 6"/>',copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',download:'<path d="M12 4v11m-5-5 5 5 5-5M4 20h16"/>',upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 20h16"/>',star:'<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',check:'<path d="m5 12 5 5 9-10"/>',back:'<path d="m15 18-6-6 6-6"/>',selectAll:'<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>',brush:'<path d="M18 3l3 3-9 9-3-3z"/><path d="M9 12c-3 0-5 2-5 5 0 1-1 2-2 2 2 2 7 2 8-1 .6-1.8.4-3.4-1-6z"/>'};
+const icon=(n,s=15)=>`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MB=10.4; // average portrait JPEG
+
+let S;
+function fresh(){
+  const photos=IDS.map((id,i)=>({id,file:`DSC${String(298+i).padStart(5,'0')}`,person:Math.floor(i/3),retouched:false}));
+  const persons=NAMES.map((name,i)=>({name,chosen:[2,9,15].includes(i)?null:photos[i*3+(i%3)].id,by:'student',quote:[2,9,15].includes(i)?'':QUOTES[i%QUOTES.length]}));
+  return {photos,persons,mode:null,tab:'photos',filter:'all',sub:'all',pfilter:'all',report:null,stage:'draft',asisLeft:0,todoOnly:false,recogLeft:0};
+}
+const chosenPhotos=()=>S.persons.filter(p=>p.chosen).map(p=>S.photos.find(x=>x.id===p.chosen));
+const byId=id=>S.photos.find(p=>p.id===id);
+const isChosen=p=>S.persons[p.person].chosen===p.id;
+
+/* ---------- Plate ---------- */
+function renderPlate(){
+  const ch=chosenPhotos(),done=ch.filter(p=>p.retouched).length,waiting=S.persons.filter(p=>!p.chosen).length;
+  const rows=[];
+  if(S.stage==='print')rows.push(`<div class="o-row"><div class="lbl"><b>Класс согласовал — макет ушёл в печать</b><span>В печати ровно то, что видел класс${S.asisLeft?` · ${S.asisLeft} фото без обработки`:''}</span></div></div>`);
+  else if(S.stage==='approval')rows.push(`<div class="o-row"><div class="lbl"><b>На согласовании у класса</b><span>После согласования макет сразу уйдёт в печать</span></div><button class="go" data-go="approved">Класс согласовал</button></div>`);
+  else{
+    rows.push(`<div class="o-row"><div class="lbl"><b>${S.mode?(S.mode==='retouch'&&done<ch.length?'Черновик макета — ждёт обработанные фото':'Макет готов к согласованию'):'Все выбрали фото — можно собирать макет'}</b><span>${S.mode?'Класс увидит только финальные фото':waiting?`Не выбрали: ${waiting}`:'Выбрали все'}</span></div>${S.mode?`<button class="go ${S.mode==='retouch'&&done<ch.length?'':'main'}" data-go="send">Отправить на согласование</button>`:'<button class="go main" data-go="start">Собрать макет</button>'}</div>`);
+  }
+  if(S.mode==='retouch'&&S.stage!=='print')rows.push(`<div class="o-row"><div class="lbl"><b>Обработка портретов · ${done} из ${ch.length}</b><span>${done===ch.length?'Все обработаны — в макете уже новые':'Обработанные сами встают в макет'}</span></div><span class="bar"><i style="width:${ch.length?done/ch.length*100:0}%"></i></span><button class="go" data-go="retouch">Открыть</button></div>`);
+  $('#plate').innerHTML=rows.join('');
+  $('#tabs').innerHTML=[['photos','Фото',S.photos.length],['persons','Персоны',S.persons.length],['layout','Макет','']].map(([k,l,n])=>`<button data-tab="${k}" class="${S.tab===k?'on':''}">${l}${n!==''?`<small>${n}</small>`:''}</button>`).join('');
+}
+
+/* ---------- Photos ---------- */
+function tile(p,opts={}){
+  const chosen=isChosen(p),badge=chosen?`<span class="pick-badge ${p.retouched?'done':''}" title="${p.retouched?'Выбор ученика · обработано':'Выбор ученика'}">${icon(p.retouched?'brush':'star',12)}${p.retouched?'обработано':'выбор'}</span>`:'';
+  return `<label class="photo-tile ${opts.cls||''} ${p.recog?'recognising':''}" data-id="${p.id}">${p.recog?'<span class="spin tile-spin"></span>':''}<img src="${MEDIA}${p.img||p.id}/thumb" alt="" loading="lazy" draggable="false" onerror="this.removeAttribute('src')">${opts.noBadge?'':badge}${opts.extra||''}<p>${p.file}.jpg</p><span class="tile-person">${p.recog?'распознаём…':p.error?'лицо не найдено':esc(S.persons[p.person].name)}</span></label>`;
+}
+function progressRow(){
+  const ch=chosenPhotos(),done=ch.filter(p=>p.retouched).length,todo=ch.length-done;
+  return `<div class="chosen-tools"><div class="prog"><b>Обработано ${done} из ${ch.length}</b><span class="bar"><i style="width:${ch.length?done/ch.length*100:0}%"></i></span>${todo?`<button class="link" data-tool="todo">${S.todoOnly?'показать всех':`показать ${todo} необработанных`}</button>`:'<span class="all-done">все готовы</span>'}</div>
+    <button class="tbtn" data-tool="lr">${icon('copy')}Список файлов</button><button class="tbtn" data-tool="zip">${icon('download')}Скачать ${fmtSize(currentChosenList().length)}</button></div>
+    ${S.stage==='approval'?'<div class="replace-bar" style="margin:0 0 10px"><span>Макет у класса на согласовании. Замена фото отправит его на повторное согласование.</span></div>':''}${backZoneHtml()}${reportHtml()}`;
+}
+function renderPhotos(){
+  const ch=chosenPhotos(),errors=S.photos.filter(p=>p.error);
+  if(S.filter==='review'&&!errors.length)S.filter='all';
+  let list=S.photos;
+  if(S.filter==='chosen')list=[...(S.todoOnly?ch.filter(p=>!p.retouched):ch)].sort((a,b)=>a.retouched-b.retouched);
+  if(S.filter==='review')list=errors;
+  const chips=[['all','Все',S.photos.length],['chosen','Выбраны',ch.length],...(errors.length?[['review','Проверить',errors.length]]:[])];
+  const recog=S.recogLeft?`<span class="recog"><span class="spin"></span>Распознаём лица · осталось ${S.recogLeft}</span>`:'';
+  const review=S.filter==='review'?`<div class="chosen-tools"><div class="prog"><b>Не удалось распознать ${errors.length}</b></div><button class="tbtn" data-tool="retry">Повторить</button></div>`:'';
+  $('#view').innerHTML=`<div class="shoot-head"><button type="button" class="shoot-back" aria-label="Все съёмки">${icon('back',18)}</button><h2>Портреты <span class="muted">${S.photos.length}</span></h2><div class="add-menu"><button type="button" class="add-toggle">${icon('upload',15)}Добавить</button></div></div>
+    <div class="shoot-bar"><div class="filter-chips photo-filters">${chips.map(([k,l,n])=>`<button data-filter="${k}" class="${S.filter===k?'active':''}">${l}<small>${n}</small></button>`).join('')}</div><div class="grid-tools">${recog}<button class="text-button">${icon('selectAll',15)}Выбрать все</button></div></div>
+    ${S.filter==='chosen'?progressRow():''}${review}<div class="photo-grid">${list.map(p=>tile(p)).join('')}</div>${list.length?'':'<div class="empty-state" style="background:none;border:0;box-shadow:none;text-align:center"><h3>Здесь пусто</h3></div>'}`;
+  bindBackZone();
+}
+const backZoneHtml=()=>`<div class="back-zone" id="back-zone">${icon('upload',20)}<div><strong>Загрузить обработанные</strong>Перетащите <span class="lnk" id="back-pick">фото</span> сюда — заменят выбранные по имени файла <span class="hint-i" data-tip="DSC00298.jpg, DSC00298-Edit.jpg и DSC00298-2.jpg считаются одним кадром. Ученик, место в макете и выбор сохранятся.">i</span></div><input type="file" id="back-files" multiple accept="image/jpeg,image/png" style="display:none"></div>`;
+const fmtSize=n=>{const mb=n*MB;return mb>1024?(mb/1024).toFixed(1).replace('.',',')+' ГБ':Math.round(mb)+' МБ';};
+
+/* ---------- Lightroom / download popovers ---------- */
+function openPop(anchor,html){const pop=$('#pop');pop.innerHTML=html;pop.hidden=false;const r=anchor.getBoundingClientRect();pop.style.top=Math.min(innerHeight-pop.offsetHeight-10,r.bottom+8)+'px';pop.style.left=Math.max(10,Math.min(innerWidth-pop.offsetWidth-10,r.right-pop.offsetWidth))+'px';}
+function lrPop(anchor){
+  const list=currentChosenList(),names=list.map(p=>p.file).join(' ');
+  openPop(anchor,`<h4>Список файлов · ${list.length}</h4><p>Имена без расширения — подходят и к JPEG, и к RAW. <span class="hint-i" data-tip="Lightroom Classic: Библиотека → панель фильтров → Текст → Имя файла → «Содержит». Вставьте строку, выделите найденные и поставьте цветную метку или создайте коллекцию.">i</span></p><textarea readonly id="lr-names">${names}</textarea><div class="row"><span class="grow"></span><button class="tbtn dark" data-tool="lr-copy">${icon('copy')}Скопировать</button></div>`);
+}
+function zipPop(anchor){
+  const list=currentChosenList();
+  openPop(anchor,`<h4>Скачать ${list.length} фото · ${fmtSize(list.length)}</h4><p>Один архив, оригиналы как загружены.</p>
+    <label class="opt"><input type="radio" name="zn" checked> <span>Фамилия Имя — DSC00298.jpg<small>Сразу видно, кто это; номер кадра сохраняется для обратной загрузки</small></span></label>
+    <label class="opt"><input type="radio" name="zn"> <span>DSC00298.jpg<small>Как в камере</small></span></label>
+    <div class="row"><span class="grow"></span><button class="tbtn dark" data-tool="zip-go">${icon('download')}Скачать</button></div>`);
+}
+function currentChosenList(){const ch=chosenPhotos();return S.todoOnly?ch.filter(p=>!p.retouched):ch;}
+
+/* ---------- Retouched upload: match by base name ---------- */
+// DSC00298.jpg, DSC00298-Edit.jpg, DSC00298-2.jpg, DSC00298 copy.jpg → DSC00298
+const baseName=n=>n.replace(/\.[^.]+$/,'').replace(/(-Edit(-\d+)?|-\d+| copy( \d+)?| \(\d+\))+$/i,'').trim().toUpperCase();
+function applyRetouched(names){
+  const ch=chosenPhotos(),byBase=new Map(ch.map(p=>[p.file.toUpperCase(),p])),others=new Set(S.photos.filter(p=>!isChosen(p)).map(p=>p.file.toUpperCase()));
+  const replaced=[],notChosen=[],unknown=[];
+  names.forEach(n=>{const b=baseName(n),p=byBase.get(b);if(p){p.retouched=true;replaced.push(p);}else if(others.has(b))notChosen.push(n);else unknown.push(n);});
+  S.report={replaced,notChosen,unknown,left:ch.filter(p=>!p.retouched)};
+  const back=S.stage==='approval'&&replaced.length;if(back)S.stage='draft';
+  render();if(back)toast('Фото заменены — макет вернулся в черновик. Отправьте на согласование заново.');
+  replaced.forEach(p=>document.querySelector(`.photo-tile[data-id="${p.id}"]`)?.classList.add('flash'));
+}
+function reportHtml(){const r=S.report;if(!r)return '';
+  const files=a=>a.slice(0,14).join(' · ')+(a.length>14?` · ещё ${a.length-14}`:'');
+  return `<div class="report"><header><b>Загружено обработанных</b><button data-tool="report-close">Скрыть</button></header>
+    <div class="grp"><span class="n ok">Заменено ${r.replaced.length}</span><span class="files">${files(r.replaced.map(p=>p.file))}</span></div>
+    ${r.notChosen.length?`<div class="grp"><span class="n bad">Не выбраны ${r.notChosen.length}</span><span class="files">${files(r.notChosen)} — ученики выбрали другие кадры, файлы не взяты</span></div>`:''}
+    ${r.unknown.length?`<div class="grp"><span class="n bad">Без пары ${r.unknown.length}</span><span class="files">${files(r.unknown)}</span></div>`:''}
+    <div class="grp"><span class="n wait">Осталось ${r.left.length}</span><span class="files">${r.left.length?files(r.left.map(p=>p.file)):'все выбранные обработаны'}</span></div></div>`;}
+function bindBackZone(){const z=$('#back-zone');if(!z)return;
+  $('#back-pick').onclick=()=>$('#back-files').click();
+  $('#back-files').onchange=e=>{applyRetouched([...e.target.files].map(f=>f.name));e.target.value='';};
+  z.ondragover=e=>{e.preventDefault();z.classList.add('drag');};z.ondragleave=()=>z.classList.remove('drag');
+  z.ondrop=e=>{e.preventDefault();z.classList.remove('drag');applyRetouched([...e.dataTransfer.files].map(f=>f.name));};}
+
+/* ---------- Persons ---------- */
+function renderPersons(){
+  const n=S.persons.filter(p=>!p.chosen).length;
+  const list=S.persons.map((p,i)=>({...p,i})).filter(p=>S.pfilter==='all'||(S.pfilter==='none'?!p.chosen:!!p.chosen)).filter(p=>!S.todoOnly||S.pfilter==='none'||(p.chosen&&!byId(p.chosen).retouched));
+  const chips=[['all','Все',S.persons.length],['chosen','Выбрали',S.persons.length-n],['none','Не выбрали',n]];
+  $('#view').innerHTML=`<div class="shoot-bar" style="position:static"><div class="filter-chips p-filter" style="margin:0">${chips.map(([k,l,c])=>`<button data-pfilter="${k}" class="${S.pfilter===k?'active':''}">${l}<small>${c}</small></button>`).join('')}</div></div>
+    ${progressRow()}
+    <div class="persons">${list.map(p=>{const cov=p.chosen?byId(p.chosen):S.photos[p.i*3];const r=p.chosen&&byId(p.chosen).retouched;
+      return `<button class="pcard" data-person="${p.i}"><div class="cov ${p.chosen?'':'none'}"><img src="${MEDIA}${cov.id}/thumb" alt="" loading="lazy" onerror="this.removeAttribute('src')">${p.chosen?`<span class="pick-badge ${r?'done':''}">${icon(r?'brush':'star',12)}${r?'обработано':'выбор'}</span>`:'<span>Ещё не выбрал</span>'}</div><div class="meta"><b>${esc(p.name)}</b><small class="${p.chosen?'ok':''}">${p.chosen?(p.quote?`«${esc(p.quote)}»`:`Выбрал ${byId(p.chosen).file}`):'3 фото'}</small></div></button>`;}).join('')}</div>`;
+  bindBackZone();
+}
+let PW={i:null,editing:false,replacing:false,candidate:null};
+function openPerson(i){PW={i,editing:false,replacing:false,candidate:null};drawPerson();}
+function drawPerson(){
+  const i=PW.i,p=S.persons[i],own=S.photos.filter(x=>x.person===i).sort((a,b)=>(b.id===p.chosen)-(a.id===p.chosen)),ch=p.chosen&&byId(p.chosen);
+  const [last,first]=p.name.split(' ');
+  const head=PW.editing?`<form class="name-edit" id="name-form"><input name="last" value="${esc(last)}" placeholder="Фамилия" aria-label="Фамилия"><input name="first" value="${esc(first||'')}" placeholder="Имя" aria-label="Имя"><button class="icon-btn ok" title="Сохранить · Enter" aria-label="Сохранить">${icon('check',15)}</button><button type="button" class="icon-btn" data-pw="cancel-name" title="Отмена · Esc" aria-label="Отмена">${icon('x',15)}</button></form>`
+    :`<h3>${esc(p.name)}</h3><button class="icon-btn" data-pw="edit-name" title="Изменить имя" aria-label="Изменить имя">${icon('pen',15)}</button>`;
+  const choice=ch?`<div class="pw-choice"><img src="${MEDIA}${ch.id}/thumb" alt=""><span class="pick-badge ${ch.retouched?'done':''}">${icon(ch.retouched?'brush':'star',12)}${ch.retouched?'обработано':'выбор'}</span></div><div class="pw-file">${ch.file}.jpg${p.by==='photographer'?'<span class="by-photog">выбрал фотограф</span>':''}</div>`
+    :`<div class="pw-choice none">Ещё не выбрал</div><div class="pw-file"></div>`;
+  const quote=p.quote?`<div class="pw-quote">${icon('quote',16)}${esc(p.quote)}</div>`:'<div class="pw-quote empty">Цитаты нет</div>';
+  const bar=PW.replacing?`<div class="replace-bar"><span>${PW.candidate?'Этот кадр пойдёт в альбом вместо выбора ученика.':'Нажмите на кадр, который пойдёт в альбом.'}</span><button class="tbtn" data-pw="cancel-replace">Отмена</button><button class="tbtn dark" data-pw="save-replace" ${PW.candidate?'':'disabled'}>Сохранить</button></div>`:'';
+  dialog(`<div class="pw-head">${head}<button class="icon-btn close" data-dlg="close" aria-label="Закрыть">${icon('x',17)}</button></div>
+    <div class="pw"><div>${choice}${quote}</div>
+    <div class="pw-right"><header><b>Все кадры</b><span class="muted">${own.length}</span>${PW.replacing?'':`<button class="link" data-pw="replace">${p.chosen?'Заменить выбор':'Выбрать за ученика'}</button>`}</header>${bar}
+    <div class="pw-grid ${PW.replacing?'replacing':''}">${own.map(x=>tile(x,{cls:(x.id===p.chosen?'is-chosen ':'')+(x.id===PW.candidate?'candidate':'')})).join('')}</div></div></div>`,true);
+  const f=$('#name-form');if(f){const inp=f.elements.last;inp.focus();inp.select();f.onsubmit=e=>{e.preventDefault();const n=`${f.elements.last.value.trim()} ${f.elements.first.value.trim()}`.trim();if(n)p.name=n;PW.editing=false;drawPerson();render();toast('Имя сохранено — в макете обновится само');};
+    f.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();PW.editing=false;drawPerson();}};}
+  $('#dlg').onclick=e=>{const t=e.target.closest('[data-pw]');
+    if(!t){if(PW.replacing){const tl=e.target.closest('.pw-grid .photo-tile');if(tl&&tl.dataset.id!==p.chosen){e.preventDefault();PW.candidate=tl.dataset.id;drawPerson();}}return;}
+    e.preventDefault();const a=t.dataset.pw;
+    if(a==='edit-name'){PW.editing=true;drawPerson();}
+    if(a==='cancel-name'){PW.editing=false;drawPerson();}
+    if(a==='replace'){PW.replacing=true;PW.candidate=null;drawPerson();}
+    if(a==='cancel-replace'){PW.replacing=false;PW.candidate=null;drawPerson();}
+    if(a==='save-replace'&&PW.candidate){p.chosen=PW.candidate;p.by='photographer';PW.replacing=false;PW.candidate=null;drawPerson();render();toast(`${p.name}: выбор заменён`);}};
+}
+/* ---------- Dialogs: start layout / print ---------- */
+function dialog(html,wide=false){$('#dlg').onclick=null;$('#dlg-box').className='box'+(wide?' wide':'');$('#dlg-box').innerHTML=html;$('#dlg').hidden=false;}
+function startDialog(){let pick=S.mode||'retouch';
+  const draw=()=>dialog(`<h3>Собрать макет</h3><p>Какие портреты ставить?</p><div class="choice">
+    <button data-mode="asis" class="${pick==='asis'?'on':''}">Как есть<small>Загружены уже готовые — можно сразу на согласование</small></button>
+    <button data-mode="retouch" class="${pick==='retouch'?'on':''}">Буду обрабатывать<small>Черновик соберётся сейчас; обработанные ${chosenPhotos().length} фото встанут сами. Класс увидит только финал</small></button></div>
+    <div class="acts"><button class="tbtn" data-dlg="close">Отмена</button><button class="tbtn dark" data-dlg="build">Собрать макет</button></div>`);
+  draw();$('#dlg').onclick=e=>{const m=e.target.closest('[data-mode]');if(m){pick=m.dataset.mode;draw();}
+    const a=e.target.closest('[data-dlg]');if(!a)return;if(a.dataset.dlg==='build'){S.mode=pick;$('#dlg').hidden=true;if(pick==='retouch'){S.tab='photos';S.filter='chosen';S.todoOnly=true;}render();toast(pick==='retouch'?'Макет собран на исходных. Выбранные — в фильтре «Выбраны».':'Макет собран.');}else $('#dlg').hidden=true;};}
+function sendDialog(){const ch=chosenPhotos(),left=ch.filter(p=>!p.retouched);
+  if(S.mode!=='retouch'||!left.length){S.stage='approval';S.asisLeft=0;render();toast('Макет отправлен классу на согласование.');return;}
+  dialog(`<h3>Отправить на согласование</h3><p>Класс согласует то, что уйдёт в печать. Не обработано ${left.length} из ${ch.length}: ${left.slice(0,8).map(p=>`${esc(S.persons[p.person].name)}`).join(', ')}${left.length>8?'…':''}</p>
+    <div class="acts"><button class="tbtn" data-dlg="wait">Дождаться обработки</button><button class="tbtn dark" data-dlg="asis">Отправить, эти без обработки</button></div>`);
+  $('#dlg').onclick=e=>{const a=e.target.closest('[data-dlg]');if(!a)return;$('#dlg').hidden=true;if(a.dataset.dlg==='asis'){S.stage='approval';S.asisLeft=left.length;render();toast(`Отправлено на согласование: ${left.length} фото без обработки.`);}else{S.tab='photos';S.filter='chosen';S.todoOnly=true;render();}};}
+
+/* ---------- Glue ---------- */
+function renderLayout(){$('#view').innerHTML=`<div class="empty-state" style="background:none;border:0;box-shadow:none;text-align:center"><h3>${S.mode?'Макет собран':'Макета ещё нет'}</h3><p>${S.mode==='retouch'?`В макете ${chosenPhotos().filter(p=>p.retouched).length} обработанных, остальные пока исходные.`:'На стенде этот экран не нужен.'}</p></div>`;}
+function render(){renderPlate();S.tab==='persons'?renderPersons():S.tab==='layout'?renderLayout():renderPhotos();}
+/* Faces are recognised one by one; the last new frame fails so «Проверить» appears. */
+function tickRecog(retry){const next=S.photos.find(p=>p.recog);if(!next){S.recogLeft=0;render();return;}
+  setTimeout(()=>{next.recog=false;if(!retry&&!S.photos.some(p=>p.recog&&p!==next))next.error=true;S.recogLeft=S.photos.filter(p=>p.recog).length;render();if(S.recogLeft)tickRecog(retry);else if(S.photos.some(p=>p.error))toast('Одно фото не распознано — оно в «Проверить».');},800);}
+let toastTimer;function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3800);}
+
+document.addEventListener('click',async e=>{
+  const t=e.target.closest('[data-tab],[data-filter],[data-tool],[data-go],[data-sim],[data-pfilter],[data-person],[data-dlg="close"]');
+  if(!t){if(!e.target.closest('#pop'))$('#pop').hidden=true;if(e.target.id==='dlg')$('#dlg').hidden=true;return;}
+  if(t.closest('.photo-tile'))return;
+  e.preventDefault();const d=t.dataset;
+  if(d.tab){S.tab=d.tab;render();}
+  if(d.filter){S.filter=d.filter;S.todoOnly=false;render();}
+  if(d.tool==='todo'){S.todoOnly=!S.todoOnly;render();}
+  if(d.tool==='retry'){S.photos.forEach(p=>{if(p.error){p.error=false;p.recog=true;}});S.recogLeft=S.photos.filter(p=>p.recog).length;S.filter='all';render();tickRecog(true);}
+  if(d.pfilter){S.pfilter=d.pfilter;render();}
+  if(d.person)openPerson(+d.person);
+  if(d.dlg==='close')$('#dlg').hidden=true;
+  if(d.tool==='lr')lrPop(t);
+  if(d.tool==='zip')zipPop(t);
+  if(d.tool==='lr-copy'){const v=$('#lr-names').value;try{await navigator.clipboard.writeText(v);}catch{$('#lr-names').select();document.execCommand('copy');}$('#pop').hidden=true;toast(`Скопировано ${v.split(' ').length} имён. В Lightroom: фильтр «Текст → Имя файла → Содержит».`);}
+  if(d.tool==='zip-go'){$('#pop').hidden=true;toast('На стенде архив не скачивается — в сервисе начнётся загрузка.');}
+  if(d.tool==='report-close'){S.report=null;render();}
+  if(d.go==='start')startDialog();
+  if(d.go==='send')sendDialog();
+  if(d.go==='approved'){S.stage='print';render();toast('Класс согласовал — макет ушёл в печать.');}
+  if(d.go==='retouch'){S.tab='photos';S.filter='chosen';S.todoOnly=true;render();}
+  if(d.sim==='reset'){S=fresh();render();}
+  if(d.sim==='upload'){const base=S.photos.length;for(let k=0;k<6;k++)S.photos.push({id:'new'+(base+k),img:IDS[(base+k*7)%IDS.length],file:`DSC${String(400+base+k).padStart(5,'0')}`,person:(k*3)%NAMES.length,retouched:false,recog:true});S.recogLeft=6;S.tab='photos';S.filter='all';render();window.scrollTo(0,document.body.scrollHeight);tickRecog(false);}
+  if(d.sim==='start')startDialog();
+  if(d.sim==='send'){if(!S.mode){toast('Сначала «Собрать макет».');return;}sendDialog();}
+  if(d.sim==='approved'){if(S.stage!=='approval'){toast('Сначала отправьте на согласование.');return;}S.stage='print';render();toast('Класс согласовал — макет ушёл в печать.');}
+  if(d.sim==='batch'||d.sim==='rest'){
+    if(S.mode!=='retouch'){S.mode='retouch';}
+    if(S.tab!=='persons'){S.tab='photos';S.filter='chosen';}
+    const todo=chosenPhotos().filter(p=>!p.retouched),take=d.sim==='batch'?todo.slice(0,8):todo.slice(0,Math.max(0,todo.length-2));
+    const suffix=['-Edit','','-2','-Edit',' copy','-Edit-2','',''];
+    const names=take.map((p,i)=>p.file+suffix[i%suffix.length]+'.jpg');
+    if(d.sim==='batch')names.push(S.photos.find(p=>!isChosen(p)).file+'-Edit.jpg','IMG_4410.jpg');
+    applyRetouched(names);
+  }
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('#pop').hidden=true;$('#dlg').hidden=true;}});
+S=fresh();render();
+</script>
+</body>
+</html>

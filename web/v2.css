@@ -338,4 +338,48 @@
 #person-content .name-form input{flex:1 1 180px;width:0;max-width:360px;min-height:36px;margin:0;padding:8px 12px;font-size:16px}
 #person-content .name-form button{min-height:36px;padding:8px 12px;font-size:14px;border-radius:9px}
 #person-content .name-form[hidden],#person-content .person-edit[hidden],#person-title[hidden]{display:none}
-#person-content>.photo-grid{margin:0}
+#person-details>.photo-grid{margin:0}
+
+.person-choice-status{display:block;margin-top:5px;color:#477342;font-size:12px}
+.person-quote{margin-bottom:16px;padding:12px 16px;background:#f5f5f6;border-radius:12px}
+.person-quote blockquote{margin:5px 0 0;font-size:15px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.person-quote p{margin:5px 0 0}
+#person-details .person-portrait-mark{display:block;margin:0 8px 8px;color:#477342;font-size:12px;font-weight:600}
+
+/* Person window: the chosen portrait and quote on the left, every frame on the right. */
+#person-content .person-heading{align-items:center}
+#person-content .person-name{gap:6px}
+#person-content .person-edit{width:30px;height:30px;color:#a3a49e}
+#person-content .person-edit:hover{background:#f1f1ec;color:#242522}
+#person-content .name-form{flex-wrap:nowrap;gap:6px;width:auto}
+#person-content .name-form input{flex:0 1 170px;width:170px;min-height:34px;padding:0 10px;border:1px solid #d9dad4;border-radius:8px;font-size:15px;font-weight:600}
+#person-content .name-form input:focus{outline:none;border-color:#242522}
+#person-content .name-form button{display:grid;place-items:center;width:32px;min-height:32px;height:32px;padding:0;border-radius:8px;background:none;color:#81827d}
+#person-content .name-form .pw-ok{background:#242522;color:#fff}
+.pw{display:grid;grid-template-columns:260px minmax(0,1fr);gap:24px;align-items:start}
+.pw-side{position:sticky;top:0}
+.pw-choice{position:relative;margin:0;aspect-ratio:4/5;border-radius:12px;overflow:hidden;background:#dcdad6}
+.pw-choice img{width:100%;height:100%;object-fit:cover;display:block}
+.pw-choice.none{display:grid;place-items:center;color:#8a8b85;font-size:13px;background:repeating-linear-gradient(135deg,#efeee9 0 10px,#f5f4f0 10px 20px)}
+.pw-badge,.pw-tile-badge,.pw-card-badge{position:absolute;z-index:2;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px 0 6px;border-radius:11px;background:#fffffff2;color:#242522;font-size:11px;font-weight:700;box-shadow:0 1px 4px #0003}
+.pw-badge svg,.pw-tile-badge svg,.pw-card-badge svg{color:#d7b400}
+.pw-badge{top:10px;left:10px}
+.pw-tile-badge{top:10px;right:10px}
+.pw-card-badge{top:10px;right:10px}
+.pw-file{margin:8px 0 14px;color:#9a9c92;font-size:12px}
+.pw-quote{position:relative;margin:0;padding:12px 14px 12px 38px;background:#fafaf8;border:1px solid #ecece7;border-radius:12px;font-size:14px;line-height:1.5;color:#3c3d37;white-space:pre-wrap;overflow-wrap:anywhere}
+.pw-quote svg{position:absolute;left:12px;top:13px;color:#c9b25a}
+.pw-quote.empty{padding-left:14px;color:#a3a49e;font-size:13px}
+.pw-head{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.pw-head b{font-size:13px}
+.pw-head .muted{font-size:12px}
+.v2 .pw-link{margin-left:auto;padding:0;background:none;color:#242522;font-size:12px;font-weight:600;text-decoration:underline;text-decoration-color:#d7b400;text-decoration-thickness:2px;text-underline-offset:3px}
+.pw-replace{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:8px 8px 8px 12px;border-radius:10px;background:#fdf6e3;font-size:12px;color:#6d5c20}
+.pw-replace span{flex:1}
+.v2 .pw-replace button{padding:6px 12px;font-size:12px}
+.pw-picking .photo-tile{cursor:pointer}
+.pw-picking .photo-tile input[data-photo]{display:none}
+.pw-picking .photo-tile:hover{outline:2px solid #e3d48a;outline-offset:-1px}
+.v2 .pw-picking .photo-tile.pw-candidate{outline:3px solid #242522;outline-offset:-1px}
+.person-card .pw-card-quote{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+@media(max-width:760px){.pw{grid-template-columns:1fr}.pw-side{position:static}.pw-choice{max-width:260px}}

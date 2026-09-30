@@ -22,10 +22,10 @@ const OrderActivities=(()=>{
     else if(u)list.push({key:'upload',tone:'alert',icon:'upload',label:'Загрузка прервана',detail:`не загружено ${u.total-u.done}`,tag:waits,actions:[['upload-resume','Догрузить'],['upload-dismiss','Скрыть','quiet']]});
     else{const f=fresh(o,'upload');if(f)list.push({key:'upload-done',tone:'done',icon:'check',label:'Загружено',detail:f.detail});}
     const w=work(o);
-    if(w.pending)list.push({key:'processing',icon:'photo',motion:'spin',label:'Обработка',detail:`${w.total-w.pending} из ${w.total}`,bar:(w.total-w.pending)/Math.max(1,w.total),eta:eta(o.processing?.eta_seconds),tag:waits});
+    if(w.pending)list.push({key:'processing',icon:'photo',motion:'spin',label:'Распознавание лиц',detail:`${w.total-w.pending} из ${w.total}`,bar:(w.total-w.pending)/Math.max(1,w.total),eta:eta(o.processing?.eta_seconds),tag:waits});
     else{const f=fresh(o,'processing');if(f)list.push({key:'processing-done',tone:'done',icon:'check',label:'Фото обработаны',detail:f.detail});}
     const failed=errors(o);
-    if(failed)list.push({key:'errors',tone:'alert',icon:'alert',label:'Не обработались',detail:count(failed,'фото','фото','фото'),actions:[['retry-photos','Повторить']]});
+    if(failed)list.push({key:'errors',tone:'alert',icon:'alert',label:'Не распознались',detail:count(failed,'фото','фото','фото'),actions:[['retry-photos','Повторить']]});
     if(s.review&&!['new','photos'].includes(o.stage))list.push({key:'review',tone:'task',icon:'eye',label:'Фото на проверку',detail:count(s.review,'снимок','снимка','снимков'),link:[`#order/${o.id}/review`,'Проверить']});
     return list;}
 

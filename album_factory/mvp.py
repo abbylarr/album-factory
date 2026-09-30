@@ -650,11 +650,15 @@ def install(app, s):
             }
 
     @app.post("/api/orders/{order_id}/layout/publish")
-    def publish_layout(order_id: str):
+    def publish_layout(order_id: str, allow_unretouched: bool = False):
         with s.db() as con:
             con.execute("BEGIN IMMEDIATE")
             from . import production
             production.require_editable(con, s.require_order(con, order_id))
+            from .retouch import progress as retouch_progress
+            retouch = retouch_progress(con, order_id)
+            if retouch['mode'] == 'retouch' and retouch['remaining'] and not allow_unretouched:
+                raise HTTPException(409, f"Не обработано {len(retouch['remaining'])} из {retouch['total']} портретов. Дождитесь обработки или явно отправьте без неё")
             layout = con.execute("SELECT document FROM order_layouts WHERE order_id=?", (order_id,)).fetchone()
             if layout is None:
                 raise HTTPException(409, "Сначала создайте макет")

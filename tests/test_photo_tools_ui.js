@@ -24,7 +24,7 @@ assert(board.indexOf('Анна')<board.indexOf('Персона 2'),'groups follo
 assert(board.includes('/media/r/thumb')&&board.includes('Эталон'),'confirmed photo is the reference');
 assert(board.includes('Оставить отдельно · 1'),'a person without other photos can be kept as new');
 assert(board.includes('Не распознано <span>1</span>')&&board.includes('Лицо не найдено'));
-assert(board.includes('Ошибки обработки <span>1</span>')&&board.includes('Сломан файл')&&board.includes('data-action="retry"'));
+assert(board.includes('Не удалось распознать <span>1</span>')&&board.includes('Сломан файл')&&board.includes('data-action="retry"'));
 assert(!board.includes('data-person='),'group buttons must not trigger the person dialog handler');
 assert(T.reviewBoard([]).includes('Всё проверено')&&T.reviewBoard([]).includes('data-v2="send-forms"'));
 console.log('Review grouped by person, unrecognised and errors: OK');

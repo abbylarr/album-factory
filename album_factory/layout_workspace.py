@@ -325,6 +325,7 @@ def school_short(con, order_id):
 
 def snapshot_for(con, order, data, master=False):
     photos = {}
+    versions = {r['photo_id']: r['version'] for r in con.execute('SELECT r.* FROM photo_retouch r JOIN photos p ON p.id=r.photo_id WHERE p.order_id=?', (order['id'],))}
     for photo in data['photos']:
         if photo['status'] != 'ready':
             continue
@@ -334,6 +335,8 @@ def snapshot_for(con, order, data, master=False):
         with Image.open(path) as image:
             width, height = image.size
         photos[photo['id']] = {'path': str(path), 'width': width, 'height': height}
+        if photo['id'] in versions:
+            photos[photo['id']]['version'] = versions[photo['id']]
     selected = {r['person_id']: dict(r) for r in con.execute('''SELECT s.* FROM client_selections s
         JOIN persons p ON p.id=s.person_id WHERE p.order_id=?''', (order['id'],))}
     students, selections = [], []
@@ -439,7 +442,8 @@ def install(app, s):
                             'people': layout.get('people', {}).get(id, []),
                             **({k: general[id].get(k) for k in ('bucket', 'scale', 'style', 'quality', 'alt')} if id in general else {}),
                             'width': layout['snapshot']['photos'][id]['width'],
-                            'height': layout['snapshot']['photos'][id]['height']}
+                            'height': layout['snapshot']['photos'][id]['height'],
+                            'version': layout['snapshot']['photos'][id].get('version', '')}
                            for id, p in layout['photo_info'].items() if id in layout['snapshot']['photos']] + [
                     {'id': key, 'filename': 'Изображение мастер-макета', 'shoot_type': 'general', 'person_id': None,
                      'width': p['width'], 'height': p['height'], 'url': p['url']}

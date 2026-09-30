@@ -335,12 +335,12 @@
 @media(hover:none){.v2 .order-tile-menu .design-menu-toggle{opacity:1}}
 /* Light hover motion: portraits fan out, paper and layout lift a little. */
 .v2 .order-preview-fan img,.v2 .order-preview-paper,.v2 .order-preview-book .layout-canvas{transition:transform .35s cubic-bezier(.2,.7,.3,1),box-shadow .35s}
-.v2 .order-tile:hover .order-preview-fan.count-3 img:first-child{transform:rotate(-8deg) translate(-8px,4px)}
-.v2 .order-tile:hover .order-preview-fan.count-3 img:nth-child(2){transform:translateY(-3px)}
-.v2 .order-tile:hover .order-preview-fan.count-3 img:last-child{transform:rotate(8deg) translate(8px,4px)}
-.v2 .order-tile:hover .order-preview-fan.count-2 img:first-child{transform:rotate(-6deg) translateX(-6px)}
-.v2 .order-tile:hover .order-preview-fan.count-2 img:last-child{transform:rotate(6deg) translateX(6px)}
-.v2 .order-tile:hover .order-preview-fan.count-1 img{transform:translateY(-3px) rotate(-2deg)}
+.v2 :is(.order-tile,.folder):hover .order-preview-fan.count-3 img:first-child{transform:rotate(-8deg) translate(-8px,4px)}
+.v2 :is(.order-tile,.folder):hover .order-preview-fan.count-3 img:nth-child(2){transform:translateY(-3px)}
+.v2 :is(.order-tile,.folder):hover .order-preview-fan.count-3 img:last-child{transform:rotate(8deg) translate(8px,4px)}
+.v2 :is(.order-tile,.folder):hover .order-preview-fan.count-2 img:first-child{transform:rotate(-6deg) translateX(-6px)}
+.v2 :is(.order-tile,.folder):hover .order-preview-fan.count-2 img:last-child{transform:rotate(6deg) translateX(6px)}
+.v2 :is(.order-tile,.folder):hover .order-preview-fan.count-1 img{transform:translateY(-3px) rotate(-2deg)}
 .v2 .order-tile:hover .order-preview-paper{transform:rotate(-1deg) translateY(-3px)}
 .v2 .order-tile:hover .order-preview-book .layout-canvas{transform:rotate(0deg) translateY(-3px) scale(1.02);box-shadow:5px 10px 22px #28212f24}
 @media(prefers-reduced-motion:reduce){.v2 .order-preview-fan img,.v2 .order-preview-paper,.v2 .order-preview-book .layout-canvas{transition:none}}

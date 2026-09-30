@@ -62,6 +62,7 @@ const LayoutStart=(()=>{
       <fieldset class="package-field"><legend>Дизайн и комплектация</legend>${packagePicker(designs,state.order.master_template_id,false)}</fieldset>${rebuild?'<p class="muted small">Другая комплектация соберёт макет заново, без прежних правок.</p>':''}
       <section class="ls-block"><h3>Учителя</h3><p class="muted small">Проверьте состав, предметы и классного руководителя перед созданием макета.</p><div id="ls-teachers"></div></section>
       <section class="ls-block"><h3>Общие съёмки</h3><div id="ls-shoots"></div></section>
+      <section class="ls-block"><h3>Портреты в макете</h3><div class="ls-retouch-modes"><label><input type="radio" name="retouch_mode" value="asis" ${state.order.retouch?.mode!=='retouch'?'checked':''}> Как есть<small>Фото уже готовы — можно сразу на согласование</small></label><label><input type="radio" name="retouch_mode" value="retouch" ${state.order.retouch?.mode==='retouch'?'checked':''}> Буду обрабатывать<small>Черновик соберётся сейчас. Обработанные фото займут те же места в макете</small></label></div></section>
       ${counters()}<p id="layout-master-error" class="error" role="alert"></p>
       <div class="ls-submit"><small id="ls-wait" class="muted"></small><button type="submit" class="primary">Создать макет</button></div></form>`;
     drawTeachers();drawShoots();syncButton();$('#layout-master-form [type=submit]').disabled=true;
@@ -76,7 +77,7 @@ const LayoutStart=(()=>{
     form.addEventListener('input',e=>{if(e.target.matches('[data-ls-subject]'))teachersDirty=true;});
     form.onsubmit=async e=>{e.preventDefault();const b=form.querySelector('[type=submit]'),error=$('#layout-master-error'),master=form.master_template_id.value;error.textContent='';
       if(!master){error.textContent='Выберите комплектацию.';return;}b.disabled=true;
-      try{if(teachersDirty&&form.querySelector('.ls-teacher-list')){await api(`/orders/${encodeURIComponent(id)}/teachers`,json('PUT',readTeachers()));teachersDirty=false;}
+      try{await api(`/orders/${id}/retouch`,json('PUT',{mode:form.retouch_mode.value}));if(teachersDirty&&form.querySelector('.ls-teacher-list')){await api(`/orders/${encodeURIComponent(id)}/teachers`,json('PUT',readTeachers()));teachersDirty=false;}
         const w=waiting();
         if(w.any){await api(`/orders/${id}/layout/queue`,json('POST',{master_template_id:master,uploading:uploadingHere()}));dialog.close();toast('Макет в очереди — соберём, когда фото загрузятся и обработаются');await refreshOrder();startOrderPolling();return;}
         await api('/orders/'+id+'/layout',json('POST',{master_template_id:master}));dialog.close();if(location.hash===`#order/${id}/layout`)await route();else location.hash=`order/${id}/layout`;toast('Макет создан');}

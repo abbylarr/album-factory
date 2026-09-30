@@ -35,6 +35,32 @@ class ClientPortalTests(unittest.TestCase):
         self.client.post(f'/api/orders/{self.order}/move',json={'photo_ids':[a]})
         self.assertEqual(self.client.get(base).json()['completed'], 0)
 
+    def test_photographer_person_exposes_valid_portrait_and_quote(self):
+        first = self.photo()
+        chosen = self.photo()
+        def person():
+            return self.client.get(f'/api/orders/{self.order}').json()['persons'][0]
+        self.assertIsNone(person()['selected_photo_id'])
+        self.assertEqual(person()['quote'], '')
+        base = self.link()
+        response = self.client.put(base+'/persons/person', json=dict(
+            photo_id=chosen, first_name='Анна', last_name='Иванова', quote='Моя цитата'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(person()['selected_photo_id'], chosen)
+        self.assertEqual(person()['quote'], 'Моя цитата')
+        self.assertNotEqual(person()['selected_photo_id'], first)
+        # An unavailable or reassigned portrait must not be shown as the student's choice.
+        with test_server_v2.s.db() as con:
+            con.execute("UPDATE photos SET status='error' WHERE id=?", (chosen,))
+        self.assertIsNone(person()['selected_photo_id'])
+        self.assertEqual(person()['quote'], '')
+        with test_server_v2.s.db() as con:
+            con.execute("UPDATE photos SET status='ready' WHERE id=?", (chosen,))
+        self.client.post(f'/api/orders/{self.order}/move', json={'photo_ids':[chosen]})
+        original = next(p for p in self.client.get(f'/api/orders/{self.order}').json()['persons'] if p['id']=='person')
+        self.assertIsNone(original['selected_photo_id'])
+        self.assertEqual(original['quote'], '')
+
     def test_scope_and_validation(self):
         photo = self.photo()
         base = self.link()

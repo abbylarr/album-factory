@@ -27,11 +27,18 @@ for(const filter of ['all','pending','error','review']){
   state.photoFilter=filter;
   const html=vm.runInContext("shootBody({id:'shoot',kind:'portrait'})",c);
   assert(!html.includes('selection-bar'),'actions live in the floating bar');
-  assert(html.includes('data-photo-tools="select-all"')&&html.includes('id="choose-folder"'));
+  assert(html.includes('id="choose-folder"'));
+  assert.equal(state.photoFilter,'all','filters that do not exist fall back to all photos');
 }
 state.order.photos.forEach(p=>{p.shoot_id='shoot';});
 const counted=vm.runInContext("shootBody({id:'shoot',kind:'portrait'})",c);
-assert(counted.includes('Проверить<small>2</small>'),'review filter shows how many photos wait');
+assert(counted.includes('data-photo-tools="select-all"'),'select all sits in the shoot row');
+assert(counted.includes('data-photo-filter="review" aria-pressed="false">Проверить <small>2</small>'),'review chip shows how many photos wait');
+assert(counted.includes('data-photo-filter="chosen"'),'chosen portraits have a separate chip');
+assert(!counted.includes('В обработке')&&!counted.includes('info-tip'),'no pending chip, no help tip');
+state.photoFilter='review';
+assert(vm.runInContext("shootBody({id:'shoot',kind:'portrait'})",c).includes('data-photo-filter="review" aria-pressed="true"'),'an active filter is indicated on its chip');
+state.photoFilter='all';
 assert(counted.includes('id="add-toggle"')&&!counted.includes('class="dropzone"'),'a shoot with photos gets the compact add button');
 assert(vm.runInContext("shootBody({id:'empty',kind:'portrait'})",c).includes('class="dropzone"'));
 delete c.needsReview;
