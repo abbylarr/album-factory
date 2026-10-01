@@ -118,17 +118,28 @@ function paintColor(hex, opacity) {
   } else {
     const l = selectedLayer();
     if (!l) return;
-    if (key === 'shadow.color') {
-      l.shadow = Object.assign(
-        { color: '#000000', offsetX: 0, offsetY: 1.5, blur: 2, opacity: 35 },
-        l.shadow,
-      );
-      l.shadow.color = hex;
-      if (opacity != null) l.shadow.opacity = opacity;
-    } else if (key === 'stroke') {
-      l.stroke = hex;
-      if (opacity != null) l.strokeOpacity = opacity;
-    } else if (key === 'fill' || key === 'color' || key === 'detailColor') {
+    if (l.type === 'grid' && captionLookKey(key)) {
+      setCaptionLook(key, hex);
+      if (opacity != null && key.endsWith('Shadow.color')) setCaptionLook(key.replace('.color', '.opacity'), opacity);
+      scheduleEffectRender();
+      return;
+    }
+    /* A portrait's outline and shadow are the same in every vignette of the block. */
+    const looks = l.type === 'grid' ? blockGrids() : [l];
+    if (key === 'shadow.color')
+      for (const item of looks) {
+        item.shadow = Object.assign(
+          { color: '#000000', offsetX: 0, offsetY: 1.5, blur: 2, opacity: 35 },
+          item.shadow,
+        );
+        item.shadow.color = hex;
+        if (opacity != null) item.shadow.opacity = opacity;
+      }
+    else if (key === 'stroke')
+      for (const item of looks) {
+        item.stroke = hex;
+        if (opacity != null) item.strokeOpacity = opacity;
+      } else if (key === 'fill' || key === 'color' || key === 'detailColor') {
       if (key === 'color' && l.type === 'text') setTextFormat(l, 'color', hex);
       else if (l.type === 'grid')
         section()
@@ -294,6 +305,8 @@ function colorOpacity(key) {
   const l = selectedLayer();
   if (key === 'stroke') return l?.strokeOpacity ?? 100;
   if (key === 'shadow.color') return l?.shadow?.opacity ?? 35;
+  if (l?.type === 'grid' && captionLookKey(key))
+    return key.endsWith('Shadow.color') ? l[captionLookKey(key).field]?.opacity ?? 50 : 100;
   return l?.opacity ?? 100;
 }
 function fontChoices() {
@@ -332,14 +345,26 @@ function markIcon(name) {
 function styleButton(on, attrs, label, glyph) {
   return `<button type="button" class="icon-toggle" ${attrs} aria-pressed="${on ? 'true' : 'false'}" aria-label="${label}" title="${label}">${glyph}</button>`;
 }
-function textStyleBar(l, prefix = '') {
+/* One bar for how letters look, as in Figma: bold, italic, underline, strike and, for page texts, the letter case.
+   A case button pressed again goes back to the text as typed. */
+function textStyleBar(l, prefix = '', textCase = null) {
   const flags = [
     ['bold', 'Жирный', '<b>B</b>'],
     ['italic', 'Курсив', '<i>I</i>'],
     ['underline', 'Подчёркнутый', '<span class="u">U</span>'],
     ['strike', 'Зачёркнутый', '<span class="s">S</span>'],
-  ];
-  return `<div class="segments" role="toolbar" aria-label="Начертание">${flags.map(([key, name, icon]) => `<button type="button" data-choice="${prefix + key}" data-value="toggle" class="${l[key] ? 'active' : ''}" title="${name}" aria-label="${name}" aria-pressed="${l[key] ? 'true' : 'false'}">${icon}</button>`).join('')}</div>`;
+  ],
+    cases =
+      textCase == null
+        ? ''
+        : '<i class="bar-divider" aria-hidden="true"></i>' +
+          AutoText.CASES.filter(([id]) => id)
+            .map(
+              ([id, name, glyph]) =>
+                `<button type="button" data-choice="textCase" data-value="${textCase === id ? '' : id}" class="${textCase === id ? 'active' : ''}" title="${name}" aria-label="${name}" aria-pressed="${textCase === id}"><b class="case-glyph">${glyph}</b></button>`,
+            )
+            .join('');
+  return `<div class="segments" role="toolbar" aria-label="Начертание">${flags.map(([key, name, icon]) => `<button type="button" data-choice="${prefix + key}" data-value="toggle" class="${l[key] ? 'active' : ''}" title="${name}" aria-label="${name}" aria-pressed="${l[key] ? 'true' : 'false'}">${icon}</button>`).join('')}${cases}</div>`;
 }
 function textAlignBar(value, prefix = '') {
   const icons = {

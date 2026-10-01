@@ -161,9 +161,13 @@ function setTextFormat(layer, key, value) {
   layer[key] = value;
   return null;
 }
+/* A notice goes away by itself; an error stays a little longer to be read. */
+let notifyTimer = 0;
 function notify(message, error = false) {
   $('#feedback').textContent = message;
   $('#feedback').classList.toggle('error', error);
+  clearTimeout(notifyTimer);
+  if (message) notifyTimer = setTimeout(() => ($('#feedback').textContent = ''), error ? 7000 : 3500);
 }
 async function api(path, method = 'GET', body) {
   const r = await fetch('/api' + path, {

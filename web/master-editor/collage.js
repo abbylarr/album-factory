@@ -561,8 +561,8 @@ function bindCollageUi() {
 }
 bindCollageUi();
 /* Spacing handles on a selected vignette, same gesture as collage gaps: between cards, photo → name, name → caption. */
-const vignetteGapMax = { gap: 30, photoNameGap: 20, nameDetailGap: 20 },
-  vignetteGapDefault = { gap: 5, photoNameGap: 3, nameDetailGap: 2 };
+const vignetteGapMax = { gap: 30, photoNameGap: 20, nameDetailGap: 20, overInset: 20 },
+  vignetteGapDefault = { gap: 5, photoNameGap: 3, nameDetailGap: 2, overInset: 3 };
 let vignetteDrag = null,
   vignetteFrame = 0;
 function vignetteGap(l, key) {
@@ -573,7 +573,9 @@ function vignetteGapLabel(l, key) {
     ? 'Между карточками'
     : key === 'photoNameGap'
       ? 'Фото — имя'
-      : l.source === 'teachers'
+      : key === 'overInset'
+        ? 'От края фото'
+        : l.source === 'teachers'
         ? 'Имя — предмет'
         : 'Имя — цитата';
 }
@@ -589,31 +591,33 @@ function vignetteHandles(l) {
   const { geo, cards } = data,
     ox = layerOffset(l, obj.side) + l.box.x,
     oy = l.box.y,
-    gap = vignetteGap(l, 'gap'),
-    cols = Math.min(geo.cols, cards.length),
-    rows = Math.ceil(cards.length / geo.cols),
-    left = cards[0].x,
-    top = cards[0].y,
-    right = left + cols * geo.cellW + (cols - 1) * gap,
-    bottom = top + rows * geo.cellH + (rows - 1) * gap,
+    gx = vignetteGap(l, 'gap'),
+    gy = gx,
+    /* Rows follow the real cards: a squeezed row or a short one has its own gaps, the first row shows the column gaps. */
+    rowsY = [...new Set(cards.map(c => c.y))].sort((a, b) => a - b),
+    first = cards.filter(c => c.y === rowsY[0]),
+    left = geo.offsetX,
+    top = rowsY[0],
+    right = left + geo.blockW,
+    bottom = rowsY.at(-1) + geo.cellH,
     out = [];
-  for (let c = 1; c < cols; c++)
+  for (let c = 1; c < first.length; c++)
     out.push({
       key: 'gap',
       axis: 'x',
-      x: ox + left + c * geo.cellW + (c - 1) * gap,
+      x: ox + first[c].x - gx,
       y: oy + top,
-      w: gap,
+      w: gx,
       h: bottom - top,
     });
-  for (let r = 1; r < rows; r++)
+  for (let r = 1; r < rowsY.length; r++)
     out.push({
       key: 'gap',
       axis: 'y',
       x: ox + left,
-      y: oy + top + r * geo.cellH + (r - 1) * gap,
+      y: oy + rowsY[r] - gy,
       w: right - left,
-      h: gap,
+      h: gy,
     });
   return out;
 }
@@ -626,7 +630,7 @@ function cardHandles(l) {
     oy = l.box.y,
     p = card.photo,
     gap = vignetteGap(l, 'photoNameGap'),
-    pad = Math.min(gap, p.w / 4),
+    pad = Math.min(vignetteGap(l, 'overInset'), p.w / 4),
     out = [],
     seen = new Set();
   for (const text of [card.name, card.detail].filter(Boolean)) {
@@ -639,7 +643,7 @@ function cardHandles(l) {
       right: { axis: 'x', sign: 1, x: p.x + p.w, y: p.y, w: gap, h: p.h },
       over: { axis: 'y', sign: -1, x: p.x, y: p.y + p.h - pad, w: p.w, h: pad },
     }[text.zone];
-    out.push({ key: 'photoNameGap', ...strip, x: ox + strip.x, y: oy + strip.y });
+    out.push({ key: text.zone === 'over' ? 'overInset' : 'photoNameGap', ...strip, x: ox + strip.x, y: oy + strip.y });
   }
   if (card.detail && card.detail.zone === card.name.zone)
     out.push({
@@ -682,7 +686,7 @@ function placeVignetteUi() {
     return;
   }
   const drag = vignetteDrag,
-    handles = cardLayer() ? cardHandles(l) : vignetteHandles(l),
+    handles = vignetteHandles(l).concat(cardPart === 'name' || cardPart === 'detail' ? cardHandles(l) : []),
     dragged = drag ? Math.min(drag.index, handles.length - 1) : -1;
   host.hidden = false;
   host.innerHTML = handles

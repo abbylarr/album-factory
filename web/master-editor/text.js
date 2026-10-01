@@ -432,19 +432,12 @@ const STYLE_ICONS = {
   detach:
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M6.5 4.5 8 3a2.8 2.8 0 0 1 4 4L10.5 8.5M9.5 11.5 8 13a2.8 2.8 0 0 1-4-4l1.5-1.5M3 3l10 10"/></svg>',
 };
-function textPanel(l) {
+function textPanel(l, extra = '') {
   const style = textStyle(l),
     head = style
       ? `<div class="type-style-row applied"><button type="button" class="type-style-chip" data-open-style-menu aria-haspopup="dialog" aria-expanded="false" title="Сменить стиль" aria-label="Стиль «${esc(style.name)}». Сменить стиль"><b class="type-style-ag" aria-hidden="true">Ag</b><span>${esc(style.name)}</span><small>${esc(`${style.fontSize}/${style.lineHeight || 1.25}`)}</small></button><div class="text-style-actions"><button type="button" data-text-style="rename" title="Переименовать стиль" aria-label="Переименовать стиль">✎</button><button type="button" data-text-style-detach title="Отвязать от стиля" aria-label="Отвязать от стиля">${STYLE_ICONS.detach}</button></div></div><p class="section-note">Изменения применяются ко всем текстам стиля «${esc(style.name)}».</p>`
       : `<div class="type-style-row"><span class="type-label">Стиль</span><div class="text-style-actions"><button type="button" data-text-style="create" title="Создать стиль из этого текста" aria-label="Создать стиль из этого текста">＋</button><button type="button" data-open-style-menu aria-haspopup="dialog" aria-expanded="false" title="Применить стиль" aria-label="Применить стиль">${STYLE_ICONS.apply}</button></div></div>`;
-  return `${head}<div class="type-font">${fontRow(l)}</div><div class="type-main-row"><div class="type-weight"><select data-prop="bold" aria-label="Начертание"><option value="false" ${!l.bold ? 'selected' : ''}>Обычное</option><option value="true" ${l.bold ? 'selected' : ''}>Жирное</option></select><i class="type-chevron" aria-hidden="true"></i></div>${scrubField('Размер текста', 'fontSize', l.fontSize, 4, 120, 1, '<span class="type-size-icon">A</span>')}</div><div class="type-metrics">${scrubField('Интерлиньяж', 'lineHeight', l.lineHeight ?? 1.25, 0.8, 3, 0.05, '<svg class="type-line-height-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h10M8 17h10M4 5v10M2 7l2-2 2 2M2 13l2 2 2-2"/></svg>')}${scrubField('Интервал', 'letterSpacing', l.letterSpacing ?? 0, -20, 80, 1, '<span class="type-metric-icon">A↔</span>', '%')}${scrubField('Наклон', 'skew', l.skew ?? 0, -30, 30, 1, '<span class="type-metric-icon type-skew-icon">A</span>', '°')}${l.type === 'text' ? textCaseField(l.textCase) : ''}</div><div class="type-align"><span class="type-label">Выравнивание</span>${l.type === 'text' ? `<div class="type-align-pair">${textAlignBar(l.align)}${textValignBar(l.valign)}</div>` : textAlignBar(l.align)}</div>${l.type === 'text' ? textFitRow(l) : ''}<div class="type-extras">${textStyleBar(l)}</div>${colorControl('Цвет', 'color', l.color || '#333333')}`;
-}
-function textCaseField(value) {
-  return `<div class="type-field text-case-field"><span class="type-label">Регистр</span>${segments(
-    'textCase',
-    value || '',
-    AutoText.CASES.map(([id, name, icon]) => [id, name, `<b class="case-glyph">${icon}</b>`]),
-  )}</div>`;
+  return `${head}<div class="type-font">${fontRow(l)}</div><div class="type-main-row"><div class="type-weight"><select data-prop="bold" aria-label="Начертание"><option value="false" ${!l.bold ? 'selected' : ''}>Обычное</option><option value="true" ${l.bold ? 'selected' : ''}>Жирное</option></select><i class="type-chevron" aria-hidden="true"></i></div>${l.sizeField ?? scrubField('Размер текста', 'fontSize', l.fontSize, 4, 120, 1, '<span class="type-size-icon">A</span>')}</div><div class="type-metrics">${scrubField('Интерлиньяж', 'lineHeight', l.lineHeight ?? 1.25, 0.8, 3, 0.05, '<svg class="type-line-height-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h10M8 17h10M4 5v10M2 7l2-2 2 2M2 13l2 2 2-2"/></svg>')}${scrubField('Интервал', 'letterSpacing', l.letterSpacing ?? 0, -20, 80, 1, '<span class="type-metric-icon">A↔</span>', '%')}${scrubField('Наклон', 'skew', l.skew ?? 0, -30, 30, 1, '<span class="type-metric-icon type-skew-icon">A</span>', '°')}${extra}</div><div class="type-align"><span class="type-label">Выравнивание</span>${l.type === 'text' ? `<div class="type-align-pair">${textAlignBar(l.align)}${textValignBar(l.valign)}</div>` : textAlignBar(l.align)}</div>${l.type === 'text' ? textFitRow(l) : ''}<div class="type-extras">${textStyleBar(l, '', l.type === 'text' || l.caseBar ? l.textCase || '' : null)}</div>${colorControl('Цвет', 'color', l.color || '#333333')}`;
 }
 function textValignBar(value) {
   const icon = y =>
@@ -458,7 +451,7 @@ function textValignBar(value) {
 function textFitRow(l) {
   return `<div class="text-fit-row"><span class="type-label">Уменьшать, чтобы влезло ${infoTip('Текст не переносится, а уменьшается целиком, пока не влезет в рамку. Новая строка — только там, где нажат Enter.')}</span><button type="button" class="switch${l.fit ? ' on' : ''}" data-choice="fit" aria-pressed="${!!l.fit}" aria-label="Уменьшать, чтобы влезло"></button></div>`;
 }
-function gridTextPanel(l, prefix = '') {
+function gridTextPanel(l, prefix = '', extra = '', sizeField = '') {
   const prefixed = key => (prefix ? prefix + key[0].toUpperCase() + key.slice(1) : key),
     value = (key, fallback) => l[prefixed(key)] ?? fallback,
     settings = {
@@ -470,10 +463,14 @@ function gridTextPanel(l, prefix = '') {
       strike: value('strike', prefix ? false : !!l.strike),
       lineHeight: value('lineHeight', 1.25),
       letterSpacing: value('letterSpacing', 0),
+      skew: value('skew', 0),
       align: value('align', 'center'),
       color: value('color', l.color || '#333333'),
+      textCase: value('textCase', ''),
+      caseBar: true,
+      sizeField: sizeField || undefined,
     };
-  let html = textPanel(settings),
+  let html = textPanel(settings, extra),
     start = html.indexOf('<div class="type-font">');
   html = html.slice(start);
   if (prefix)
@@ -487,6 +484,8 @@ const vignetteGapIcon = {
   gap: '<rect x="2" y="4" width="4.5" height="12" rx="1"/><rect x="13.5" y="4" width="4.5" height="12" rx="1"/><path d="M8.5 10h3M9.5 8.5 8.3 10l1.2 1.5M10.5 8.5l1.2 1.5-1.2 1.5"/>',
   photoNameGap:
     '<rect x="4" y="2" width="12" height="7.5" rx="1"/><path d="M10 11.5v3.5M8.6 12.8 10 11.5l1.4 1.3M8.6 13.7 10 15l1.4-1.3M5 18h10"/>',
+  overInset:
+    '<rect x="3" y="2.5" width="14" height="15" rx="1"/><path d="M6.5 13.5h7M10 14.5v2.5"/>',
   nameDetailGap:
     '<path d="M4 3.5h12M10 6.5v6M8.6 7.8 10 6.5l1.4 1.3M8.6 11.2 10 12.5l1.4-1.3M6 16h8M7.5 18.5h5"/>',
 };
@@ -503,19 +502,46 @@ function vignetteGapField(l, key) {
   );
 }
 /* A vignette is a frame the block's list flows into: who and how many live in the block, the card design lives here. */
-function vignetteListLink() {
-  const list = blockList(section());
-  return `<button type="button" class="vignette-list-link" data-open-block title="Кого и сколько на странице — в настройках блока"><span class="vignette-list-icon">${kindIcon('flow')}</span><span class="vignette-list-copy"><strong>${list.source === 'teachers' ? 'Учителя' : 'Ученики'}</strong><small>${list.min}–${list.max} на странице</small></span><svg class="vignette-list-go" viewBox="0 0 8 12" aria-hidden="true"><path d="M2 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+/* The vignette as a whole, like auto layout in Figma: the list it is filled from (with what the test class gives),
+   its size, where the cards sit when they do not fill it, and the gap between them. */
+const CARD_ANCHOR_NAMES = {
+  'top-left': 'Сверху слева',
+  top: 'Сверху по центру',
+  'top-right': 'Сверху справа',
+  left: 'По центру слева',
+  center: 'По центру',
+  right: 'По центру справа',
+  'bottom-left': 'Снизу слева',
+  bottom: 'Снизу по центру',
+  'bottom-right': 'Снизу справа',
+};
+function vignetteSection(l) {
+  const teachers = blockList(section()).source === 'teachers',
+    anchor = CARD_ANCHOR_NAMES[l.anchor] ? l.anchor : 'center',
+    column = i => ['start', 'center', 'end'][i % 3],
+    row = i => ['start', 'center', 'end'][Math.floor(i / 3)],
+    anchors = Object.entries(CARD_ANCHOR_NAMES)
+      .map(
+        ([id, name], i) =>
+          `<button type="button" data-choice="anchor" data-value="${id}" class="${anchor === id ? 'active' : ''}" aria-pressed="${anchor === id}" title="${name}" aria-label="${name}">${anchor === id ? `<i class="anchor-bars" style="align-items:${column(i)};justify-content:${row(i)}"><b></b><b></b><b></b></i>` : '<i class="anchor-dot"></i>'}</button>`,
+      )
+      .join('');
+  return `<section class="inspector-section typography-section vignette-section"><h3>Виньетка</h3><button type="button" class="vignette-list-link" data-open-block title="Кого разместить и как делить по страницам — в настройках блока"><span class="vignette-list-icon">${kindIcon('flow')}</span><span class="vignette-list-copy"><strong>${teachers ? 'Учителя' : 'Ученики'}</strong><small>Блок «${esc(section().name)}»</small></span><svg class="vignette-list-go" viewBox="0 0 8 12" aria-hidden="true"><path d="M2 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` +
+    `<div class="vignette-layout"><div><p class="visual-label">Размер</p><div class="vignette-size">${vignetteCell('Ширина', 'box.w', round(layerW(l)), round(pageWidth()), 'W')}${vignetteCell('Высота', 'box.h', round(l.box.h), round(pageHeight()), 'H')}</div></div><div><p class="visual-label">Выравнивание</p><div class="anchor-grid" role="group" aria-label="Где стоят карточки">${anchors}</div></div></div>` +
+    (teachers && spreadsFill()
+      ? `<div class="vignette-lead-row"><span class="type-label">Классный руководитель</span><div class="segments" role="radiogroup" aria-label="Классный руководитель">${[
+          ['card', 'Как все'],
+          ['big', 'Крупнее'],
+        ]
+          .map(([id, name]) => `<button type="button" role="radio" data-choice="lead" data-value="${id}" class="${(l.lead || 'card') === id ? 'active' : ''}" aria-checked="${(l.lead || 'card') === id}">${name}</button>`)
+          .join('')}</div></div>`
+      : '') +
+    `<div class="vignette-detail-row vignette-last-row"><span>Неполный ряд по центру</span><button type="button" class="switch${l.centerLastRow ? ' on' : ''}" data-choice="centerLastRow" aria-pressed="${!!l.centerLastRow}" aria-label="Неполный ряд по центру"></button></div>` +
+    `</section>`;
 }
-/* Outside the card: how cards are laid out. What a card looks like is edited inside it (card.js). */
-function vignettePanel(l) {
-  const zone = CARD_ZONE_NAMES[l.nameAt || 'below'].toLowerCase(),
-    ratio = PHOTO_RATIOS.find(([value]) => Math.abs(value - (Number(l.photoRatio) || 0.75)) < 1e-3)?.[1] || '3:4',
-    caption = l.showDetail ? `имя и ${vignetteDetailName(l).toLowerCase()}` : 'имя';
-  return (
-    `<section class="inspector-section typography-section"><div class="typography-heading"><h3>Раскладка</h3></div><div class="type-metrics vignette-gaps">${vignetteGapField(l, 'gap')}</div></section>` +
-    `<section class="inspector-section typography-section"><div class="typography-heading"><h3>Карточка</h3></div><button type="button" class="card-enter" data-card-enter title="Двойной клик по карточке · Enter"><span class="card-enter-copy"><strong>Фото ${ratio} · ${caption}</strong><small>${caption[0].toUpperCase() + caption.slice(1)} — ${zone}</small></span><span class="card-enter-go">Изменить</span></button></section>`
-  );
+/* A number cell of the vignette and card sections: a scrub icon, the value, an optional unit. */
+function vignetteCell(label, key, value, max, icon, { attr = 'data-live', step = 0.5, min = 1, suffix = '', hideLabel = false, placeholder = '' } = {}) {
+  return `<div class="type-field">${hideLabel ? '' : `<span class="type-label">${label}</span>`}<div class="type-value${suffix ? ' type-value-suffixed' : ''}" data-scrub="${key}" data-min="${min}" data-max="${max}" data-step="${step}" title="${label}: потяните влево или вправо"><span class="type-inline-scrub" aria-hidden="true">${icon.startsWith('<') ? icon : `<span class="type-metric-icon">${icon}</span>`}</span><input ${attr}="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${value}"${placeholder !== '' ? ` placeholder="${placeholder}"` : ''}${suffix ? ` style="width:${Math.max(1, String(value).length)}ch"` : ''} aria-label="${label}">${suffix ? `<span class="type-suffix">${suffix}</span>` : ''}</div></div>`;
 }
 function vignetteDetailName(l) {
   return l.source === 'teachers' ? 'Предмет' : 'Цитата';

@@ -52,7 +52,7 @@ def master():
 
 def snapshot(students=12, teachers=5):
     return {'students': [{'id': f's{i}', 'first_name': 'Ученик', 'last_name': str(i)} for i in range(students)],
-            'teachers': [{'id': f't{i}', 'first_name': 'Учитель', 'last_name': str(i)} for i in range(teachers)],
+            'teachers': [{'id': f't{i}', 'first_name': 'Учитель', 'last_name': str(i), 'is_class_teacher': i == 0} for i in range(teachers)],
             'photos': {}, 'selections': [], 'order': {'class_name': '11А', 'year': '2026'}}
 
 
@@ -82,6 +82,32 @@ class BlockRulesTests(unittest.TestCase):
         leads = [e for spread in result['variant_spreads']['student:s0'].values() for e in spread['elements'] if e['key'].endswith('/lead')]
         self.assertEqual(len(leads), 1)
         self.assertEqual(len(names(result, 'student:s0', 'teachers')), 19)
+
+    def one_spread(self):
+        doc = master()
+        teachers = dict(grid('tg'), source='teachers', lead='big', gap=4, minFontSize=8, minPhotoWidth=30)
+        doc['sections'][1] = {'id': 'teachers', 'name': 'Учителя', 'kind': 'flow', 'target': 1,
+                              'list': {'source': 'teachers', 'min': 4, 'max': 12, 'strictMin': False, 'excludeLead': False, 'fill': 'spreads'},
+                              'spreads': [{'id': 't1', 'role': 'intro', 'pages': [page('t1l', [dict(teachers, id='tl')]), page('t1r', [dict(teachers, id='tr')])]}]}
+        return doc
+
+    def test_teachers_kept_to_one_spread_with_a_larger_class_teacher(self):
+        for n, lead_alone in ((13, True), (19, False), (25, None)):  # a page of his own, beside a short row, a card
+            result = self.build(self.one_spread(), teachers=n)
+            spreads = [s for s in result['variant_spreads']['student:s0'].values() if s['section'] == 'teachers']
+            self.assertEqual(len(spreads), 1, n)
+            photos = [e for e in spreads[0]['elements'] if e['key'].endswith('/photo')]
+            self.assertEqual(len(photos), n, n)
+            self.assertEqual(sorted(names(result, 'student:s0', 'teachers')), sorted(f'Учитель {i}' for i in range(n)))
+            widths = sorted({round(e['box'][2], 3) for e in photos})
+            lead = next(e for e in photos if 'teacher:t0' in e['key'])
+            if lead_alone is None:
+                # No room for a larger portrait: the class teacher is a card like the others.
+                self.assertLessEqual(lead['box'][2], widths[-1] + 1e-6)
+            else:
+                self.assertGreater(lead['box'][2], 1.3 * min(e['box'][2] for e in photos if e is not lead), n)
+        too_many = self.build(self.one_spread(), teachers=40)
+        self.assertTrue(any('Не помещаются все' in i['message'] for i in too_many['issues']))
 
     def test_personal_blocks_choose_people_per_block(self):
         result = self.build(students=4)

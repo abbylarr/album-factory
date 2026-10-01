@@ -16,7 +16,7 @@ window.MasterDefaults=(()=>{const id=()=>crypto.randomUUID();
   /* A collage that takes as many photos of the person as the shoot has: from `min` to `max`. */
   const flexCollage = (x,y,w,h,min=1,max=4) => layer('collage',box(x,y,w,h),{name:'Гибкий коллаж',fill:'#e6e1ea',gapX:4,gapY:4,gapLinked:true,rows:[[{id:id(),source:'class',pick:{category:'any',who:'hero'},cropX:50,cropY:50}]],flex:{min,max},pick:{category:'any',who:'hero'}});
   const cover = (pageSize=[210,280]) => ({id:id(),name:'Обложка',cover:true,kind:'fixed',pageSize:[Math.min(pageSize[0]+6,500),Math.min(pageSize[1]+6,500)],safety:{safe:8,bleed:3,spine:8,gap:2},spreads:[spread(page([]),page([]))]});
-  const listDefaults = source => ({source,min:4,max:12,strictMin:false,excludeLead:source==='teachers'});
+  const listDefaults = source => ({source,min:4,max:100,strictMin:false,excludeLead:source==='teachers'});
   const withRole = (value, role) => ({...value, role});
   /* Starter blocks for the «new block» dialog and the default document.
      fixed: {spreads}; flow: {source, min, max, intro, last}; repeat: {people}. */

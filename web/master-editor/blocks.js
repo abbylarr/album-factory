@@ -71,6 +71,8 @@ function blockSummary(s) {
   if (continuation(s)) return `${who} · первые ${plural(s.limit || 1, 'разворот', 'разворота', 'разворотов')}`;
   if (s.kind === 'flow') {
     const l = blockList(s);
+    /* A block kept to its spreads says how many people it takes at most. */
+    if (l.fill === 'spreads' && planner) return `${who} · до ${spreadsCapacity(s)} в блоке`;
     return `${who} · ${l.min}–${l.max} на странице`;
   }
   return who;
@@ -128,8 +130,18 @@ function blockSettings(s) {
         ['students', 'Учеников'],
         ['teachers', 'Учителей'],
       ]);
-    body += `<p class="block-label">Карточек на странице</p><div class="block-range"><label>от<input type="number" data-block-num="min" min="1" max="100" value="${l.min}" aria-label="Карточек на странице: от"></label><label>до<input type="number" data-block-num="max" min="1" max="100" value="${l.max}" aria-label="Карточек на странице: до"></label></div>`;
-    body +=
+    body += blockQuestion(
+      'Сколько разворотов',
+      'fill',
+      l.fill === 'spreads' ? 'spreads' : 'grow',
+      [
+        ['grow', 'Сколько нужно'],
+        ['spreads', 'Только эти'],
+      ],
+      'Только эти — весь список на развороты блока, по одному разу. Кто не поместится — ошибка в заказе.',
+    );
+    if (l.fill !== 'spreads')
+      body +=
       blockQuestion(
         'Если людей немного',
         'density',
@@ -178,7 +190,6 @@ function blockSettings(s) {
       )
       .join('')}</div>`;
   }
-  if (s.kind === 'flow') body += blockTestClass(s);
   const size = doc.pageSize || [210, 280];
   body += `<p class="block-label">Развороты${s.kind === 'flow' ? infoTip(MasterPlan.ROLES.map(r => `${ROLE_NAMES[r]} — ${ROLE_HELP[r]}.`).join(' ')) : ''}</p><ol class="block-spreads">${s.spreads
     .map((sp, i) => {
@@ -218,22 +229,6 @@ function openBlockSettings(id = view.section) {
   if (!dialog.open) dialog.showModal();
   renderBlockSettings();
 }
-/* The test class fills the vignettes on the canvas: change the count to see how the block spreads out. */
-function blockTestClass(s) {
-  const source = blockList(s).source,
-    plan = plans.find(p => p.sectionId === s.id),
-    spreads = Math.ceil((plan?.pages.length || 0) / 2),
-    design = new Set(planner.designIssues(s).map(i => i.text)),
-    own = /^(Минимум карточек|Минимальный кегль|По размерам фото)/,
-    issues = (plan?.issues || []).filter(i => !design.has(i.text) && !own.test(i.text)),
-    check = (flag, label) =>
-      `<label class="check"><input type="checkbox" data-test-flag="${flag}"${view[flag] ? ' checked' : ''}>${label}</label>`;
-  return (
-    `<p class="block-label">Тестовый класс${infoTip('Виньетки на холсте заполняются этим классом. Меняйте число, чтобы увидеть, как разойдётся список.')}</p><div class="block-range"><label><input type="number" data-test-count="${source}" min="0" max="${source === 'teachers' ? 60 : 80}" value="${view[source]}" aria-label="Сколько ${source === 'teachers' ? 'учителей' : 'учеников'} в тестовом классе"></label><span>${source === 'teachers' ? pluralWord(view[source], 'учитель', 'учителя', 'учителей') : pluralWord(view[source], 'ученик', 'ученика', 'учеников')} → ${spreads} ${pluralWord(spreads, 'разворот', 'разворота', 'разворотов')}</span></div>` +
-    `<div class="block-test-flags">${check('long', 'Длинное имя')}${check('missing', 'Нет портрета')}</div>` +
-    issues.map(i => `<div class="issue ${i.severity}">${esc(i.text)}</div>`).join('')
-  );
-}
 function renderBlockSettings() {
   const dialog = $('#block-settings');
   if (!dialog?.open) return;
@@ -242,11 +237,7 @@ function renderBlockSettings() {
   const body = $('#block-settings-body'),
     scroll = body.scrollTop,
     active = body.contains(document.activeElement) ? document.activeElement : null,
-    focus = active?.dataset.blockNum
-      ? `[data-block-num="${active.dataset.blockNum}"]`
-      : active?.dataset.testCount
-        ? '[data-test-count]'
-        : null;
+    focus = active?.dataset.blockNum ? `[data-block-num="${active.dataset.blockNum}"]` : null;
   $('#block-settings-title').textContent = s.name;
   body.innerHTML = blockSettings(s);
   body.scrollTop = scroll;
@@ -340,6 +331,11 @@ function blockSet(key, value) {
     if (key === 'max') {
       list.max = clamp(Math.round(value) || 1, 1, 100);
       if (list.min > list.max) list.min = list.max;
+      return;
+    }
+    if (key === 'fill') {
+      if (value === 'spreads') list.fill = 'spreads';
+      else delete list.fill;
       return;
     }
     if (key === 'strictMin') list.strictMin = value === 'stop';
@@ -439,7 +435,7 @@ function openBlockDialog(change = false) {
         empty: false,
         source: 'students',
         min: 4,
-        max: 12,
+        max: 100,
         intro: false,
         last: true,
         people: 'all',
@@ -475,7 +471,7 @@ function renderBlockDialog() {
     options = `${name}<p class="block-label">Кого разместить</p>${segs('source', [
       ['students', 'Учеников'],
       ['teachers', 'Учителей'],
-    ])}<div class="block-pair"><span>Карточек на странице</span><label>от<input type="number" data-draft="min" min="1" max="100" value="${d.min}" aria-label="Карточек на странице: от"></label><label>до<input type="number" data-draft="max" min="1" max="100" value="${d.max}" aria-label="Карточек на странице: до"></label></div>${check('intro', d.source === 'teachers' ? 'Открывающий разворот с портретом руководителя' : 'Открывающий разворот с заголовком')}${check('last', 'Последний неполный разворот: виньетка и общее фото')}`;
+    ])}${check('intro', d.source === 'teachers' ? 'Открывающий разворот с портретом руководителя' : 'Открывающий разворот с заголовком')}${check('last', 'Последний неполный разворот: виньетка и общее фото')}`;
   else
     options = `${name}<p class="block-label">Для кого</p><div class="block-people">${['all', 'others', 'owner'].map(id => `<button type="button" class="photo-choice${d.people === id ? ' active' : ''}" data-draft-choice="people" data-value="${id}" aria-pressed="${d.people === id}"><span class="photo-radio" aria-hidden="true"></span><span class="photo-choice-copy"><strong>${PEOPLE_NAMES[id]}</strong><small>${PEOPLE_HELP[id]}</small></span></button>`).join('')}</div><p class="section-note">Слева — портрет и имя героя разворота, справа — гибкий коллаж из 1–4 общих фото с ним.</p>`;
   $('#block-body').innerHTML =
@@ -614,23 +610,8 @@ $('#sections').addEventListener('dblclick', e => {
       render();
     }
   });
-  dialog.addEventListener('input', e => {
-    const el = e.target;
-    if (!el.dataset.testCount || el.value === '' || !el.validity.valid) return;
-    view[el.dataset.testCount] = Number(el.value);
-    render();
-  });
   dialog.addEventListener('change', e => {
     const el = e.target;
-    if (el.dataset.testCount) {
-      if (el.value === '' || !el.validity.valid) el.value = view[el.dataset.testCount];
-      return;
-    }
-    if (el.dataset.testFlag) {
-      view[el.dataset.testFlag] = el.checked;
-      render();
-      return;
-    }
     if ('blockName' in el.dataset) {
       const name = el.value.trim();
       if (name && name !== section().name) blockSet('name', name);

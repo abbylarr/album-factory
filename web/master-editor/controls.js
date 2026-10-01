@@ -500,7 +500,7 @@ function liveProperty(key, value) {
     if (!style) {
       if (
         layer.type === 'grid' &&
-        [
+        ([
           'radius',
           'fontSize',
           'lineHeight',
@@ -508,12 +508,10 @@ function liveProperty(key, value) {
           'detailFontSize',
           'detailLineHeight',
           'detailLetterSpacing',
-        ].includes(key)
+        ].includes(key) ||
+          vignetteLook(key))
       )
-        section()
-          .spreads.flatMap(sp => sp.pages.flatMap(p => p.layers))
-          .filter(item => item.type === 'grid')
-          .forEach(item => assignLive(item, key, value));
+        blockGrids().forEach(item => assignLive(item, key, value));
       else assignLive(layer, key, value);
     }
     const obj = canvas.getObjects().find(o => o.masterId === layer.id);

@@ -4,7 +4,7 @@ import math
 import re
 from itertools import permutations
 from .layout_engine import canonical_hash
-from .master_plan import CARD_ZONES, ISSUES as PLAN_ISSUES, has_grid, list_plan, people as block_people, personal_take
+from .master_plan import CARD_ANCHORS, CARD_ZONES, ISSUES as PLAN_ISSUES, distribute, has_grid, list_plan, people as block_people, personal_take
 from .photo_pick import Picker, RELAX_TEXT, GOOD_DPI, categories_of, entries_from, fit, resolve, rules_of
 from .svg_draw import present_svg
 from . import auto_text
@@ -159,8 +159,10 @@ def card_frame(layer):
     Each caption sits in a zone around the photo (above, below, left, right) or over it; one zone stacks name first."""
     ratio = float(layer.get('photoRatio') or .75)
     gap = float(layer.get('photoNameGap', 3))
+    inset = float(layer.get('overInset', 3))
     between = float(layer.get('nameDetailGap', 2))
     side = float(layer.get('captionWidth') or 40)
+    side_align = min(1, max(0, float(layer.get('sideAlign', .5) or 0)))
     name_h = layer['fontSize']*.3528*float(layer.get('lineHeight') or 1.25)*2
     detail_h = layer.get('detailFontSize', 9)*.3528*float(layer.get('detailLineHeight') or 1.25)*2 if layer.get('showDetail') else 0
     zone_of = lambda key: layer.get(key) if layer.get(key) in CARD_ZONES else 'below'
@@ -169,7 +171,7 @@ def card_frame(layer):
     for zone in CARD_ZONES:
         items = [t for t in texts if t[1] == zone]
         zones[zone] = sum(t[2] for t in items) + between*(len(items)-1) if items else 0
-    return dict(ratio=ratio, gap=gap, between=between, side=side, name_h=name_h, detail_h=detail_h, texts=texts, zones=zones,
+    return dict(ratio=ratio, gap=gap, inset=inset, between=between, side=side, side_align=side_align, name_h=name_h, detail_h=detail_h, texts=texts, zones=zones,
                 top=zones['above']+gap if zones['above'] else 0, bottom=zones['below']+gap if zones['below'] else 0,
                 left=side+gap if zones['left'] else 0, right=side+gap if zones['right'] else 0,
                 side_h=max(zones['left'], zones['right']))
@@ -180,7 +182,7 @@ def card_parts(photo_w, frame):
     f = frame
     photo_h = photo_w/f['ratio']
     body = max(photo_h, f['side_h'])
-    pad = min(f['gap'], photo_w/4)
+    pad = min(f['inset'], photo_w/4)
     parts = {'photo': [f['left'], f['top'], photo_w, photo_h]}
     zones = {}
     for zone in CARD_ZONES:
@@ -196,7 +198,7 @@ def card_parts(photo_w, frame):
         elif zone == 'over':
             x, w, y = f['left']+pad, max(1, photo_w-2*pad), f['top']+photo_h-pad-h
         else:
-            x, w, y = (0 if zone == 'left' else f['left']+photo_w+f['gap']), f['side'], f['top']+max(0, (photo_h-h)/2)
+            x, w, y = (0 if zone == 'left' else f['left']+photo_w+f['gap']), f['side'], f['top']+max(0, (photo_h-h)*f['side_align'])
         for key, _, text_h in items:
             parts[key] = [x, y, w, text_h]
             zones[key] = zone
@@ -204,30 +206,268 @@ def card_parts(photo_w, frame):
     return dict(w=f['left']+photo_w+f['right'], h=f['top']+body+f['bottom'], photo_h=photo_h, parts=parts, zones=zones)
 
 
+def name_room(geo):
+    """How tall a name may grow: beside the photo, the photo height less the caption under it; elsewhere the two
+    reserved lines. Mirrors nameRoom."""
+    zones = geo['zones']
+    if zones['name'] not in ('left', 'right'):
+        return geo['name_h']
+    below = geo['name_detail_gap']+geo['detail_h'] if zones.get('detail') == zones['name'] else 0
+    return max(geo['name_h'], geo['photo_h']-below)
+
+
+def caption_fits(measurer, text, font, size, line_height, width, room, letter=0):
+    """Whether a card caption reads in its box: no word wider than the caption, no more lines than its room (mm).
+    The editor checks the same in nameFont and detailFont."""
+    if any(measurer.width(word, font, size, letter) > width for word in text.split()):
+        return False
+    return measurer.height(text, font, size, size*line_height, width, letter) <= room+.1
+
+
+def caption_look(layer, prefix):
+    """Outline and shadow of a card caption ('name' or 'detail'). The outline runs outside the letters, as on the
+    editor canvas, so they keep their weight."""
+    look = {}
+    stroke = layer.get(prefix+'Stroke')
+    if isinstance(stroke, dict) and stroke.get('width'):
+        look.update(stroke=stroke.get('color', '#ffffff'), strokeWidth=float(stroke['width']), strokeAlign='outside')
+    if isinstance(layer.get(prefix+'Shadow'), dict):
+        look['shadow'] = layer[prefix+'Shadow']
+    return look
+
+
+def caption_floor(layer):
+    """The narrowest caption a name still reads in at its smallest size: a teacher's first name and patronymic on one
+    line (about 22 letters), a student's longest word (about 15); capitals are wider. Beside the photo a name may take
+    more lines, so there only its longest word must fit. Mirrors captionFloor."""
+    side = layer.get('nameAt') in ('left', 'right')
+    letters = 22 if layer.get('source') == 'teachers' and not side else 15
+    em = .62 if layer.get('textCase') == 'upper' else .52
+    return letters*em*float(layer.get('minFontSize') or layer['fontSize'])*.3528
+
+
+def row_counts(n, cols, rows):
+    """Cards per row for n cards in cols columns and at most rows rows. Rows fill in turn, fuller rows first; when n
+    needs more rows than there are, the first rows take one card more each (narrower, «squeezed»), never two; a last row
+    shorter than half a row borrows a card from each row above it in turn. Mirrors rowCounts."""
+    if n <= 0:
+        return []
+    need = math.ceil(n/cols)
+    if need > rows:
+        counts = [cols]*rows
+        for i in range(n-cols*rows):
+            counts[i] += 1
+        return counts
+    counts, half = [cols]*need, math.ceil(cols/2)
+    counts[need-1] = n-cols*(need-1)
+    k = need-2
+    while need > 1 and counts[need-1] < half:
+        if k < 0:
+            k = need-2
+        counts[k] -= 1
+        counts[need-1] += 1
+        k -= 1
+    return counts
+
+
 def geometry(count, layer):
-    best = None
+    """The grid for count cards: columns, rows, the card size and, when rows are squeezed, the narrower card. Rows are
+    squeezed only when the cards do not fit otherwise — within the photo width «от» and the page's «до» (layer max,
+    counting full rows). Mirrors gridGeometry."""
+    if count <= 0:
+        return None
+    best = squeezed = None
+    cap = float(layer.get('max') or math.inf)
+    w, h = layer['box']['w'], layer['box']['h']
     gap = float(layer['gap'])
     frame = card_frame(layer)
+    floor = caption_floor(layer)
+    least = float(layer.get('minPhotoWidth') or 5)
+    most = float(layer.get('photoWidth') or 85)
+    widest = lambda slot_w, room: min(slot_w-frame['left']-frame['right'], room*frame['ratio'], most)
     for cols in range(1, min(6, count) + 1):
-        rows = math.ceil(count / cols)
-        slot_w = (layer['box']['w'] - (cols-1)*gap) / cols
-        slot_h = (layer['box']['h'] - (rows-1)*gap) / rows
-        room = slot_h-frame['top']-frame['bottom']
-        if room < frame['side_h']:
-            continue
-        pw = min(slot_w-frame['left']-frame['right'], room*frame['ratio'], float(layer.get('photoWidth') or 85))
-        if pw < layer['minPhotoWidth']:
-            continue
-        card = card_parts(pw, frame)
-        offset_x = (layer['box']['w'] - cols*card['w'] - (cols-1)*gap)/2
-        offset_y = (layer['box']['h'] - rows*card['h'] - (rows-1)*gap)/2
-        score = pw*pw*count - (cols*rows-count)*pw*.01
-        if best is None or score > best['score']:
-            best = dict(score=score, cols=cols, cell_w=card['w'], cell_h=card['h'],
-                        photo_w=pw, photo_h=card['photo_h'], parts=card['parts'], zones=card['zones'],
-                        name_h=frame['name_h'], detail_h=frame['detail_h'], photo_name_gap=frame['gap'],
-                        name_detail_gap=frame['between'], offset_x=offset_x, offset_y=offset_y)
-    return best
+        for rows in range(math.ceil(count/(cols+1)), math.ceil(count/cols)+1):
+            extra = max(0, count-cols*rows)
+            # Squeezed rows stay the exception: when every row would take one more, that is simply a wider grid.
+            if extra and extra >= rows or count-extra > cap:
+                continue
+            slot_h = (h - (rows-1)*gap) / rows
+            room = slot_h-frame['top']-frame['bottom']
+            if room < frame['side_h']:
+                continue
+            pw = widest((w - (cols-1)*gap) / cols, room)
+            if pw < least:
+                continue
+            card = card_parts(pw, frame)
+            # A name must still read in two lines at the smallest size names may shrink to.
+            if card['parts']['name'][2] < floor:
+                continue
+            tight = None
+            if extra:
+                tight_w = min(pw, widest((w - cols*gap) / (cols+1), room))
+                if tight_w < least:
+                    continue
+                t = card_parts(tight_w, frame)
+                if t['parts']['name'][2] < floor:
+                    continue
+                tight = dict(cell_w=t['w'], photo_w=tight_w, photo_h=t['photo_h'], parts=t['parts'])
+            # Where the cards sit when they do not fill the area: one of nine anchors, as in Figma auto layout.
+            at = CARD_ANCHORS.index(layer['anchor']) if layer.get('anchor') in CARD_ANCHORS else 4
+            full_w = cols*card['w'] + (cols-1)*gap
+            block_w = max(full_w, (cols+1)*tight['cell_w'] + cols*gap if tight else 0)
+            offset_x = (w - block_w)*(at % 3)/2
+            offset_y = (h - rows*card['h'] - (rows-1)*gap)*(at // 3)/2
+            score = (count-extra)*pw*pw + (extra*tight['photo_w']*tight['photo_w'] if tight else 0) - max(0, cols*rows-count)*pw*.01 - extra*pw*.001 - (rows*pw*pw*.05 if layer.get('fewRows') else 0)
+            found = dict(score=score, cols=cols, rows=rows, cell_w=card['w'], cell_h=card['h'],
+                         photo_w=pw, photo_h=card['photo_h'], parts=card['parts'], zones=card['zones'], tight=tight,
+                         full_w=full_w, block_w=block_w,
+                         name_h=frame['name_h'], detail_h=frame['detail_h'], photo_name_gap=frame['gap'], over_inset=frame['inset'],
+                         name_detail_gap=frame['between'], offset_x=offset_x, offset_y=offset_y)
+            if extra:
+                if squeezed is None or score > squeezed['score']:
+                    squeezed = found
+            elif best is None or score > best['score']:
+                best = found
+    return best or squeezed
+
+
+def card_slots(n, geo, layer):
+    """Where each of n cards stands in a grid made for at least n: (x, y, squeezed). Rows by row_counts; a short row keeps
+    the left edge of the full rows, or stands in the middle with centerLastRow. Mirrors cardSlots."""
+    gap = float(layer['gap'])
+    out = []
+    for r, k in enumerate(row_counts(n, geo['cols'], geo['rows'])):
+        tight = k > geo['cols']
+        cw = geo['tight']['cell_w'] if tight else geo['cell_w']
+        row_w = k*cw + (k-1)*gap
+        x = geo['offset_x'] + ((geo['block_w']-row_w)/2 if k >= geo['cols'] or layer.get('centerLastRow') else (geo['block_w']-geo['full_w'])/2)
+        y = geo['offset_y'] + float(layer.get('pushY') or 0) + r*(geo['cell_h']+gap)
+        out.extend((x + i*(cw+gap), y, tight) for i in range(k))
+    return out
+
+
+def narrowest(geo):
+    """The narrowest card of a grid: names and quotes are sized for it so they read in every card. Mirrors narrowest."""
+    return {**geo, 'cell_w': geo['tight']['cell_w'], 'photo_w': geo['tight']['photo_w'], 'photo_h': geo['tight']['photo_h'], 'parts': geo['tight']['parts']} if geo and geo.get('tight') else geo
+
+
+TOP_OF = {'top-left': 'top-left', 'top': 'top', 'top-right': 'top-right', 'left': 'top-left', 'center': 'top', 'right': 'top-right',
+          'bottom-left': 'top-left', 'bottom': 'top', 'bottom-right': 'top-right'}
+
+
+def lead_frame(layer):
+    """The class teacher's portrait keeps its own proportions, whatever the cards have. Mirrors leadFrame."""
+    return card_frame({**layer, 'photoRatio': float(layer.get('leadRatio') or .75)})
+
+
+def lead_room(layer, used, geo, m):
+    """The class teacher opens the page: his card on top, the cards of the page under it; together they stand where the
+    vignette's anchor puts them. Without cards he has the whole page. None when the portrait would not fit. Mirrors leadRoom."""
+    w, h = layer['box']['w'], layer['box']['h']
+    gap = float(layer.get('gap') or 0)
+    frame = lead_frame(layer)
+    below = 0
+    if m:
+        rows = len(row_counts(m, geo['cols'], geo['rows']))
+        below = rows*geo['cell_h'] + (rows-1)*gap + gap
+    room = h-below
+    if room <= 0:
+        return None
+    photo_w = min(w-frame['left']-frame['right'], (room-frame['top']-frame['bottom'])*frame['ratio'])
+    if photo_w <= 0 or (frame['side_h'] and room-frame['top']-frame['bottom'] < frame['side_h']):
+        return None
+    card = card_parts(photo_w, frame)
+    if card['parts']['name'][2] < caption_floor(layer):
+        return None
+    at = CARD_ANCHORS.index(layer['anchor']) if layer.get('anchor') in CARD_ANCHORS else 4
+    y = (room-card['h'])*(at // 3)/2
+    return dict(x=(w-card['w'])/2, y=y, photo_w=photo_w, push=y+card['h']+gap, used=used)
+
+
+def fill_pages(grids, count, lead_big, least=1):
+    """A block kept to its own spreads: every vignette page once, the list shared so that all cards are one size and as
+    large as the pages allow; a page holds at most max cards plus squeezed ones. With lead_big the class teacher takes
+    the free space of one page when that makes the portrait clearly larger than a card; otherwise it is the first card.
+    Mirrors fillPages. Returns {'pages': [{'count', 'cap', 'top', 'lead'}], 'lead_card', 'fits'}."""
+    pages = len(grids)
+    most = lambda g: max(1, round(float(g.get('max') or 100)))
+
+    def attempt(m, big):
+        if m < 0:
+            return None
+        splits = [[m]] if pages == 1 else [[a, m-a] for a in range(m+1)] if pages == 2 else [distribute(m, pages)]
+        best = None
+        for split in splits:
+            # A page with cards keeps at least «от» of them, unless the whole list is shorter.
+            if any(k and k < min(least, m // pages) for k in split):
+                continue
+            if not big and any(not k for k in split) and m >= pages:
+                continue
+            natural = [geometry(k, grids[i]) if k else None for i, k in enumerate(split)]
+            if any(k and not natural[i] for i, k in enumerate(split)):
+                continue
+            # «до» counts the cards of full rows; a squeezed row may add one card to each row.
+            if any(k and k-max(0, k-natural[i]['cols']*natural[i]['rows']) > most(grids[i]) for i, k in enumerate(split)):
+                continue
+            widths = [g['photo_w'] for g in natural if g]
+            common = min(widths) if widths else 0
+            settings = [{**grids[i], 'photoWidth': min(float(grids[i].get('photoWidth') or 85), common)} for i in range(pages)]
+            capped = [geometry(k, settings[i]) if k else None for i, k in enumerate(split)]
+            if any(k and not capped[i] for i, k in enumerate(split)):
+                continue
+            lead = None
+            if big:
+                # Beside the class teacher the cards take as few rows as they can, to leave the portrait the most room.
+                for i in range(pages):
+                    few = {**settings[i], 'fewRows': True}
+                    room = lead_room(few, i, geometry(split[i], few) if split[i] else None, split[i])
+                    if room and (lead is None or room['photo_w'] > lead['photo_w']):
+                        lead = room
+                if lead is None or (common and lead['photo_w'] < common*1.4):
+                    continue
+            squeezed = sum(max(0, k-capped[i]['cols']*capped[i]['rows']) for i, k in enumerate(split) if k)
+            # A whole page for the class teacher first (the teachers fit the other pages), then larger cards, then a larger portrait.
+            score = [1 if lead and not split[lead['used']] else 0, _half(common), _half(lead['photo_w']) if lead else 0, -squeezed,
+                     -abs(split[0]-(split[1] if len(split) > 1 else split[0]))]
+            if best is None or score > best['score']:
+                best = dict(score=score, split=split, common=common, lead=lead, big=big)
+        return best
+
+    found = (lead_big and count > 0 and attempt(count-1, True)) or attempt(count, False)
+    if not found:
+        return {'pages': [{'count': 0, 'cap': 0, 'top': False, 'push': 0, 'lead': None} for _ in grids], 'lead_card': True, 'fits': False}
+    lead = found['lead']
+    return {'pages': [{'count': k, 'cap': found['common'], 'max': grids[i].get('max'), 'top': bool(lead) and lead['used'] == i,
+                       'push': lead['push'] if lead and lead['used'] == i else 0,
+                       'lead': {'x': lead['x'], 'y': lead['y'], 'photo_w': lead['photo_w']} if lead and lead['used'] == i else None}
+                      for i, k in enumerate(found['split'])],
+            'lead_card': not found['big'], 'fits': True}
+
+
+def _half(value):
+    """Round to half a millimetre, as Math.round(v*2)/2 does in the editor."""
+    return math.floor(value*2+.5)/2
+
+
+def fill_capacity(grids, lead_big, least=1):
+    """The most people a block kept to its own spreads takes. Mirrors fillCapacity."""
+    n, k = 0, 1
+    while k <= 100 and k-n <= 6:
+        if fill_pages(grids, k, lead_big, least)['fits']:
+            n = k
+        k += 1
+    return n
+
+
+def page_settings(layer, fill):
+    """The vignette of a page as a block kept to its own spreads lays it out: cards no wider than the common width, and on
+    the class teacher's page as few rows as fit, standing at the top. Mirrors pageSettings."""
+    if not fill or not fill.get('cap'):
+        return layer
+    out = {**layer, 'max': fill.get('max'), 'photoWidth': min(float(layer.get('photoWidth') or 85), fill['cap'])}
+    if fill.get('top'):
+        out.update(anchor=TOP_OF.get(layer.get('anchor'), 'top'), fewRows=True, pushY=fill.get('push') or 0)
+    return out
 
 
 def pages_for(section, master, snapshot, owner, issue):
@@ -241,7 +481,7 @@ def pages_for(section, master, snapshot, owner, issue):
     settings = next(l for l in grids[0]['layers'] if l['type']=='grid')
     records = snapshot[settings['source']][:]
     if settings['source']=='teachers' and settings.get('excludeLead') and any(l['type']=='photo' and not l.get('hidden') and l['source']=='lead' for p in pages for l in p['layers']):
-        records = records[1:]
+        records = [t for t in records if t is not class_teacher(snapshot)]
     # Every page template must accommodate every balanced part.
     all_settings = [l for p in grids for l in p['layers'] if l['type']=='grid']
     capacity = min(max((n for n in range(1, int(l['max'])+1) if geometry(n,l)), default=0) for l in all_settings)
@@ -268,13 +508,18 @@ def pages_for(section, master, snapshot, owner, issue):
     return result
 
 
+def class_teacher(snapshot):
+    """The class teacher of the order, as marked in its teacher choice; none when nobody is marked."""
+    return next((t for t in snapshot['teachers'] if t.get('is_class_teacher')), None)
+
+
 def list_capacity(section):
     """Cards that fit on the tightest vignette page of a list block (rulesVersion 2)."""
     settings = section.get('list') or {}
     grids = [l for s in section['spreads'] for p in s['pages'] for l in p['layers'] if l['type'] == 'grid']
     if not grids:
         return 0
-    return min(max((n for n in range(1, int(settings.get('max', 12)) + 1) if geometry(n, l)), default=0) for l in grids)
+    return min(max((n for n in range(1, int(settings.get('max', 100)) + 1) if geometry(n, l)), default=0) for l in grids)
 
 
 def blocks_pages(section, snapshot, owner, issue, lists=None):
@@ -304,11 +549,14 @@ def blocks_pages(section, snapshot, owner, issue, lists=None):
         records = snapshot[settings['source']][:]
         if settings['source'] == 'teachers' and settings.get('excludeLead') and any(
                 l['type'] == 'photo' and not l.get('hidden') and l['source'] == 'lead' for p in pages.values() for l in p['layers']):
-            records = records[1:]
+            records = [t for t in records if t is not class_teacher(snapshot)]
     rest = records[start:]
     if source and not rest:
         lists[section['id']] = (records, start)
         return []
+    if settings.get('fill') == 'spreads' and not source:
+        lists[section['id']] = (records, len(records))
+        return spread_pages(section, settings, rest, snapshot, issue)
     plan = list_plan(section, len(rest), list_capacity(section))
     lists[section['id']] = (records, start + plan['taken'])
     records = rest
@@ -330,6 +578,38 @@ def blocks_pages(section, snapshot, owner, issue, lists=None):
                 result.append((page, None, chunks[item['part']], layout_count))
             else:
                 result.append((page, None, [] if has_grid(page) else None, 0))
+    return result
+
+
+def spread_pages(section, settings, people_list, snapshot, issue):
+    """A list kept to the block's own spreads: each spread once, the list shared by fill_pages. Pages carry a fifth item:
+    the page's share of the fill, the class teacher on its free space, and the grid the block's names are sized for.
+    Mirrors spreadPages."""
+    templates = [(p, next((l for l in p['layers'] if l['type'] == 'grid'), None)) for s in section['spreads'] for p in s['pages']]
+    grids = [{**g, 'max': settings.get('max', 100)} for _, g in templates if g]
+    teacher = class_teacher(snapshot)
+    lead = teacher if settings['source'] == 'teachers' and grids and grids[0].get('lead') == 'big' and teacher in people_list else None
+    least = int(settings.get('min', 1))
+    fill = fill_pages(grids, len(people_list), bool(lead), least)
+    if not fill['fits']:
+        most = fill_capacity(grids, bool(lead), least)
+        issue('error', section['id'], f'Не помещаются все: эти развороты принимают до {most}.' if most else PLAN_ISSUES['no-fit'][1])
+    # The class teacher without room of his own is the first card.
+    others = [p for p in people_list if p is not lead] if lead else people_list
+    if lead and fill['lead_card']:
+        others = [lead] + others
+    layouts = [geometry(f['count'], page_settings(grids[i], f)) for i, f in enumerate(fill['pages']) if f['count']]
+    narrow = min((narrowest(g) for g in layouts if g), key=lambda g: g['parts']['name'][2], default=None)
+    result, offset, at = [], 0, 0
+    for page, grid in templates:
+        if not grid:
+            result.append((page, None, None, 0))
+            continue
+        f = fill['pages'][at]
+        at += 1
+        chunk = others[offset:offset + f['count']]
+        offset += f['count']
+        result.append((page, None, chunk, len(chunk), {**f, 'lead_person': lead if f['lead'] and not fill['lead_card'] else None, 'font_geo': narrow}))
     return result
 
 
@@ -531,7 +811,8 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                 e['text']=auto_text.apply_case(e['text'],e['textCase'])
             if e['type']=='text' and e.get('fit'):
                 fit_text(e)
-            elif e['type']=='text' and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
+            # Card captions of a vignette are checked where they are sized, with the person named.
+            elif e['type']=='text' and '/card[' not in e['key'] and measurer.height(e['text'],e['font'],e['size'],e['leading'],e['box'][2], e.get('letterSpacing') or 0) > e['box'][3]+.1:
                 issue('error',e['key'],'Текст выходит за границы рамки')
         blank_sides = []
         # Both page backgrounds go first: an object may cross the fold and must not be covered by the next page.
@@ -544,13 +825,14 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
         if painted_spine:
             current[0] = (2, -1, -1, -1)
             add({'key':f'{spread_key}/spine','type':'rect','box':[page_width,0,gap,page_height],'fill':section['spineColor']})
-        for side,(page, item, records, layout_count) in enumerate(pair):
+        for side,(page, item, records, layout_count, *extra) in enumerate(pair):
+            fill = extra[0] if extra else None
             if (section['id'], index + side) in blanks:
                 blank_sides.append(side); continue
             if page is None: continue
             appearance={}
             prefix=f'{spread_key}/{side}'
-            lead = snapshot['teachers'][0] if snapshot['teachers'] else None
+            lead = class_teacher(snapshot)
             styles = {style['id']: style for style in master.get('textStyles', [])}
             for position, layer in enumerate(page['layers']):
                 if layer.get('hidden'): continue
@@ -646,45 +928,78 @@ def generate(edition, snapshot, measurer, overrides=(), only_owner=None):
                         else:
                             add({**slot,'type':'rect','fill':layer.get('fill','#e6e1ea')})
                 elif layer['type']=='grid':
-                    if not records: continue
-                    geo=geometry(layout_count,layer)
+                    lead_card = fill and fill.get('lead') and fill.get('lead_person')
+                    if not records and not lead_card: continue
+                    settings=page_settings(layer,fill)
+                    geo=geometry(layout_count or 1,settings)
                     if not geo:
                         issue('error',key,'Виньетки не помещаются'); continue
                     frame_style={key:appearance[key] for key in ('stroke','strokeWidth','strokeDash','strokeAlign','strokeCap','strokeJoin','strokeOpacity') if key in appearance}
                     # Corners, stroke and shadow belong to each portrait, not to the vignette area.
                     photo_style={'radius':layer.get('radius',0),**frame_style}
                     if isinstance(layer.get('shadow'),dict): photo_style.update(shadow=layer['shadow'],shadowGroup=key)
-                    cols=geo['cols']; cw=geo['cell_w']; ch=geo['cell_h']; pw=geo['photo_w']; parts=geo['parts']; zones=geo['zones']
+                    zones=geo['zones']; narrow=fill['font_geo'] if fill and fill.get('font_geo') else narrowest(geo)
                     size=layer['fontSize']; leading=float(layer.get('lineHeight') or 1.25)
                     # Shared reduction for the complete source, not individual cards.
                     all_people=snapshot[layer['source']]
-                    while size>layer['minFontSize'] and any(measurer.height(name(p),font,size,size*leading,parts['name'][2]*.97, layer.get('letterSpacing') or 0)>geo['name_h']+.1 for p in all_people): size=max(layer['minFontSize'],size-.5)
+                    # Letter case changes the width, so names are measured as they will be printed.
+                    card_name = lambda person: auto_text.apply_case(name(person), layer.get('textCase', ''))
+                    # Beside the photo a name takes the lines the photo height leaves; elsewhere two lines at its size.
+                    side_room = name_room(narrow) if zones['name'] in ('left','right') else None
+                    name_fits = lambda person, s: caption_fits(measurer, card_name(person), font, s, leading, narrow['parts']['name'][2]*.97,
+                                                               side_room if side_room is not None else 2*s*.3528*leading, layer.get('letterSpacing') or 0)
+                    while size>layer['minFontSize'] and not all(name_fits(p,size) for p in all_people): size=max(layer['minFontSize'],size-.5)
                     detail_style={'font':layer.get('detailFont',layer['font']),'bold':layer.get('detailBold',False),'italic':layer.get('detailItalic',False)}
-                    detail_size=layer.get('detailFontSize',9); detail_leading=detail_size*layer.get('detailLineHeight',1.25)
-                    for i,person in enumerate(records):
-                        x=bounds[0]+geo['offset_x']+(i%cols)*(cw+layer['gap']); y=bounds[1]+geo['offset_y']+(i//cols)*(ch+layer['gap'])
+                    detail_line=float(layer.get('detailLineHeight',1.25)); detail_max=layer.get('detailFontSize',9)
+                    detail_min=min(detail_max,float(layer.get('detailMinFontSize',detail_max)))
+                    detail_noun='Цитата' if layer['source']=='students' else 'Предмет'
+                    # Every card of the page, and the class teacher's larger card on the free space.
+                    items=[(person,sx,sy,narrowest(geo) if squeezed else geo) for person,(sx,sy,squeezed) in zip(records,card_slots(len(records),geo,settings))]
+                    if lead_card:
+                        big=card_parts(fill['lead']['photo_w'],lead_frame(layer))
+                        items.append((fill['lead_person'],fill['lead']['x'],fill['lead']['y'],{**geo,'photo_w':fill['lead']['photo_w'],'photo_h':big['photo_h'],'parts':big['parts']}))
+                    for person,sx,sy,card in items:
+                        # A squeezed row holds narrower cards: their photo and captions follow that width.
+                        parts=card['parts']; pw=card['photo_w']; ph=card['photo_h']
+                        x=bounds[0]+sx; y=bounds[1]+sy
                         pk=key+'/card['+('student:' if layer['source']=='students' else 'teacher:')+person['id']+']'
                         px,py=parts['photo'][:2]
-                        add({**photo_element(pk+'/photo',[x+px,y+py,pw,geo['photo_h']],photo_for(person)),**photo_style},False)
-                        detail=(person.get('quote','') if layer['source']=='students' else person.get('school_subject','')) if layer.get('showDetail') else ''
+                        add({**photo_element(pk+'/photo',[x+px,y+py,pw,ph],photo_for(person)),**photo_style},False)
+                        detail=auto_text.apply_case((person.get('quote','') if layer['source']=='students' else person.get('school_subject','')) if layer.get('showDetail') else '', layer.get('detailTextCase', ''))
                         nx,ny,nw,_=parts['name']
-                        name_height=measurer.height(name(person),font,size,size*leading,nw,layer.get('letterSpacing') or 0)
+                        if not name_fits(person,size):
+                            issue('error',pk+'/name',f'Имя не помещается в подпись: {name(person)}')
+                        name_height=measurer.height(card_name(person),font,size,size*leading,nw,layer.get('letterSpacing') or 0)
                         dx=dy=dw=detail_height=None
                         if detail:
                             dx,dy,dw,_=parts['detail']
+                            # Each subject or quote shrinks on its own, down to «от», within the two lines kept for it.
+                            detail_fits=lambda s: caption_fits(measurer, detail, font_key(detail_style), s, detail_line, dw*.97, geo['detail_h'], layer.get('detailLetterSpacing') or 0)
+                            detail_size=detail_max
+                            while detail_size>detail_min and not detail_fits(detail_size): detail_size=max(detail_min,detail_size-.5)
+                            if not detail_fits(detail_size):
+                                issue('error',pk+'/detail',f'{detail_noun} не помещается в подпись: {name(person)}')
+                            detail_leading=detail_size*detail_line
                             detail_height=measurer.height(detail,font_key(detail_style),detail_size,detail_leading,dw,layer.get('detailLetterSpacing') or 0)
                         # Captions of one zone hug each other; over the photo they rest on its bottom edge.
-                        pad=min(geo['photo_name_gap'],pw/4); floor=py+geo['photo_h']-pad
+                        pad=min(geo['over_inset'],pw/4); floor=py+ph-pad
+                        # Beside the photo they stand at the set height by the text they really have, so «низ» puts
+                        # the last line at the photo foot.
+                        height=min(1,max(0,float(layer.get('sideAlign',.5) or 0))); stand=lambda h: py+max(0,(ph-h)*height)
+                        if zones['name'] in ('left','right'):
+                            ny=stand(name_height+(geo['name_detail_gap']+detail_height if detail and zones['detail']==zones['name'] else 0))
+                        if detail and zones['detail'] in ('left','right') and zones['detail']!=zones['name']: dy=stand(detail_height)
                         if detail and zones['detail']=='over': dy=floor-detail_height
                         if zones['name']=='over': ny=(dy-geo['name_detail_gap'] if detail and zones['detail']=='over' else floor)-name_height
                         elif detail and zones['detail']==zones['name']: dy=ny+name_height+geo['name_detail_gap']
-                        add(text_element(pk+'/name',[x+nx,y+ny,nw,geo['name_h']],name(person),size),False)
+                        add({**text_element(pk+'/name',[x+nx,y+ny,nw,max(geo['name_h'],name_height)],card_name(person),size),**caption_look(layer,'name')},False)
                         if detail:
                             detail_element={'key':pk+'/detail','type':'text','box':[x+dx,y+dy,dw,geo['detail_h']],'text':detail,'font':font_key(detail_style),'size':detail_size,'leading':detail_leading,'align':layer.get('detailAlign','center'),'valign':'top','color':layer.get('detailColor',layer['color']),'opacity':layer.get('opacity',100)}
                             if layer.get('detailLetterSpacing'): detail_element['letterSpacing']=layer['detailLetterSpacing']
+                            if layer.get('detailSkew'): detail_element['skew']=layer['detailSkew']
                             if layer.get('detailUnderline'): detail_element['underline']=True
                             if layer.get('detailStrike'): detail_element['strike']=True
-                            add(detail_element,False)
+                            add({**detail_element,**caption_look(layer,'detail')},False)
                 elif layer['type']=='svg':
                     add({**common,'type':'svg','svg':present_svg(layer['svg'], layer),'fill':layer.get('fill','#29282d')})
                 else:
