@@ -75,7 +75,7 @@ window.PhotoTools=(()=>{
     if(e.key==='Enter'&&state.selected.size){const b=$('#selection-dock [data-v2="confirm-photos"]');if(b&&!b.disabled){e.preventDefault();b.click();}}
   });
 
-  /* Actions panel next to the last selected photo; «Другой персоне» turns it into a person search in place. */
+  /* Actions panel next to the last selected photo; «Другому ученику» turns it into a person search in place. */
   let last=null,picking=false,hot=0,query='',hints=new Map(),hintGen=0;
   const button=(attrs,icon,label,title,cls='',key='')=>`<button class="sel-act ${cls}" ${attrs} title="${esc(title)}">${svgIcon(icon,16)}<span>${esc(label)}</span>${key?`<kbd>${key}</kbd>`:''}</button>`;
   function actions(){
@@ -85,7 +85,7 @@ window.PhotoTools=(()=>{
     if(state.view==='photos'&&globalThis.GeneralReview?.isGeneral())return GeneralReview.dockActions(button)+cover+del;
     const portrait=chosen.length&&chosen.every(p=>isPortrait(p)&&!busy(p));
     return (chosen.some(p=>p.uncertain&&canConfirmMatch(p))?`<button class="sel-act primary" data-v2="confirm-photos"></button>`:'')
-      +(portrait?button('data-photo-tools="move"','swap','Другой персоне','Назначить другую или новую персону','','P'):'')
+      +(portrait?button('data-photo-tools="move"','swap','Другому ученику','Назначить другого или нового ученика','','P'):'')
       +(portrait?button('data-photo-tools="to-general"','scene','Не портрет','Перенести в общую съёмку','','N'):'')+cover+del;
   }
   /* While something is selected the shoot row shows the count instead of its tools. */
@@ -143,7 +143,7 @@ window.PhotoTools=(()=>{
 
   function openPicker(){
     const chosen=[...state.selected].map(photo).filter(Boolean);
-    if(!chosen.length||!chosen.every(p=>isPortrait(p)&&!busy(p))){toast('Персону можно назначить только обработанным портретам');return;}
+    if(!chosen.length||!chosen.every(p=>isPortrait(p)&&!busy(p))){toast('Ученика можно назначить только обработанным портретам');return;}
     picking=true;query='';hot=0;hints=new Map();dock();$('#pick-q')?.focus({preventScroll:true});
     // No room on either side of the photo: scroll so the search opens below it.
     const el=$('#selection-dock'),tile=boxes().find(b=>b.dataset.photo===last)?.closest('.photo-tile');
@@ -168,12 +168,12 @@ window.PhotoTools=(()=>{
     const list=candidates(),current=[...new Set([...state.selected].map(id=>photo(id)?.person_id))];
     return list.map((p,j)=>`<button type="button" class="opt ${j===hot?'hot':''}" data-pick="${p.id}"><span class="ava">${p.cover?faceImg(p.cover):''}</span><span class="opt-name">${esc(p.name)}</span>${current.length===1&&current[0]===p.id?'<span class="tag">сейчас</span>':hints.has(p.id)?'<span class="tag like">похож</span>':''}</button>`).join('')
       +(list.length?'':'<div class="pp-empty">Никого не нашли</div>')
-      +`<button type="button" class="opt new ${hot===list.length?'hot':''}" data-pick=""><span class="ava">${svgIcon('plus',12)}</span><span class="opt-name">Новая персона</span></button>`;
+      +`<button type="button" class="opt new ${hot===list.length?'hot':''}" data-pick=""><span class="ava">${svgIcon('plus',12)}</span><span class="opt-name">Новый ученик</span></button>`;
   }
   /* The thumbnail scaled and shifted so the stored face box fills the circle; no extra requests. */
   function faceImg(p){const f=p.face;if(!f)return `<img src="/media/${p.id}/thumb${p.retouch_version?'?v='+p.retouch_version:''}" alt="" loading="lazy">`;const zoom=Math.min(6,Math.max(1,.62/f[2]));
     return `<img class="face" src="/media/${p.id}/thumb${p.retouch_version?'?v='+p.retouch_version:''}" alt="" loading="lazy" style="width:${(zoom*100).toFixed(1)}%;transform:translate(${(-(f[0]+f[2]/2)*100).toFixed(1)}%,${(-(f[1]+f[3]/2)*100).toFixed(1)}%)">`;}
-  function pickerHtml(){return `<div class="pp-head"><button type="button" class="ico-btn" data-photo-tools="pick-back" title="Назад · Esc" aria-label="Назад">${svgIcon('left',16)}</button><strong>Другой персоне <span>· ${state.selected.size} фото</span></strong></div><div class="pp-search">${svgIcon('search',15)}<input id="pick-q" type="text" placeholder="Найти по имени" autocomplete="off" aria-label="Найти персону" value="${esc(query)}"></div><div class="pp-list">${pickerRows()}</div><div class="pp-foot">↑↓ — выбрать · Enter — перенести · Esc — назад</div>`;}
+  function pickerHtml(){return `<div class="pp-head"><button type="button" class="ico-btn" data-photo-tools="pick-back" title="Назад · Esc" aria-label="Назад">${svgIcon('left',16)}</button><strong>Другому ученику <span>· ${state.selected.size} фото</span></strong></div><div class="pp-search">${svgIcon('search',15)}<input id="pick-q" type="text" placeholder="Найти по имени" autocomplete="off" aria-label="Найти ученика" value="${esc(query)}"></div><div class="pp-list">${pickerRows()}</div><div class="pp-foot">↑↓ — выбрать · Enter — перенести · Esc — назад</div>`;}
   /* Only the list is redrawn so the search field keeps focus. */
   function refreshPicker(){const box=$('#selection-dock .pp-list');if(!box)return;box.innerHTML=pickerRows();place();box.querySelector('.opt.hot')?.scrollIntoView({block:'nearest'});}
   function pickerKey(e){
@@ -186,16 +186,16 @@ window.PhotoTools=(()=>{
   async function assign(pid){
     const list=[...state.selected],o=state.order,i=pid?personIndex(pid):-1;
     document.querySelectorAll('#selection-dock .opt').forEach(b=>{b.disabled=true;});
-    try{await api(`/orders/${o.id}/move`,json('POST',{photo_ids:list,person_id:pid||null}));picking=false;$('#person-dialog')?.open&&$('#person-dialog').close();state.selected.clear();await refreshOrder();toast(pid?`${personName(o.persons[i],i)}: перенесено ${list.length}`:`Новая персона: ${list.length} фото`);}
+    try{await api(`/orders/${o.id}/move`,json('POST',{photo_ids:list,person_id:pid||null}));picking=false;$('#person-dialog')?.open&&$('#person-dialog').close();state.selected.clear();await refreshOrder();toast(pid?`${personName(o.persons[i],i)}: перенесено ${list.length}`:`Новый ученик: ${list.length} фото`);}
     catch(error){toast(error.message);refreshPicker();}
   }
   document.addEventListener('click',e=>{if(picking&&!e.target.closest('#selection-dock,.photo-tile'))closePicker();});
 
   /* Review: suggested matches grouped by person next to a confirmed reference, then unrecognised frames, then errors. */
   function reviewTile(p,kind){
-    const quick=kind==='match'?`<button type="button" class="quick ok" data-review="ok" data-id="${p.id}" title="Верно" aria-label="Верно">${svgIcon('ok',18)}</button><button type="button" class="quick no" data-review="wrong" data-id="${p.id}" title="Не он — выбрать персону" aria-label="Другая персона">${svgIcon('x',18)}</button>`
-      :kind==='unknown'?`<button type="button" class="quick" data-review="assign" data-id="${p.id}" title="Кто это? Выбрать персону" aria-label="Выбрать персону">${svgIcon('user',17)}</button><button type="button" class="quick" data-review="general" data-id="${p.id}" title="Не портрет — в общую съёмку" aria-label="Перенести в общую съёмку">${svgIcon('scene',17)}</button>`:'';
-    const note=kind==='unknown'?(p.status==='ready'?'Персона не определена':statuses[p.status]||'Проверить'):kind==='error'?p.error||statuses.error:'';
+    const quick=kind==='match'?`<button type="button" class="quick ok" data-review="ok" data-id="${p.id}" title="Верно" aria-label="Верно">${svgIcon('ok',18)}</button><button type="button" class="quick no" data-review="wrong" data-id="${p.id}" title="Не он — выбрать ученика" aria-label="Другой ученик">${svgIcon('x',18)}</button>`
+      :kind==='unknown'?`<button type="button" class="quick" data-review="assign" data-id="${p.id}" title="Кто это? Выбрать ученика" aria-label="Выбрать ученика">${svgIcon('user',17)}</button><button type="button" class="quick" data-review="general" data-id="${p.id}" title="Не портрет — в общую съёмку" aria-label="Перенести в общую съёмку">${svgIcon('scene',17)}</button>`:'';
+    const note=kind==='unknown'?(p.status==='ready'?'Ученик не определён':statuses[p.status]||'Проверить'):kind==='error'?p.error||statuses.error:'';
     // The checkbox goes first: a label activates its first labelable descendant, and buttons are labelable too.
     return `<label class="photo-tile review-tile" ${kind==='error'?'':'draggable="true"'}><input type="checkbox" data-photo="${p.id}" aria-label="Выбрать ${esc(p.filename)}" ${state.selected.has(p.id)?'checked':''}><span class="tile-media"><img src="/media/${p.id}/thumb${p.retouch_version?'?v='+p.retouch_version:''}" alt="${esc(p.filename)}" loading="lazy" decoding="async" draggable="false"><span class="tile-quick">${quick}</span></span><p title="${esc(p.filename)}">${esc(p.filename)}</p>${note?`<small>${esc(note)}</small>`:''}</label>`;
   }
@@ -209,8 +209,8 @@ window.PhotoTools=(()=>{
   function reviewBoard(photos){
     const o=state.order,matches=photos.filter(p=>p.status==='ready'&&p.person_id&&personIndex(p.person_id)>=0),errors=photos.filter(p=>p.status==='error'),unknown=photos.filter(p=>!matches.includes(p)&&!errors.includes(p));
     const groups=[...new Set(matches.map(p=>p.person_id))].sort((a,b)=>personIndex(a)-personIndex(b)).map(id=>({id,photos:matches.filter(p=>p.person_id===id)}));
-    if(!photos.length)return `<div class="empty-state review-done">${svgIcon('check',40)}<h3>Всё проверено</h3><p>Все портреты распределены по персонам.</p>${o.stage==='photos'?'<button class="primary" data-v2="send-forms">Отправить на анкеты</button>':''}</div>`;
-    return `<div class="review-board">${groups.length?`<section class="review-section"><header><h3>Проверьте совпадения <span>${matches.length}</span></h3><p>Слева эталон персоны. Нажмите «Всё верно» для группы или ✕ на лишнем снимке. Снимки можно перетащить в другую группу.</p></header><div class="review-groups">${groups.map(reviewGroup).join('')}</div></section>`:''}${unknown.length?`<section class="review-section"><header><h3>Не распознано <span>${unknown.length}</span></h3><p>Лицо не найдено, несколько лиц или персона не определена. Назначьте человека, перенесите в общую съёмку или удалите.</p></header><div class="photo-grid">${unknown.map(p=>reviewTile(p,'unknown')).join('')}</div></section>`:''}${errors.length?`<section class="review-section"><header><h3>Не удалось распознать <span>${errors.length}</span></h3><button class="secondary with-icon" data-action="retry">${svgIcon('retry',15)}Повторить</button></header><div class="photo-grid">${errors.map(p=>reviewTile(p,'error')).join('')}</div></section>`:''}</div>`;
+    if(!photos.length)return `<div class="empty-state review-done">${svgIcon('check',40)}<h3>Всё проверено</h3><p>Все портреты распределены по ученикам.</p>${o.stage==='photos'?'<button class="primary" data-v2="send-forms">Отправить на анкеты</button>':''}</div>`;
+    return `<div class="review-board">${groups.length?`<section class="review-section"><header><h3>Проверьте совпадения <span>${matches.length}</span></h3><p>Слева эталон ученика. Нажмите «Всё верно» для группы или ✕ на лишнем снимке. Снимки можно перетащить в другую группу.</p></header><div class="review-groups">${groups.map(reviewGroup).join('')}</div></section>`:''}${unknown.length?`<section class="review-section"><header><h3>Не распознано <span>${unknown.length}</span></h3><p>Лицо не найдено, несколько лиц или ученик не определён. Назначьте человека, перенесите в общую съёмку или удалите.</p></header><div class="photo-grid">${unknown.map(p=>reviewTile(p,'unknown')).join('')}</div></section>`:''}${errors.length?`<section class="review-section"><header><h3>Не удалось распознать <span>${errors.length}</span></h3><button class="secondary with-icon" data-action="retry">${svgIcon('retry',15)}Повторить</button></header><div class="photo-grid">${errors.map(p=>reviewTile(p,'error')).join('')}</div></section>`:''}</div>`;
   }
   async function confirm(photos,message){
     photos=photos.filter(p=>p.status==='ready'&&p.person_id);if(!photos.length)return;
@@ -248,7 +248,7 @@ window.PhotoTools=(()=>{
     list=list.filter(id=>isPortrait(photo(id))&&!busy(photo(id)));
     if(!list.length){toast('Выберите обработанные портреты');return;}
     const generals=(state.order.shoots||[]).filter(s=>s.kind==='general');
-    $('#action-content').innerHTML=`<form id="to-general-form"><div class="dialog-heading"><h2>Перенести в общую съёмку?</h2><button type="button" class="close" data-close="action-dialog" aria-label="Закрыть">×</button></div><p class="muted">Выбрано снимков: ${list.length}. Они уйдут из групп персон, а в общей съёмке их заново проанализируют для подбора в макет.</p><label>Куда<select name="target">${generals.map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join('')}<option value="new">＋ Новая общая съёмка</option></select></label><p class="error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-close="action-dialog">Отмена</button><button type="submit" class="primary">Перенести</button></div></form>`;
+    $('#action-content').innerHTML=`<form id="to-general-form"><div class="dialog-heading"><h2>Перенести в общую съёмку?</h2><button type="button" class="close" data-close="action-dialog" aria-label="Закрыть">×</button></div><p class="muted">Выбрано снимков: ${list.length}. Они уйдут из групп учеников, а в общей съёмке их заново проанализируют для подбора в макет.</p><label>Куда<select name="target">${generals.map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join('')}<option value="new">＋ Новая общая съёмка</option></select></label><p class="error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-close="action-dialog">Отмена</button><button type="submit" class="primary">Перенести</button></div></form>`;
     const form=$('#to-general-form');
     form.onsubmit=async e=>{e.preventDefault();const b=form.querySelector('[type=submit]'),orderId=state.order.id;b.disabled=true;try{let id=form.elements.target.value;if(id==='new')id=(await api(`/orders/${orderId}/shoots`,json('POST',{kind:'general',title:'Общая съёмка'}))).id;await api(`/orders/${orderId}/shoots/${id}/move-photos`,json('POST',{photo_ids:list}));$('#action-dialog').close();$('#person-dialog').close();list.forEach(x=>state.selected.delete(x));await refreshOrder();toast(`Перенесено в общую съёмку: ${list.length}`);}catch(error){form.querySelector('.error').textContent=error.message;b.disabled=false;}};
     if(!$('#action-dialog').open)$('#action-dialog').showModal();

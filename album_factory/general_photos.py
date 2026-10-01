@@ -55,7 +55,7 @@ def process_batch(server, rows, vision):
                 current = con.execute('SELECT status FROM photos WHERE id=?', (row['id'],)).fetchone()
                 if current is None or current['status'] != 'processing':
                     continue
-            raw = vision.analyze(row['path'], row.get('original'))
+            raw = vision.analyze(row['path'])
             with server.db() as con:
                 con.execute('BEGIN IMMEDIATE')
                 if (con.execute('SELECT status FROM photos WHERE id=?', (row['id'],)).fetchone() or {'status': None})['status'] != 'processing':
@@ -402,7 +402,7 @@ def install(app, s):
             photos = []
             if payload.action == 'person':
                 if not payload.person_id or not con.execute('SELECT 1 FROM persons WHERE id=? AND order_id=?', (payload.person_id, order_id)).fetchone():
-                    raise HTTPException(404, 'Персона не найдена в заказе')
+                    raise HTTPException(404, 'Ученик не найден в заказе')
                 photos = [r['photo_id'] for r in rows]
                 if len(photos) != len(set(photos)):
                     raise HTTPException(409, 'Один человек не может быть на снимке дважды')

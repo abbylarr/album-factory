@@ -8,7 +8,7 @@ import uuid
 
 from fastapi import HTTPException
 
-KINDS = ('forms_complete', 'approved', 'corrections', 'photos_ready')
+KINDS = ('forms_complete', 'approved', 'corrections', 'photos_ready', 'teacher_proposals')
 KEEP_DAYS = 30
 LIMIT = 50
 

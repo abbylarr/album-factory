@@ -30,7 +30,7 @@ class FakeVision:
     def __init__(self, names):
         self.names = names
 
-    def analyze(self, path, original=None):
+    def analyze(self, path):
         people = self.names[Path(path).stem]
         faces, bodies = [], []
         for i, key in enumerate(people):

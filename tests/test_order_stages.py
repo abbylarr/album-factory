@@ -83,8 +83,8 @@ class OrderStageTests(unittest.TestCase):
         order = self.client.get(f'/api/orders/{self.order}').json()
         self.assertEqual([x['id'] for x in order['shoots']], [second])
         self.assertEqual([p['id'] for p in order['photos']], [kept])
-        self.assertFalse((s.DATA / 'photos' / (gone + '.original')).exists())
-        self.assertTrue((s.DATA / 'photos' / (kept + '.original')).exists())
+        self.assertFalse((s.DATA / 'photos' / (gone + '.jpg')).exists())
+        self.assertTrue((s.DATA / 'photos' / (kept + '.jpg')).exists())
         self.assertEqual(self.client.delete(f'/api/orders/{self.order}/shoots/{first}').status_code, 404)
 
     def test_list_reports_approval_flag(self):

@@ -161,3 +161,7 @@ body.has-selection .photo-tile:not(:hover) input[data-photo]:not(:checked){opaci
   .ref-tile img{height:160px}
   .upload-pill{left:12px;right:12px;bottom:12px;width:auto}
 }
+/* «Все / Выбраны» in the shoot head are the same pills as in «Ученики», not quiet tools. */
+.v2 .shoot-tools .filter-chips .filter-chip{height:auto;padding:6px 12px;border-radius:999px;background:#ebebe6;color:#55574e;font-size:12px;font-weight:600}
+.v2 .shoot-tools .filter-chips .filter-chip:hover{background:#e2e2dc;color:#55574e}
+.v2 .shoot-tools .filter-chips .filter-chip.active,.v2 .shoot-tools .filter-chips .filter-chip.active:hover{background:#272922;color:#fff}

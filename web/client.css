@@ -205,16 +205,39 @@ textarea{resize:vertical}
   .dock{bottom:16px;padding:12px;border-radius:20px;background:#fffffff2;box-shadow:0 8px 30px #0000001f;left:16px;right:16px}
 }
 @media (min-width:1000px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
-.teacher-list{list-style:none;padding:0;margin:24px 0 16px;display:grid;gap:10px;max-width:760px}
-.teacher-row{display:flex;align-items:center;gap:14px;padding:10px 14px;background:#fff;border:1px solid #e8e8e3;border-radius:12px}
-.teacher-pick{display:flex;align-items:center;gap:14px;flex:1;min-width:0;cursor:pointer}
-.teacher-pick input,.teacher-lead input{width:18px;height:18px;flex-shrink:0;margin:0}
-.teacher-pick img,.teacher-empty{width:48px;height:64px;object-fit:cover;border-radius:8px;background:#eee;flex-shrink:0}
-.teacher-pick span:last-child{display:grid;gap:3px;min-width:0}
-.teacher-pick strong{overflow-wrap:anywhere}
-.teacher-pick small{color:#888;font-size:13px}
-.teacher-lead{display:flex;align-items:center;gap:8px;font-size:13px;color:#666;white-space:nowrap;cursor:pointer}
-@media(max-width:700px){.teacher-row{flex-wrap:wrap}.teacher-lead{padding-left:32px}}
+/* Teachers: picked like portraits; a chosen tile gets a pencil for the subject and the class-teacher mark. */
+.teacher-tile .tile-hit{position:absolute;inset:0;display:block;padding:0;border-radius:inherit;cursor:pointer}
+.teacher-tile span.tile-hit{cursor:default}
+.teacher-tile:not(.on) img{filter:saturate(.75);opacity:.9}
+.teacher-tile.on{box-shadow:0 0 0 3px var(--yellow)}
+.tile-initials{position:absolute;inset:0;display:grid;place-items:center;font-size:30px;font-weight:700;letter-spacing:1px;color:#9a9a94;padding-bottom:40px}
+.tile-edit{position:absolute;top:8px;left:8px;width:30px;height:30px;border-radius:50%;background:#fff;color:var(--ink);display:grid;place-items:center;box-shadow:0 2px 8px #00000026}
+.teacher-tile .caption{pointer-events:none}
+.teacher-tile:has(.tile-initials) .caption{background:none;color:var(--ink)}
+.teacher-tile:has(.tile-initials) .caption small{color:var(--muted);opacity:1}
+.teacher-tile .caption strong{font-size:13px}
+.lead-badge{display:inline-block;font-style:normal;font-size:11px;font-weight:700;background:var(--yellow);color:var(--ink);border-radius:6px;padding:2px 6px;margin-bottom:5px}
+.teacher-tile.proposed{background:#ebebe7;box-shadow:0 0 0 2px #d6d6d0 inset}
+.add-tile{display:grid;place-content:center;justify-items:center;gap:8px;background:transparent;border:2px dashed #cfcfca;color:var(--muted);font-size:14px;font-weight:600;text-align:center}
+.add-tile:hover{border-color:var(--ink);color:var(--ink)}
+.dock-count{margin:0 0 8px;font-size:14px;text-align:center}
+.dock-count span{color:var(--muted)}
+.dock .error:empty{display:none}
+.dock .primary:disabled{opacity:.55;cursor:default}
+.narrow-sheet{max-width:460px}
+.teacher-sheet h2{margin:0 0 4px;font-size:20px}
+.teacher-sheet .muted{margin:0}
+.sheet-who{display:flex;gap:14px;align-items:center;margin-bottom:6px}
+.sheet-face{position:relative;width:64px;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#e5e5e0;flex:none}
+.sheet-face img{width:100%;height:100%;object-fit:cover;display:block}
+.sheet-face .tile-initials{font-size:18px;padding:0}
+.teacher-sheet label.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 14px;font-weight:600;cursor:pointer}
+.teacher-sheet label.switch input[type=checkbox]{order:2;appearance:none;width:44px;height:26px;border-radius:13px;background:#d9d9d4;position:relative;flex:none;margin:0;padding:0;border:0;cursor:pointer;transition:background .15s}
+.teacher-sheet label.switch input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transition:transform .15s}
+.teacher-sheet label.switch input[type=checkbox]:checked{background:var(--ink)}
+.teacher-sheet label.switch input[type=checkbox]:checked::after{transform:translateX(18px)}
+.teacher-sheet .error:empty{display:none}
+.teacher-sheet .text-btn{width:100%;color:var(--muted)}
 .teacher-section{font-size:22px;margin:28px 0 6px}
 .sign-list{display:grid;gap:14px;margin:18px 0 10px;max-width:900px}
 .sign-card{display:grid;grid-template-columns:1fr;gap:18px;padding:14px;background:#fff;border:1px solid #e8e8e3;border-radius:14px}
@@ -234,7 +257,7 @@ textarea{resize:vertical}
 .sign-fields select{display:block;width:100%;border:1px solid var(--line);border-radius:12px;background:#fff;padding:13px 14px;margin-top:7px;font-size:16px;font-weight:400}
 .sign-fields .primary{margin-top:6px}
 
-.teacher-order-subject{display:block;font-size:12px;margin:10px 0}.teacher-order-subject input{display:block;width:100%;margin-top:5px}.teacher-row{flex-wrap:wrap}.teacher-order-subject{flex:1 1 100%}
+
 .teacher-sign-photo{display:block;width:100%;max-height:320px;object-fit:contain;border-radius:12px;background:#efedf0}
 
 .collection-parts{display:grid;gap:8px;margin-top:16px}.collection-parts>a{display:flex;align-items:center;gap:10px;padding:12px;background:#ffffff80;border-radius:12px;color:inherit}.collection-parts>a>span{display:grid;gap:3px;flex:1}.collection-parts strong{font-size:14px}.collection-parts small{font-size:12px;opacity:.7}.collection-parts img{width:18px;height:18px}

@@ -326,10 +326,14 @@ def school_short(con, order_id):
 def snapshot_for(con, order, data, master=False):
     photos = {}
     versions = {r['photo_id']: r['version'] for r in con.execute('SELECT r.* FROM photo_retouch r JOIN photos p ON p.id=r.photo_id WHERE p.order_id=?', (order['id'],))}
+    chosen = {r['photo_id'] for r in con.execute('SELECT s.photo_id FROM client_selections s JOIN persons p ON p.id=s.person_id WHERE p.order_id=?', (order['id'],))}
     for photo in data['photos']:
         if photo['status'] != 'ready':
             continue
         path = data['data_root'] / 'photos' / (photo['id'] + '.jpg')
+        if not path.is_file() and photo['id'] in chosen:
+            # A choice moved to a shrunk frame: the draft shows its thumbnail until the retouched file arrives.
+            path = path.with_name(photo['id'] + '.thumb.jpg')
         if not path.is_file():
             continue
         with Image.open(path) as image:
@@ -355,7 +359,7 @@ def snapshot_for(con, order, data, master=False):
         alternate = next((p['id'] for p in choices if p['id'] != chosen_id), chosen_id)
         selections.append({'owner': 'student:' + person['id'], 'role': 'alt_portrait', 'photo': alternate})
     if not master and len(students) < 3:
-        raise HTTPException(409, 'Для макета нужны портреты минимум трёх персон. Проверьте группы фотографий.')
+        raise HTTPException(409, 'Для макета нужны портреты минимум трёх учеников. Проверьте группы фотографий.')
     from .school_catalog import catalog_state
     return {'schema_version': 2, 'school_catalog_state': catalog_state(con, order['id']),
             'order': {'id': order['id'], 'school': order['school'], 'school_short': school_short(con, order['id']), 'city': order['school_city'], 'class_name': order['class_name'],
@@ -483,7 +487,9 @@ def install(app, s):
         missing = ([photo_id for photo_id, meta in layout['snapshot']['photos'].items() if not Path(meta['path']).is_file()]
                    if layout.get('frozen') else missing_layout_photos(layout['document'], s.DATA))
         for photo_id in missing:
-            layout['document'].setdefault('issues', []).append({'level': 'error', 'message': 'Фотография недоступна: ' + photo_id})
+            name = layout.get('photo_info', {}).get(photo_id, {}).get('filename')
+            message = f'Нет полного файла {name} — загрузите отретушированный' if name and not layout.get('frozen') else 'Фотография недоступна: ' + photo_id
+            layout['document'].setdefault('issues', []).append({'level': 'error', 'message': message})
         layout['status'] = layout_status(con, order_id, layout['document'])
         from .production import locked
         layout['status']['locked'] = locked(con, s.require_order(con, order_id))

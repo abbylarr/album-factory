@@ -383,3 +383,17 @@
 .v2 .pw-picking .photo-tile.pw-candidate{outline:3px solid #242522;outline-offset:-1px}
 .person-card .pw-card-quote{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 @media(max-width:760px){.pw{grid-template-columns:1fr}.pw-side{position:static}.pw-choice{max-width:260px}}
+/* Quote editing in the student window */
+.pw-quote{padding-right:40px}
+.pw-quote .person-edit{position:absolute;top:6px;right:6px;opacity:.55}
+.pw-quote .person-edit:hover,.pw-quote .person-edit:focus-visible{opacity:1}
+.pw-quote .person-edit svg{position:static}
+button.pw-quote.empty{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;font:inherit;font-size:13px}
+button.pw-quote.empty svg{position:static;color:#c9b25a}
+button.pw-quote.empty:hover{border-color:#d9d9d2;color:#55574e}
+.pw-quote-form textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid #d9d9d2;border-radius:12px;font:inherit;font-size:14px;line-height:1.5;resize:vertical}
+.pw-quote-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:6px}
+#person-content .pw-quote-actions button{display:grid;place-items:center;width:32px;height:32px;min-height:32px;padding:0;border:0;border-radius:8px;background:none;color:#81827d;cursor:pointer}
+#person-content .pw-quote-actions .pw-ok{background:#242522;color:#fff}
+#person-content .pw-quote-form[hidden],#person-content .pw-quote[hidden]{display:none}
+.pw-quote-form textarea:focus{outline:none;border-color:#242522}

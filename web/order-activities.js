@@ -26,6 +26,8 @@ const OrderActivities=(()=>{
     else{const f=fresh(o,'processing');if(f)list.push({key:'processing-done',tone:'done',icon:'check',label:'Фото обработаны',detail:f.detail});}
     const failed=errors(o);
     if(failed)list.push({key:'errors',tone:'alert',icon:'alert',label:'Не распознались',detail:count(failed,'фото','фото','фото'),actions:[['retry-photos','Повторить']]});
+    const offered=o.teacher_proposals||0;
+    if(offered)list.push({key:'teacher-proposals',tone:'task',icon:'users',label:offered>1?'Класс предложил учителей':'Класс предложил учителя',detail:offered>1?String(offered):'',actions:[['teacher-proposals','Посмотреть']]});
     if(s.review&&!['new','photos'].includes(o.stage))list.push({key:'review',tone:'task',icon:'eye',label:'Фото на проверку',detail:count(s.review,'снимок','снимка','снимков'),link:[`#order/${o.id}/review`,'Проверить']});
     return list;}
 
@@ -76,6 +78,7 @@ const OrderActivities=(()=>{
     if(name==='upload-dismiss'){await api(`/orders/${id}/uploads`,{method:'DELETE'});
       // Not uploading the rest: a queued layout now waits for processing only.
       if(state.order.layout_queue)await api(`/orders/${id}/layout/queue`,json('PATCH',{uploading:false}));await refreshOrder();}
+    if(name==='teacher-proposals')SchoolCatalog.proposals(state.order);
     if(name==='retry-photos'){await api(`/orders/${id}/retry`,json('POST',{}));await refreshOrder();toast('Обрабатываем заново');}}
-  return {html,slot,refreshCards,observe,uploaded,morph,action,ACTIONS:['upload-resume','upload-dismiss','retry-photos']};
+  return {html,slot,refreshCards,observe,uploaded,morph,action,ACTIONS:['upload-resume','upload-dismiss','retry-photos','teacher-proposals']};
 })();

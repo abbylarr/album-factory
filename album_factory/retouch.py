@@ -1,4 +1,4 @@
-"""Durable retouch workflow; camera originals and photo identities never change."""
+"""Durable retouch workflow; a retouched file replaces the photo's full-size JPEG, its identity never changes."""
 from pathlib import Path
 import asyncio
 import json
@@ -106,7 +106,7 @@ def install(app, s):
     @app.put('/api/orders/{order_id}/retouch')
     def set_mode(order_id: str, payload: Mode):
         if payload.mode not in {'asis', 'retouch'}:
-            raise HTTPException(422, 'Выберите способ обработки портретов')
+            raise HTTPException(422, 'Выберите, будете ли ретушировать портреты')
         with s.db() as con:
             con.execute('BEGIN IMMEDIATE')
             from .production import require_editable
@@ -123,20 +123,27 @@ def install(app, s):
                 photos = [p for p in chosen(con, order_id, shoot_id) if not todo or not p['retouch_version']]
                 if not photos:
                     raise HTTPException(409, 'Нет выбранных фотографий для выгрузки')
-                if any(not (s.DATA / 'photos' / (p['id']+'.original')).is_file() for p in photos):
-                    raise HTTPException(409, 'Оригиналы некоторых фотографий недоступны')
+                # A choice changed after the other frames shrank has only a thumbnail left.
+                missing = [p for p in photos if not (s.DATA / 'photos' / (p['id']+'.jpg')).is_file()]
+                photos = [p for p in photos if p not in missing]
+                if not photos:
+                    raise HTTPException(409, 'Полных файлов нет — возьмите кадры из своего архива')
                 with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp:
                     temp_path = Path(tmp.name)
                 used = set()
+                base = lambda p: Path(p['filename'].replace('\\', '/')).name
                 with zipfile.ZipFile(temp_path, 'w', compression=zipfile.ZIP_STORED) as z:
                     for p in photos:
-                        filename = Path(p['filename'].replace('\\', '/')).name
+                        filename = base(p)
                         label = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', p['name']).strip(' .')
                         entry = f'{label} — {filename}' if names and label else filename
                         if entry in used:
                             entry = f"{p['id'][:8]}/{entry}"
                         used.add(entry)
-                        z.write(s.DATA / 'photos' / (p['id']+'.original'), entry)
+                        z.write(s.DATA / 'photos' / (p['id']+'.jpg'), entry)
+                    if missing:
+                        z.writestr('Нет в архиве.txt', 'Этих кадров нет в полном размере, возьмите их из своего архива:\n'
+                                   + ''.join(f"{p['name']} — {base(p)}\n" for p in missing))
             return FileResponse(temp_path, media_type='application/zip', filename='chosen-portraits.zip',
                                 background=BackgroundTask(temp_path.unlink, missing_ok=True))
         except Exception:
@@ -184,5 +191,5 @@ def install(app, s):
                     path.write_bytes(data)
             raise
         finally:
-            for suffix in ['.original', *suffixes]:
+            for suffix in suffixes:
                 (s.DATA / 'photos' / (temp_id+suffix)).unlink(missing_ok=True)

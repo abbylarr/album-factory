@@ -166,12 +166,12 @@ class GeneralVision:
         matrix = np.array(values, dtype=np.float32)
         return matrix[:len(TAGS)], matrix[len(TAGS):]
 
-    def analyze(self, path, original=None):
+    def analyze(self, path):
         image = cv2.imread(str(path), cv2.IMREAD_COLOR)
         if image is None:
             raise ValueError('Cannot decode image')
         height, width = image.shape[:2]
-        moment, camera = taken_at(original if original and Path(original).is_file() else path)
+        moment, camera = taken_at(path)
         features = self.features
         with self.lock:
             raw = {'size': [width, height], 'taken_at': moment, 'camera': camera,

@@ -4,33 +4,35 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Album Factory — Заказы</title>
   <link rel="icon" href="/static/assets/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/v2.css?v=retouch-2">
+  <link rel="stylesheet" href="/static/style.css?v=2"><link rel="stylesheet" href="/static/v2.css?v=students-1">
   <link rel="stylesheet" href="/static/person-picker.css">
   <link rel="stylesheet" href="/static/phone-input.css?v=1">
   <link rel="stylesheet" href="/static/layout.css">
   <link rel="stylesheet" href="/static/general-review.css">
   <link rel="stylesheet" href="/static/board.css?v=queue-table-1">
-  <link rel="stylesheet" href="/static/photo-tools.css?v=retouch-2">
-  <link rel="stylesheet" href="/static/schools.css">
+  <link rel="stylesheet" href="/static/photo-tools.css?v=students-2">
+  <link rel="stylesheet" href="/static/schools.css?v=proposals-1">
   <link rel="stylesheet" href="/static/layout-start.css?v=4">
   <link rel="stylesheet" href="/static/select-menu.css?v=1">
   <link rel="stylesheet" href="/static/notifications.css?v=4">
   <link rel="stylesheet" href="/static/order-activities.css?v=cards-live-1">
-  <script src="/static/person-picker.js" defer></script>
+  <script src="/static/person-picker.js?v=students-1" defer></script>
   <script src="/static/phone-input.js?v=2" defer></script>
   <script src="/static/master-default.js" defer></script>
-  <script src="/static/order-activities.js?v=recog-1" defer></script>
-  <script src="/static/v2.js?v=retouch-2" defer></script>
-  <link rel="stylesheet" href="/static/retouch.css?v=1">
-  <script src="/static/retouch.js?v=1" defer></script>
-  <script src="/static/schools.js?v=teachers-upload-1" defer></script>
-  <script src="/static/layout-start.js?v=retouch-1" defer></script>
-  <script src="/static/photo-tools.js?v=retouch-2" defer></script>
-  <script src="/static/general-review.js?v=retouch-2" defer></script>
+  <script src="/static/order-activities.js?v=proposals-1" defer></script>
+  <script src="/static/v2.js?v=students-2" defer></script>
+  <link rel="stylesheet" href="/static/retouch.css?v=2">
+  <script src="/static/retouch.js?v=2" defer></script>
+  <script src="/static/schools.js?v=proposals-1" defer></script>
+  <script src="/static/layout-start.js?v=students-1" defer></script>
+  <script src="/static/photo-tools.js?v=students-1" defer></script>
+  <link rel="stylesheet" href="/static/photo-viewer.css?v=3">
+  <script src="/static/photo-viewer.js?v=2" defer></script>
+  <script src="/static/general-review.js?v=students-1" defer></script>
   <script src="/static/layout-canvas.js?v=edits-1" defer></script>
   <script src="/static/layout.js" defer></script>
   <script src="/static/select-menu.js?v=2" defer></script>
-  <script src="/static/notifications.js?v=recog-1" defer></script>
+  <script src="/static/notifications.js?v=proposals-1" defer></script>
 </head>
 <body class="v2">
 <aside class="sidebar">
@@ -51,7 +53,7 @@
   </form>
 </dialog>
 <dialog id="person-dialog" aria-labelledby="person-title"><div id="person-content"></div></dialog>
-<dialog id="move-dialog" aria-labelledby="move-title"><form id="move-form"><div class="dialog-heading"><h2 id="move-title">Перенести фотографии</h2><button type="button" class="close" data-close="move-dialog" aria-label="Закрыть">×</button></div><div id="person-picker"></div><div class="picker-footer"><button type="button" class="secondary" data-close="move-dialog">Отмена</button><button type="submit" class="primary">Назначить персону</button></div></form></dialog>
+<dialog id="move-dialog" aria-labelledby="move-title"><form id="move-form"><div class="dialog-heading"><h2 id="move-title">Перенести фотографии</h2><button type="button" class="close" data-close="move-dialog" aria-label="Закрыть">×</button></div><div id="person-picker"></div><div class="picker-footer"><button type="button" class="secondary" data-close="move-dialog">Отмена</button><button type="submit" class="primary">Назначить ученика</button></div></form></dialog>
 <dialog id="action-dialog" aria-label="Действия с заказом"><div id="action-content"></div></dialog>
 <dialog id="design-dialog" aria-labelledby="design-title"><form id="design-form"><div class="dialog-heading"><h2 id="design-title">Новый дизайн</h2><button type="button" class="close" data-close="design-dialog" aria-label="Закрыть">×</button></div><label>Название дизайна<input name="name" placeholder="Тёплый сентябрь" maxlength="80" required></label><div class="form-row"><label>Первая комплектация<input name="package_name" value="Стандарт" maxlength="80" required></label><label>Цена альбома, ₽<input name="price" type="number" value="2500" min="0" max="1000000" required></label></div><div class="idml-field"><div class="idml-head"><span>Импорт макета из InDesign</span><span class="muted">по желанию</span><button type="button" class="help-dot" aria-label="Как подготовить макет" aria-describedby="idml-help">?</button><div class="idml-help" id="idml-help" role="tooltip"><strong>Как подготовить</strong><ul><li>В InDesign: Файл → Сохранить как → InDesign Markup (IDML).</li><li>Повторяющиеся страницы делайте мастер-страницами.</li><li>Держите фото в папках «Портреты» и «Учителя» — по ним понятно, чей снимок.</li><li>Приложите файлы шрифтов TTF или OTF.</li></ul><strong>Что перенесётся</strong><ul><li>Формат, вылеты, развороты и все рамки.</li><li>Тексты с оформлением — как общие стили.</li><li>Имена, цитаты, школа, класс, год и даты съёмок — как данные заказа.</li><li>Личные развороты — одним блоком, учителя — виньеткой.</li></ul><p>Тени, градиенты и декоративные картинки не переносятся.</p></div></div><label class="idml-drop"><input name="idml" type="file" accept=".idml"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg><span class="file-box" data-empty="Перетащите файл IDML или нажмите, чтобы выбрать">Перетащите файл IDML или нажмите, чтобы выбрать</span></label><label class="idml-drop idml-fonts" data-idml-fonts hidden><input name="fonts" type="file" accept=".ttf,.otf" multiple><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19 9.5 5h1L16 19M6.3 13.5h7.4"/><path d="M17 10h4M19 10v9"/></svg><span class="file-box" data-empty="Шрифты макета: перетащите TTF или OTF">Шрифты макета: перетащите TTF или OTF</span></label></div><p class="error" role="alert"></p><button class="primary wide" type="submit">Создать и открыть редактор</button></form></dialog>
 <dialog id="package-dialog" aria-labelledby="package-title"><form id="package-form"><div class="dialog-heading"><h2 id="package-title">Новая комплектация</h2><button type="button" class="close" data-close="package-dialog" aria-label="Закрыть">×</button></div><p class="muted">Скопируем все развороты выбранной комплектации. Дальше их можно изменять независимо.</p><label>Название<input name="name" placeholder="Эконом" maxlength="80" required></label><label>Цена альбома, ₽<input name="price" type="number" min="0" max="1000000" value="1500" required></label><label>Взять за основу<select name="source_id"></select></label><p class="error" role="alert"></p><button class="primary wide" type="submit">Создать комплектацию</button></form></dialog>

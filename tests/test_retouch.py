@@ -1,4 +1,4 @@
-"""Real file replacement, scoping, review invalidation and original archive export."""
+"""Real file replacement, scoping, review invalidation and chosen-portrait archive export."""
 from io import BytesIO
 import json
 import unittest
@@ -30,9 +30,9 @@ class RetouchTests(unittest.TestCase):
         return self.client.post(f'/api/orders/{order or self.order}/retouched',
                                 params={'filename': filename, **({'shoot_id': shoot_id} if shoot_id else {})}, content=body)
 
-    def test_replace_keeps_identity_original_quote_and_choice(self):
+    def test_replace_keeps_identity_quote_and_choice(self):
         photo = self.selected()
-        original = (s.DATA / 'photos' / (photo+'.original')).read_bytes()
+        original = (s.DATA / 'photos' / (photo+'.jpg')).read_bytes()
         with s.db() as con:
             con.execute("UPDATE client_selections SET first_name='Анна',last_name='Иванова',quote='Спасибо!' WHERE person_id='person'")
         response = self.upload()
@@ -44,9 +44,8 @@ class RetouchTests(unittest.TestCase):
         self.assertEqual(order['persons'][0]['quote'], 'Спасибо!')
         self.assertEqual(order['persons'][0]['choice_source'], 'photographer')
         self.assertEqual(order['persons'][0]['selected_photo_id'], photo)
-        self.assertEqual((s.DATA/'photos'/(photo+'.original')).read_bytes(), original)
         self.assertNotEqual((s.DATA/'photos'/(photo+'.jpg')).read_bytes(), original)
-        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 3)
+        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 2)
 
     def test_suffixes_and_named_archive_round_trip(self):
         self.selected()
@@ -60,7 +59,7 @@ class RetouchTests(unittest.TestCase):
             con.execute("UPDATE photos SET filename='DSC00300.jpg' WHERE id=?", (other,))
         self.assertEqual(self.upload('DSC00300-Edit.jpg').json()['status'], 'not_chosen')
         self.assertEqual(self.upload('no-pair.jpg').json()['status'], 'unknown')
-        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 6)
+        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 4)
 
     def test_ambiguous_names_require_shoot_scope(self):
         first = self.selected()
@@ -82,7 +81,7 @@ class RetouchTests(unittest.TestCase):
         before = (s.DATA/'photos'/(photo+'.jpg')).read_bytes()
         self.assertEqual(self.upload(body=b'not a photo').status_code, 415)
         self.assertEqual((s.DATA/'photos'/(photo+'.jpg')).read_bytes(), before)
-        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 3)
+        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 2)
 
     def test_print_lock_applies_to_replacement_and_choice(self):
         photo = self.selected()
@@ -90,17 +89,17 @@ class RetouchTests(unittest.TestCase):
             con.execute("UPDATE orders SET stage='print' WHERE id=?", (self.order,))
         self.assertEqual(self.upload().status_code, 409)
         self.assertEqual(self.client.put(f'/api/orders/{self.order}/persons/person/choice', json={'photo_id': photo}).status_code, 409)
-        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 3)
+        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 2)
 
-    def test_archive_contains_camera_bytes_and_names_and_todo(self):
+    def test_archive_contains_stored_bytes_and_names_and_todo(self):
         photo = self.selected()
-        original = (s.DATA/'photos'/(photo+'.original')).read_bytes()
-        self.upload()
-        response = self.client.get(f'/api/orders/{self.order}/chosen/archive')
+        original = (s.DATA/'photos'/(photo+'.jpg')).read_bytes()
+        response = self.client.get(f'/api/orders/{self.order}/chosen/archive?todo=true')
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as z:
             self.assertEqual(z.namelist(), ['Имя — DSC00298.jpg'])
             self.assertEqual(z.read(z.namelist()[0]), original)
+        self.upload()
         self.assertEqual(self.client.get(f'/api/orders/{self.order}/chosen/archive?todo=true').status_code, 409)
         with zipfile.ZipFile(BytesIO(self.client.get(f'/api/orders/{self.order}/chosen/archive?names=false').content)) as z:
             self.assertEqual(z.namelist(), ['DSC00298.jpg'])
@@ -143,7 +142,7 @@ class RetouchTests(unittest.TestCase):
         self.assertEqual(self.client.put(f'/api/orders/{self.order}/retouch',json={'mode':'retouch'}).status_code, 200)
         response = self.client.post(f'/api/orders/{self.order}/layout/publish')
         self.assertEqual(response.status_code,409)
-        self.assertIn('Не обработано',response.text)
+        self.assertIn('Без ретуши',response.text)
         with patch('album_factory.production.save_publication_source'):
             self.assertEqual(self.client.post(f'/api/orders/{self.order}/layout/publish?allow_unretouched=true').status_code,200)
 
@@ -151,7 +150,7 @@ class RetouchTests(unittest.TestCase):
         self.selected()
         self.assertEqual(self.upload(shoot_id='foreign').json()['status'], 'unknown')
         self.assertEqual(self.upload(order='missing').status_code, 404)
-        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 3)
+        self.assertEqual(len(list((s.DATA/'photos').iterdir())), 2)
 
     def test_general_photo_cannot_be_portrait_choice(self):
         photo = self.photo()

@@ -218,12 +218,13 @@ const SchoolCatalog=(()=>{
     if(!data.school){el.innerHTML='<p class="muted small">Школа заказа не выбрана из каталога. Откройте «⋯ → Изменить заказ» и выберите школу, чтобы класс мог отметить учителей.</p>';return;}
     if(!data.teachers.length){el.innerHTML=`<p class="muted small">В каталоге у школы «${esc(data.school.name)}» пока нет учителей.${data.layout_outdated?' Макет содержит прежние данные — обновите его.':''} <a href="#order/${encodeURIComponent(id)}/teachers">Загрузить фотографии →</a></p>`;return;}
     const picked=data.teachers.filter(t=>t.selected).length;
+    const offered=data.proposals.length?`<p class="warn small">Класс предложил учителей: ${data.proposals.length} · <button type="button" class="text-button" data-teacher-proposals>Посмотреть</button></p>`:'';
     const lead=data.teachers.find(t=>t.is_class_teacher);const who=`Выбрано ${teacherLabel(picked)}${lead?' · Классный руководитель: '+esc(lead.name):''}`;
     if(state.view==='client'){
       const selected=data.teachers.filter(t=>t.selected);
-      el.innerHTML=`<p class="muted small">${who}</p><div class="teacher-selection-summary">${selected.slice(0,8).map(t=>`<span class="teacher-photo small" title="${esc(t.name)}">${avatar(t)}</span>`).join('')}${picked>8?`<span class="muted small">+${picked-8}</span>`:''}<a class="text-button" href="#order/${encodeURIComponent(id)}/teachers">${svgIcon('edit',16)} Изменить список</a></div>`;return;
+      el.innerHTML=`${offered}<p class="muted small">${who}</p><div class="teacher-selection-summary">${selected.slice(0,8).map(t=>`<span class="teacher-photo small" title="${esc(t.name)}">${avatar(t)}</span>`).join('')}${picked>8?`<span class="muted small">+${picked-8}</span>`:''}<a class="text-button" href="#order/${encodeURIComponent(id)}/teachers">${svgIcon('edit',16)} Изменить список</a></div>`;return;
     }
-    el.innerHTML=`<p class="muted small">${who}</p>${data.unsigned_groups?`<p class="warn small">Не подписано учителей на фото: ${data.unsigned_groups}. Откройте выбранные кадры классу или подпишите сами. <a href="#order/${encodeURIComponent(id)}/teachers" class="text-button">Открыть фотографии →</a></p>`:''}${data.layout_outdated?'<p class="warn small">Данные школы или учителей изменились после сборки. Обновите макет, чтобы применить изменения.</p>':''}<form id="order-teachers-form"><div class="teacher-choice-list">${data.teachers.map(t=>`<div class="teacher-choice"><label class="teacher-choice-main"><input type="checkbox" name="teacher" value="${esc(t.id)}" ${t.selected?'checked':''} ${data.locked?'disabled':''}><span class="teacher-photo small">${avatar(t)}</span><span><strong>${esc(t.name)}</strong><small>${t.archived?'В архиве · ':''}${t.has_portrait?'':'Нет портрета · '}${esc(t.subject)}</small></span></label><label class="teacher-subject">Предмет в этом классе<input data-subject="${esc(t.id)}" maxlength="100" value="${esc(t.subject)}" ${data.locked?'disabled':''}></label><label class="teacher-lead"><input type="radio" name="lead" value="${esc(t.id)}" ${t.is_class_teacher?'checked':''} ${data.locked?'disabled':''}>Кл. руководитель</label></div>`).join('')}</div>${data.locked?'<p class="muted small">Заказ в печати — состав учителей зафиксирован.</p>':'<button type="button" class="text-button" data-clear-lead>Снять назначение классного руководителя</button><p class="error" role="alert"></p><button class="secondary" type="submit">Сохранить учителей</button>'}</form>`;
+    el.innerHTML=`${offered}<p class="muted small">${who}</p>${data.unsigned_groups?`<p class="warn small">Не подписано учителей на фото: ${data.unsigned_groups}. Откройте выбранные кадры классу или подпишите сами. <a href="#order/${encodeURIComponent(id)}/teachers" class="text-button">Открыть фотографии →</a></p>`:''}${data.layout_outdated?'<p class="warn small">Данные школы или учителей изменились после сборки. Обновите макет, чтобы применить изменения.</p>':''}<form id="order-teachers-form"><div class="teacher-choice-list">${data.teachers.map(t=>`<div class="teacher-choice"><label class="teacher-choice-main"><input type="checkbox" name="teacher" value="${esc(t.id)}" ${t.selected?'checked':''} ${data.locked?'disabled':''}><span class="teacher-photo small">${avatar(t)}</span><span><strong>${esc(t.name)}</strong><small>${t.archived?'В архиве · ':''}${t.has_portrait?'':'Нет портрета · '}${esc(t.subject)}</small></span></label><label class="teacher-subject">Предмет в этом классе<input data-subject="${esc(t.id)}" maxlength="100" value="${esc(t.subject)}" ${data.locked?'disabled':''}></label><label class="teacher-lead"><input type="radio" name="lead" value="${esc(t.id)}" ${t.is_class_teacher?'checked':''} ${data.locked?'disabled':''}>Кл. руководитель</label></div>`).join('')}</div>${data.locked?'<p class="muted small">Заказ в печати — состав учителей зафиксирован.</p>':'<button type="button" class="text-button" data-clear-lead>Снять назначение классного руководителя</button><p class="error" role="alert"></p><button class="secondary" type="submit">Сохранить учителей</button>'}</form>`;
     const form=$('#order-teachers-form'),draftKey='photographer-teachers-'+id;
     if(data.locked)return;
     let draft;try{draft=JSON.parse(sessionStorage.getItem(draftKey)||'null');}catch{}
@@ -235,14 +236,38 @@ const SchoolCatalog=(()=>{
     form.onsubmit=async e=>{e.preventDefault();const ids=[...form.querySelectorAll('[name=teacher]:checked')].map(x=>x.value),lead=form.querySelector('[name=lead]:checked')?.value||null;try{await api(`/orders/${encodeURIComponent(id)}/teachers`,json('PUT',{teacher_ids:ids,class_teacher_id:lead,subjects:Object.fromEntries([...form.querySelectorAll('[data-subject]')].filter(el=>ids.includes(el.dataset.subject)).map(el=>[el.dataset.subject,el.value]))}));try{sessionStorage.removeItem(draftKey);}catch{}toast('Учителя сохранены');orderBlock(order);}catch(error){form.querySelector('.error').textContent=error.message;}};
   }
 
+  // Teachers the class proposed: add to the school catalogue, match to a teacher already there, or decline.
+  async function proposals(order){
+    const id=order.id;let dialog=$('#proposals-dialog');
+    if(!dialog){document.body.insertAdjacentHTML('beforeend','<dialog id="proposals-dialog" class="proposals-dialog" aria-labelledby="proposals-title"><div id="proposals-content"></div></dialog>');dialog=$('#proposals-dialog');}
+    const root=$('#proposals-content'),norm=x=>(x||'').trim().toLowerCase().replace(/ё/g,'е');
+    const draw=data=>{
+      if(!data.proposals.length){dialog.close();return;}
+      const catalog=data.teachers.filter(t=>!t.archived);
+      root.innerHTML=`<div class="dialog-heading"><h2 id="proposals-title">Класс предложил учителей</h2><button type="button" class="close" data-close="proposals-dialog" aria-label="Закрыть">×</button></div><div class="proposal-list">${data.proposals.map(p=>{const match=catalog.find(t=>norm(t.last_name)===norm(p.last_name)&&(!p.first_name||norm(t.first_name)===norm(p.first_name)))||catalog.find(t=>norm(t.last_name)===norm(p.last_name));
+        return `<form class="proposal" data-proposal="${esc(p.id)}"><div class="proposal-head"><strong>${esc(p.name)}</strong>${p.subject?`<span class="muted small">${esc(p.subject)}</span>`:''}${p.is_class_teacher?'<span class="proposal-lead">Классный руководитель</span>':''}</div>
+          <label class="proposal-target">Это<select name="target"><option value="">новый учитель</option>${catalog.map(t=>`<option value="${esc(t.id)}" ${match?.id===t.id?'selected':''}>${esc(t.name)}${t.subject?' · '+esc(t.subject):''}</option>`).join('')}</select></label>
+          <div class="proposal-fields" ${match?'hidden':''}><input name="last_name" value="${esc(p.last_name)}" maxlength="60" aria-label="Фамилия" placeholder="Фамилия"><input name="first_name" value="${esc(p.first_name)}" maxlength="60" aria-label="Имя" placeholder="Имя"><input name="patronymic" value="${esc(p.patronymic)}" maxlength="60" aria-label="Отчество" placeholder="Отчество"><input name="subject" value="${esc(p.subject)}" maxlength="100" aria-label="Предмет" placeholder="Предмет"></div>
+          <p class="error small" role="alert"></p><div class="proposal-actions"><button type="button" class="text-button" data-proposal-reject>Отклонить</button><button type="submit" class="primary">Добавить</button></div></form>`;}).join('')}</div>`;};
+    const after=async data=>{draw(data);document.dispatchEvent(new CustomEvent('teachers-changed',{detail:id}));if(state.order?.id===id){await refreshOrder();if($('#order-teachers'))orderBlock(state.order);}};
+    root.onchange=e=>{if(e.target.name==='target')e.target.closest('form').querySelector('.proposal-fields').hidden=!!e.target.value;};
+    root.onsubmit=async e=>{e.preventDefault();const f=e.target,v=Object.fromEntries(new FormData(f)),b=f.querySelector('[type=submit]');b.disabled=true;
+      try{const data=await api(`/orders/${encodeURIComponent(id)}/teacher-proposals/${encodeURIComponent(f.dataset.proposal)}/accept`,json('POST',v.target?{teacher_id:v.target}:{teacher:{last_name:v.last_name,first_name:v.first_name,patronymic:v.patronymic,subject:v.subject}}));toast('Учитель добавлен в альбом');await after(data);}
+      catch(error){f.querySelector('.error').textContent=error.message;b.disabled=false;}};
+    root.onclick=async e=>{const reject=e.target.closest('[data-proposal-reject]');if(!reject)return;const f=reject.closest('form');reject.disabled=true;
+      try{await after(await api(`/orders/${encodeURIComponent(id)}/teacher-proposals/${encodeURIComponent(f.dataset.proposal)}`,{method:'DELETE'}));}catch(error){f.querySelector('.error').textContent=error.message;reject.disabled=false;}};
+    root.innerHTML='<p class="muted">Загружаем…</p>';dialog.showModal();
+    try{draw(await api(`/orders/${encodeURIComponent(id)}/teachers`));}catch(error){root.innerHTML=`<p class="error">${esc(error.message)}</p>`;}
+  }
+
   function orderPage(order){
     $('#workspace').innerHTML='<div id="order-teacher-photo-workspace"></div><details class="forms-block"><summary>Выбранные учителя класса</summary><div id="order-teachers"></div></details>';
     $('#order-teacher-photo-workspace').append(orderFolder(order));
     orderBlock(order);const details=$('#workspace details');$('#workspace').addEventListener('click',e=>{if(e.target.closest('[data-order-photo-open]')){details.open=true;details.scrollIntoView({block:'start',behavior:'smooth'});}});
   }
 
-  document.addEventListener('click',e=>{if(e.target.closest('[data-school="new"]'))schoolForm(null);if(e.target.closest('[data-v2-teachers]'))state.shootId='teachers';});
+  document.addEventListener('click',e=>{if(e.target.closest('[data-teacher-proposals]')&&state.order)proposals(state.order);if(e.target.closest('[data-school="new"]'))schoolForm(null);if(e.target.closest('[data-v2-teachers]'))state.shootId='teachers';});
   // After an order upload of teacher files: redraw the open folders so new frames and groups show.
   const refreshFolders=()=>document.querySelectorAll('[data-teacher-photos]').forEach(root=>teacherPhotos(root,root.dataset.teacherPhotos,root.dataset.tphotoOrder||null));
-  return {page,orderBlock,upload,orderFolder,orderPage,refreshFolders,folderPreview};
+  return {page,orderBlock,upload,orderFolder,orderPage,refreshFolders,folderPreview,proposals};
 })();

@@ -6,6 +6,7 @@
     forms_complete:()=>({stage:'forms',tab:'client',text:'Все заполнили анкеты'}),
     approved:()=>({stage:'approval',tab:'layout',text:'Класс согласовал макет'}),
     corrections:n=>({stage:'approval',icon:'approve-alert',tab:'layout',text:n.count>1?`Правки от класса: ${n.count}`:'Класс прислал правку'}),
+    teacher_proposals:n=>({stage:'forms',icon:'users',tab:'teachers',text:n.count>1?`Класс предложил учителей: ${n.count}`:'Класс предложил учителя'}),
     photos_ready:n=>n.review_count?{stage:'photos',tab:'review',text:`Лица распознаны · ${n.review_count} на проверку`}:{stage:'photos',icon:'photo-done',tab:'photos',text:'Фото обработаны'},
   };
   let feed={items:[],unread:0},request=null;

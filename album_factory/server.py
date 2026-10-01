@@ -18,13 +18,13 @@ import time
 
 import cv2
 import numpy as np
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps, JpegImagePlugin, UnidentifiedImageError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Literal
-from . import shoots, order_stages, upload_runs
+from . import shoots, order_stages, storage, upload_runs
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .faces import FaceEngine
@@ -95,10 +95,10 @@ def init_db():
         # Backfill fingerprints for portraits selected before upload history existed.
         for teacher in con.execute("""SELECT id,school_id,portrait_path FROM teachers WHERE portrait_path!=''
                 AND id NOT IN (SELECT id FROM teacher_uploads)""").fetchall():
-            original = (DATA / teacher["portrait_path"]).with_suffix('.original')
-            if original.is_file():
+            stored = DATA / teacher["portrait_path"]
+            if stored.is_file():
                 con.execute("INSERT OR IGNORE INTO teacher_uploads VALUES (?,?,?)",
-                            (teacher["school_id"], hashlib.sha256(original.read_bytes()).hexdigest(), teacher["id"]))
+                            (teacher["school_id"], hashlib.sha256(stored.read_bytes()).hexdigest(), teacher["id"]))
         from .master_templates import init as init_masters
         init_masters(con)
         from .general_photos import init as init_general
@@ -124,13 +124,17 @@ def uid():
     return uuid.uuid4().hex
 
 
-def prepare_photo_files(body: bytes, photo_id: str) -> None:
-    """Validate image bytes and write original + working JPEG + thumbnail.
+PHOTO_SUFFIXES = (".jpg", ".thumb.jpg")
 
-    Camera JPEGs without EXIF rotation are stored as-is for the working file to
-    avoid a full re-encode on every upload.
+
+def prepare_photo_files(body: bytes, photo_id: str) -> None:
+    """Validate image bytes and write the one full-size JPEG + thumbnail.
+
+    Upright camera JPEGs are stored byte for byte. PNGs and rotated frames are
+    re-encoded once, upright, so every reader (fast reduced JPEG decode in
+    sorting, layout, print) can ignore EXIF orientation.
     """
-    paths = [DATA / "photos" / (photo_id + suffix) for suffix in [".original", ".jpg", ".thumb.jpg"]]
+    paths = [DATA / "photos" / (photo_id + suffix) for suffix in PHOTO_SUFFIXES]
     try:
         with Image.open(BytesIO(body)) as image:
             if image.format not in {"JPEG", "PNG", "MPO"}:
@@ -138,21 +142,23 @@ def prepare_photo_files(body: bytes, photo_id: str) -> None:
             width, height = image.size
             if width * height > MAX_PIXELS:
                 raise HTTPException(413, "Изображение больше 50 мегапикселей")
-            orientation = (image.getexif() or {}).get(0x0112, 1)
-            needs_reencode = image.format not in {"JPEG", "MPO"} or orientation not in (1, None)
-            paths[0].write_bytes(body)
-            if needs_reencode:
+            exif = image.getexif()
+            orientation = exif.get(0x0112, 1)
+            if image.format in {"JPEG", "MPO"} and orientation in (1, None):
+                paths[0].write_bytes(body)
+                thumb = image.copy()
+            else:
+                sampling = JpegImagePlugin.get_sampling(image) if image.format in {"JPEG", "MPO"} else 0
                 working = ImageOps.exif_transpose(image).convert("RGB")
                 working.load()
-                working.save(paths[1], "JPEG", quality=90, optimize=False)
+                exif[0x0112] = 1
+                extra = {"icc_profile": image.info["icc_profile"]} if image.info.get("icc_profile") else {}
+                working.save(paths[0], "JPEG", quality=95, subsampling=max(sampling, 0), exif=exif.tobytes(), optimize=False, **extra)
                 thumb = working
-            else:
-                paths[1].write_bytes(body)
-                thumb = ImageOps.exif_transpose(image)
             thumb.thumbnail((480, 640), Image.Resampling.BILINEAR)
             if thumb.mode != "RGB":
                 thumb = thumb.convert("RGB")
-            thumb.save(paths[2], "JPEG", quality=80, optimize=False)
+            thumb.save(paths[1], "JPEG", quality=80, optimize=False)
     except HTTPException:
         for path in paths:
             path.unlink(missing_ok=True)
@@ -197,7 +203,6 @@ def process_pending():
                 for row in rows:
                     row['path'] = str(DATA / 'photos' / (row['id'] + '.jpg'))
                     row['thumbnail'] = str(DATA / 'photos' / (row['id'] + '.thumb.jpg'))
-                    row['original'] = str(DATA / 'photos' / (row['id'] + '.original'))
                 con.executemany("UPDATE photos SET status='processing' WHERE id=?", [(r['id'],) for r in rows])
             if shoot and shoot['kind'] == 'general':
                 try:
@@ -342,6 +347,7 @@ def list_orders():
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status='error') AS error_count,
           (SELECT COUNT(*) FROM teacher_photos t WHERE t.order_id=o.id) AS teacher_total,
           (SELECT COUNT(*) FROM teacher_photos t WHERE t.order_id=o.id AND t.status='pending') AS teacher_pending,
+          (SELECT COUNT(*) FROM teacher_proposals tp JOIN order_terms ot ON ot.order_id=tp.order_id AND ot.school_id=tp.school_id WHERE tp.order_id=o.id) AS teacher_proposals,
           (SELECT COUNT(*) FROM photos p WHERE p.order_id=o.id AND p.status NOT IN ('pending','processing') AND NOT EXISTS (SELECT 1 FROM shoots s WHERE s.id=p.shoot_id AND s.kind='general') AND (p.status!='ready' OR p.uncertain=1 OR p.person_id IS NULL)) AS review_count,
           COALESCE((SELECT photo_id FROM order_covers WHERE order_id=o.id), (SELECT id FROM photos p WHERE p.order_id=o.id ORDER BY created_at,id LIMIT 1)) AS cover_id,
           (SELECT json_extract(l.document, '$.revision') FROM order_layouts l WHERE l.order_id=o.id) AS layout_revision,
@@ -463,9 +469,8 @@ def edit_order(order_id: str, payload: OrderEditInput):
         if old_school and old_school != school_id:
             if not payload.confirm_school_change:
                 raise HTTPException(409, "Смена школы сбросит состав учителей. Подтвердите смену школы")
-            con.execute("DELETE FROM order_teachers WHERE order_id=?", (order_id,))
-            con.execute("DELETE FROM order_teacher_state WHERE order_id=?", (order_id,))
-            con.execute("UPDATE teacher_photos SET order_id=NULL WHERE order_id=?", (order_id,))
+            from .school_catalog import forget as forget_teachers
+            forget_teachers(con, order_id)
         if not payload.class_name.strip():
             raise HTTPException(422, "Укажите класс")
         con.execute("UPDATE order_terms SET school_id=? WHERE order_id=?", (school_id, order_id))
@@ -518,6 +523,8 @@ def get_order(order_id: str):
         order["upload"] = upload_runs.state(con, order_id)
         teachers = con.execute("SELECT COUNT(*), COALESCE(SUM(status='pending'),0) FROM teacher_photos WHERE order_id=?", (order_id,)).fetchone()
         order["teacher_total"], order["teacher_pending"] = teachers[0], teachers[1]
+        from .school_catalog import proposals
+        order["teacher_proposals"] = len(proposals(con, order_id))
         order["max_photos"] = MAX_PHOTOS
         from .layout_queue import state as layout_queue_state
         order["layout_queue"] = layout_queue_state(con, order_id)
@@ -690,12 +697,12 @@ async def upload_photo(order_id: str, request: Request, filename: str, shoot_id:
         with db() as con:
             con.execute("BEGIN IMMEDIATE")
             if not con.execute("SELECT 1 FROM orders WHERE id=?", (order_id,)).fetchone():
-                for suffix in [".original", ".jpg", ".thumb.jpg"]:
+                for suffix in PHOTO_SUFFIXES:
                     (DATA / "photos" / (photo_id + suffix)).unlink(missing_ok=True)
                 raise HTTPException(404, "Заказ удалён")
             existing = con.execute("SELECT id,shoot_id FROM photos WHERE order_id=? AND sha=?", (order_id, sha)).fetchone()
             if existing:
-                for path in [DATA / "photos" / (photo_id + suffix) for suffix in [".original", ".jpg", ".thumb.jpg"]]:
+                for path in [DATA / "photos" / (photo_id + suffix) for suffix in PHOTO_SUFFIXES]:
                     path.unlink(missing_ok=True)
                 if existing['shoot_id'] != shoot_id:
                     raise HTTPException(409, "Эта фотография уже загружена в другую съёмку заказа")
@@ -703,7 +710,7 @@ async def upload_photo(order_id: str, request: Request, filename: str, shoot_id:
                 return {"id": existing["id"], "duplicate": True}
             count = con.execute("SELECT COUNT(*) FROM photos WHERE order_id=?", (order_id,)).fetchone()[0]
             if count >= MAX_PHOTOS:
-                for path in [DATA / "photos" / (photo_id + suffix) for suffix in [".original", ".jpg", ".thumb.jpg"]]:
+                for path in [DATA / "photos" / (photo_id + suffix) for suffix in PHOTO_SUFFIXES]:
                     path.unlink(missing_ok=True)
                 raise HTTPException(409, f"Лимит заказа — {MAX_PHOTOS} фотографий")
             con.execute(
@@ -725,6 +732,8 @@ def media(photo_id: str, variant: str):
         if not mvp.photo_visible(con, photo_id):
             raise HTTPException(404)
     path = DATA / "photos" / (photo_id + (".thumb.jpg" if variant == "thumb" else ".jpg"))
+    if not path.is_file():  # unchosen portraits keep only the thumbnail
+        raise HTTPException(404)
     return FileResponse(path, media_type="image/jpeg")
 
 
@@ -732,23 +741,33 @@ class PersonInput(BaseModel):
     name: str = Field(default="", max_length=100)
     first_name: str | None = Field(default=None, max_length=60)
     last_name: str | None = Field(default=None, max_length=60)
+    quote: str | None = Field(default=None, max_length=1000)
 
 
 @app.patch("/api/orders/{order_id}/persons/{person_id}")
 def rename_person(order_id: str, person_id: str, payload: PersonInput):
-    """Separate first and last names also correct what the student entered in the form."""
+    """Separate first and last names and the quote also correct what the student entered in the form."""
     split = payload.first_name is not None or payload.last_name is not None
     first, last = (payload.first_name or "").strip(), (payload.last_name or "").strip()
     name = f"{first} {last}".strip() if split else payload.name.strip()
+    renames = split or payload.quote is None
     with db() as con:
         con.execute("BEGIN IMMEDIATE")
         from .production import require_editable
         require_editable(con, require_order(con, order_id))
-        result = con.execute("UPDATE persons SET name=? WHERE id=? AND order_id=?", (name, person_id, order_id))
-        if result.rowcount != 1:
-            raise HTTPException(404, "Персона не найдена")
+        if con.execute("SELECT 1 FROM persons WHERE id=? AND order_id=?", (person_id, order_id)).fetchone() is None:
+            raise HTTPException(404, "Ученик не найден")
+        if renames:
+            con.execute("UPDATE persons SET name=? WHERE id=?", (name, person_id))
         if split and first and last:
             con.execute("UPDATE client_selections SET first_name=?, last_name=? WHERE person_id=?", (first, last, person_id))
+        if payload.quote is not None:
+            from . import mvp
+            quote, limit = payload.quote.strip(), mvp.quote_limit(con, order_id)
+            if len(quote) > limit:
+                raise HTTPException(422, f"Цитата не длиннее {limit} символов")
+            if con.execute("UPDATE client_selections SET quote=? WHERE person_id=?", (quote, person_id)).rowcount != 1:
+                raise HTTPException(409, "Сначала выберите портрет ученика")
         if con.execute('SELECT 1 FROM order_layouts WHERE order_id=?', (order_id,)).fetchone():
             from .layout_workspace import build_layout
             build_layout(con, __import__('sys').modules[__name__], order_id)
@@ -769,10 +788,10 @@ def choose_portrait(order_id: str, person_id: str, payload: ChoiceInput):
         require_editable(con, require_order(con, order_id))
         person = con.execute("SELECT name FROM persons WHERE id=? AND order_id=?", (person_id, order_id)).fetchone()
         if person is None:
-            raise HTTPException(404, "Персона не найдена")
+            raise HTTPException(404, "Ученик не найден")
         if con.execute("SELECT 1 FROM photos f LEFT JOIN shoots s ON s.id=f.shoot_id WHERE f.id=? AND f.order_id=? AND f.person_id=? AND f.status='ready' AND COALESCE(s.kind,'portrait')='portrait'",
                        (payload.photo_id, order_id, person_id)).fetchone() is None:
-            raise HTTPException(409, "Этот кадр не относится к персоне")
+            raise HTTPException(409, "Этот кадр не относится к ученику")
         first, _, last = (person["name"] or "").strip().partition(" ")
         con.execute("""INSERT INTO client_selections (person_id, photo_id, first_name, last_name, quote) VALUES (?,?,?,?,'')
             ON CONFLICT(person_id) DO UPDATE SET photo_id=excluded.photo_id""", (person_id, payload.photo_id, first, last.strip()))
@@ -782,6 +801,8 @@ def choose_portrait(order_id: str, person_id: str, payload: ChoiceInput):
         if con.execute('SELECT 1 FROM order_layouts WHERE order_id=?', (order_id,)).fetchone():
             from .layout_workspace import build_layout
             build_layout(con, __import__('sys').modules[__name__], order_id)
+        unchosen = storage.shrink_unchosen(con, person_id)
+    storage.drop_full_files(DATA, unchosen)
     return {"ok": True}
 
 
@@ -803,11 +824,11 @@ def move_photos(order_id: str, payload: MoveInput):
         if any(row["status"] in {"pending", "processing"} for row in rows):
             raise HTTPException(409, "Дождитесь завершения обработки")
         if con.execute(f"SELECT 1 FROM photos p JOIN shoots s ON s.id=p.shoot_id WHERE p.id IN ({placeholders}) AND s.kind='general'", ids).fetchone():
-            raise HTTPException(409, "Общие съёмки не распределяются по персонам")
+            raise HTTPException(409, "Общие съёмки не распределяются по ученикам")
         person_id = payload.person_id
         if person_id:
             if not con.execute("SELECT 1 FROM persons WHERE id=? AND order_id=?", (person_id, order_id)).fetchone():
-                raise HTTPException(404, "Персона не найдена в заказе")
+                raise HTTPException(404, "Ученик не найден в заказе")
         else:
             person_id = uid()
             con.execute("INSERT INTO persons VALUES (?,?,?,?)", (person_id, order_id, "", now()))
@@ -868,7 +889,7 @@ def remove_photo_rows(con, order_id, ids, deleting_order=False):
 
 def remove_photo_files(ids):
     for photo_id in ids:
-        for suffix in [".original", ".jpg", ".thumb.jpg"]:
+        for suffix in PHOTO_SUFFIXES:
             (DATA / "photos" / (photo_id + suffix)).unlink(missing_ok=True)
         for face in (DATA / "photos" / "faces").glob(photo_id + "-*.jpg"):
             face.unlink(missing_ok=True)
@@ -936,10 +957,10 @@ def confirm_photos(order_id: str, payload: ConfirmPhotos):
         require_order(con, order_id)
         rows = con.execute(f"SELECT id,status,person_id FROM photos WHERE order_id=? AND id IN ({marks})", [order_id, *ids]).fetchall()
         if len(rows) != len(ids) or any(r["status"] != "ready" or not r["person_id"] for r in rows):
-            raise HTTPException(409, "Сначала обработайте фотографии и назначьте им персону")
+            raise HTTPException(409, "Сначала обработайте фотографии и назначьте им ученика")
         expected = getattr(payload, 'expected_persons', None)
         if expected is not None and (set(expected) != set(ids) or any(expected.get(r['id']) != r['person_id'] for r in rows)):
-            raise HTTPException(409, "Назначения изменились. Обновите фотографии и проверьте персоны ещё раз")
+            raise HTTPException(409, "Назначения изменились. Обновите фотографии и проверьте учеников ещё раз")
         con.execute(f"UPDATE photos SET uncertain=0 WHERE order_id=? AND id IN ({marks})", [order_id, *ids])
     return {"ok": True}
 

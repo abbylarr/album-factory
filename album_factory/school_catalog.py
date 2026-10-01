@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from . import mvp, order_stages, upload_runs
 
 LOCKED_STAGES = set(order_stages.STAGES[5:])
-PORTRAIT_SUFFIXES = (".original", ".jpg", ".thumb.jpg")
+PORTRAIT_SUFFIXES = (".jpg", ".thumb.jpg")
 
 
 def init(con):
@@ -41,6 +41,10 @@ def init(con):
       previous_at TEXT NOT NULL, created_at TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0)""")
     con.execute("""CREATE TABLE IF NOT EXISTS teacher_uploads (
       school_id TEXT NOT NULL, sha TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(school_id,sha))""")
+    con.execute("""CREATE TABLE IF NOT EXISTS teacher_proposals (
+      id TEXT PRIMARY KEY, order_id TEXT NOT NULL, school_id TEXT NOT NULL,
+      last_name TEXT NOT NULL, first_name TEXT NOT NULL, patronymic TEXT NOT NULL DEFAULT '',
+      subject TEXT NOT NULL DEFAULT '', is_class_teacher INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)""")
     if "subject" not in {r[1] for r in con.execute("PRAGMA table_info(order_teachers)")}:
         con.execute("ALTER TABLE order_teachers ADD COLUMN subject TEXT")
     if "school_city" not in {r[1] for r in con.execute("PRAGMA table_info(orders)")}:
@@ -81,6 +85,7 @@ def init(con):
 
 def forget(con, order_id):
     con.execute("DELETE FROM order_teachers WHERE order_id=?", (order_id,))
+    con.execute("DELETE FROM teacher_proposals WHERE order_id=?", (order_id,))
     con.execute("DELETE FROM order_teacher_state WHERE order_id=?", (order_id,))
     con.execute("UPDATE teacher_photos SET order_id=NULL WHERE order_id=?", (order_id,))
 
@@ -150,8 +155,10 @@ def order_teachers_body(con, order_id, public=False):
         teachers.append(item)
     stage = con.execute("SELECT stage FROM orders WHERE id=?", (order_id,)).fetchone()
     state = con.execute("SELECT updated_at, updated_by FROM order_teacher_state WHERE order_id=?", (order_id,)).fetchone()
-    body = {"school": dict(school) if school else None, "teachers": teachers,
-            "class_teacher_id": next((key for key, lead in selected.items() if lead), None),
+    offered = [proposal_view(row) for row in proposals(con, order_id)]
+    body = {"school": dict(school) if school else None, "teachers": teachers, "proposals": offered,
+            "class_teacher_id": next((key for key, lead in selected.items() if lead), None)
+            or next((p["id"] for p in offered if p["is_class_teacher"]), None),
             "chosen": state is not None, "locked": bool(stage and stage["stage"] in LOCKED_STAGES)}
     if not public:
         layout = con.execute("SELECT generated_at,snapshot FROM order_layouts WHERE order_id=?", (order_id,)).fetchone()
@@ -172,8 +179,10 @@ def save_order_teachers(con, order_id, teacher_ids, class_teacher_id, who, when,
     known = {row["id"] for row in school_teachers(con, school_id)} | {row["id"] for row in chosen(con, order_id)}
     if any(teacher_id not in known for teacher_id in ids):
         raise HTTPException(422, "Учитель не найден в этой школе")
-    if class_teacher_id and class_teacher_id not in ids:
+    offered = {row["id"] for row in proposals(con, order_id)}
+    if class_teacher_id and class_teacher_id not in ids and class_teacher_id not in offered:
         raise HTTPException(422, "Классный руководитель должен быть среди выбранных учителей")
+    con.execute("UPDATE teacher_proposals SET is_class_teacher=(id IS ?) WHERE order_id=?", (class_teacher_id, order_id))
     previous = {row["teacher_id"]: row["subject"] for row in con.execute("SELECT teacher_id,subject FROM order_teachers WHERE order_id=?", (order_id,))}
     subjects = subjects or {}
     if any(key not in ids or len(value) > 100 for key, value in subjects.items()):
@@ -183,6 +192,42 @@ def save_order_teachers(con, order_id, teacher_ids, class_teacher_id, who, when,
         (order_id, teacher_id, index, int(teacher_id == class_teacher_id), clean(subjects[teacher_id]) if teacher_id in subjects else previous.get(teacher_id)) for index, teacher_id in enumerate(ids)])
     con.execute("""INSERT INTO order_teacher_state VALUES (?,?,?) ON CONFLICT(order_id)
         DO UPDATE SET updated_at=excluded.updated_at, updated_by=excluded.updated_by""", (order_id, when, who))
+
+
+def proposals(con, order_id):
+    """Teachers the class asked for that are not in the catalogue yet; the photographer confirms them."""
+    return con.execute("""SELECT * FROM teacher_proposals WHERE order_id=?
+        AND school_id IS (SELECT school_id FROM order_terms WHERE order_id=?) ORDER BY created_at, id""", (order_id, order_id)).fetchall()
+
+
+def proposal_view(row):
+    return {"id": row["id"], "last_name": row["last_name"], "first_name": row["first_name"],
+            "patronymic": row["patronymic"], "subject": row["subject"], "name": full_name(row),
+            "is_class_teacher": bool(row["is_class_teacher"])}
+
+
+def same_name(row, values):
+    return all(clean(row[key]).casefold().replace('ё', 'е') == clean(value).casefold().replace('ё', 'е')
+               for key, value in zip(("last_name", "first_name", "patronymic"), values))
+
+
+def accept_proposal(con, proposal, teacher_id):
+    """The proposed teacher joins the album right after the class's chosen ones; a class-teacher mark moves with it."""
+    order_id = proposal["order_id"]
+    row = con.execute("SELECT position, subject FROM order_teachers WHERE order_id=? AND teacher_id=?", (order_id, teacher_id)).fetchone()
+    position = row["position"] if row else con.execute("SELECT COALESCE(MAX(position)+1,0) FROM order_teachers WHERE order_id=?", (order_id,)).fetchone()[0]
+    catalog = con.execute("SELECT subject FROM teachers WHERE id=?", (teacher_id,)).fetchone()["subject"]
+    subject = proposal["subject"] if proposal["subject"] and proposal["subject"] != catalog else (row["subject"] if row else None)
+    if proposal["is_class_teacher"]:
+        con.execute("UPDATE order_teachers SET is_class_teacher=0 WHERE order_id=?", (order_id,))
+    lead = int(bool(proposal["is_class_teacher"]))
+    if row:
+        con.execute("UPDATE order_teachers SET subject=?, is_class_teacher=MAX(is_class_teacher,?) WHERE order_id=? AND teacher_id=?",
+                    (subject, lead, order_id, teacher_id))
+    else:
+        con.execute("INSERT INTO order_teachers (order_id,teacher_id,position,is_class_teacher,subject) VALUES (?,?,?,?,?)",
+                    (order_id, teacher_id, position, lead, subject))
+    con.execute("DELETE FROM teacher_proposals WHERE id=?", (proposal["id"],))
 
 
 def snapshot_teachers(con, order_id):
@@ -335,7 +380,7 @@ def client_summary(con, order_id):
     available = len(school_teachers(con, school_id)) if school_id else 0
     picked = chosen(con, order_id)
     lead = next((row for row in picked if row["is_class_teacher"]), None)
-    return {"available": available, "chosen": len(picked),
+    return {"school": school_id is not None, "available": available, "chosen": len(picked), "proposed": len(proposals(con, order_id)),
             "unsigned": len(client_groups(con, school_id)) if school_id else 0,
             "done": con.execute("SELECT 1 FROM order_teacher_state WHERE order_id=?", (order_id,)).fetchone() is not None,
             "class_teacher": full_name(lead) if lead else ""}
@@ -370,6 +415,18 @@ class MergeInput(BaseModel):
 
 class MoveInput(BaseModel):
     group_id: str | None = None
+
+
+class ProposalInput(BaseModel):
+    last_name: str = Field(min_length=1, max_length=60)
+    first_name: str = Field(min_length=1, max_length=60)
+    patronymic: str = Field(default="", max_length=60)
+    subject: str = Field(default="", max_length=100)
+
+
+class AcceptInput(BaseModel):
+    teacher_id: str | None = None
+    teacher: TeacherInput | None = None
 
 
 class ChoiceInput(BaseModel):
@@ -480,9 +537,7 @@ def install(app, s):
         values = [clean(v) for v in (payload.last_name, payload.first_name, payload.patronymic, payload.subject)]
         if not values[0]:
             raise HTTPException(422, "Укажите фамилию учителя")
-        similar = [row for row in school_teachers(con, school_id)
-                   if all(clean(row[key]).casefold().replace('ё','е') == value.casefold().replace('ё','е')
-                          for key, value in zip(('last_name','first_name','patronymic'), values[:3]))]
+        similar = [row for row in school_teachers(con, school_id) if same_name(row, values[:3])]
         if similar:
             raise HTTPException(409, "Учитель с таким ФИО уже есть: " + full_name(similar[0]) + ". Выберите его из списка или уточните имя")
         teacher_id = s.uid()
@@ -866,9 +921,89 @@ def install(app, s):
         with s.db() as con:
             con.execute("BEGIN IMMEDIATE")
             order = mvp._order_by_token(con, token)
-            mvp.require_level(con, request, order["id"], "manage")
+            mvp.require_level(con, request, order["id"], "entry")
             save_order_teachers(con, order["id"], payload.teacher_ids, payload.class_teacher_id, "client", s.now(), payload.subjects)
             return order_teachers_body(con, order["id"], public=True)
+
+    def open_for_teachers(con, order_id):
+        stage = con.execute("SELECT stage FROM orders WHERE id=?", (order_id,)).fetchone()
+        if stage and stage["stage"] in LOCKED_STAGES:
+            raise HTTPException(409, "Заказ уже отправлен в печать. Состав учителей изменить нельзя")
+        school_id = order_school_id(con, order_id)
+        if school_id is None:
+            raise HTTPException(409, "Фотограф ещё не выбрал школу из каталога")
+        return school_id
+
+    @app.post("/client-api/{token}/teacher-proposals", status_code=201)
+    def client_propose(token: str, payload: ProposalInput, request: Request):
+        """Any pupil may ask for a teacher missing from the catalogue; it waits for the photographer."""
+        values = [clean(v) for v in (payload.last_name, payload.first_name, payload.patronymic)]
+        if not values[0] or not values[1]:
+            raise HTTPException(422, "Укажите фамилию и имя учителя")
+        with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
+            order = mvp._order_by_token(con, token)
+            mvp.require_level(con, request, order["id"], "entry")
+            school_id = open_for_teachers(con, order["id"])
+            known = next((row for row in school_teachers(con, school_id) if same_name(row, values)), None)
+            if known:
+                raise HTTPException(409, "Этот учитель уже есть в списке: " + full_name(known))
+            waiting = proposals(con, order["id"])
+            if any(same_name(row, values) for row in waiting):
+                raise HTTPException(409, "Этого учителя класс уже предложил")
+            if len(waiting) >= 30:
+                raise HTTPException(409, "Слишком много предложенных учителей. Дождитесь, пока фотограф их проверит")
+            proposal_id = s.uid()
+            con.execute("""INSERT INTO teacher_proposals (id,order_id,school_id,last_name,first_name,patronymic,subject,created_at)
+                VALUES (?,?,?,?,?,?,?,?)""", (proposal_id, order["id"], school_id, *values, clean(payload.subject), s.now()))
+            from . import notifications
+            notifications.emit(con, order["id"], "teacher_proposals")
+            return order_teachers_body(con, order["id"], public=True)
+
+    @app.delete("/client-api/{token}/teacher-proposals/{proposal_id}")
+    def client_withdraw(token: str, proposal_id: str, request: Request):
+        with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
+            order = mvp._order_by_token(con, token)
+            mvp.require_level(con, request, order["id"], "entry")
+            open_for_teachers(con, order["id"])
+            if con.execute("DELETE FROM teacher_proposals WHERE id=? AND order_id=?", (proposal_id, order["id"])).rowcount:
+                from . import notifications
+                notifications.retract(con, order["id"], "teacher_proposals")
+            return order_teachers_body(con, order["id"], public=True)
+
+    def require_proposal(con, order_id, proposal_id):
+        s.require_order(con, order_id)
+        row = next((row for row in proposals(con, order_id) if row["id"] == proposal_id), None)
+        if row is None:
+            raise HTTPException(404, "Предложение уже рассмотрено. Обновите страницу")
+        return row
+
+    @app.post("/api/orders/{order_id}/teacher-proposals/{proposal_id}/accept")
+    def accept(order_id: str, proposal_id: str, payload: AcceptInput):
+        """Add the proposed teacher to the school catalogue, or match it to a teacher already there."""
+        with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
+            proposal = require_proposal(con, order_id, proposal_id)
+            school_id = open_for_teachers(con, order_id)
+            if payload.teacher_id:
+                if not any(row["id"] == payload.teacher_id for row in school_teachers(con, school_id)):
+                    raise HTTPException(422, "Учитель не найден в этой школе")
+                teacher_id = payload.teacher_id
+            else:
+                teacher_id = insert_teacher(con, school_id, payload.teacher or TeacherInput(
+                    last_name=proposal["last_name"], first_name=proposal["first_name"],
+                    patronymic=proposal["patronymic"], subject=proposal["subject"]))
+            accept_proposal(con, proposal, teacher_id)
+            return order_teachers_body(con, order_id)
+
+    @app.delete("/api/orders/{order_id}/teacher-proposals/{proposal_id}")
+    def reject(order_id: str, proposal_id: str):
+        with s.db() as con:
+            con.execute("BEGIN IMMEDIATE")
+            require_proposal(con, order_id, proposal_id)
+            con.execute("DELETE FROM teacher_proposals WHERE id=?", (proposal_id,))
+            return order_teachers_body(con, order_id)
 
     def client_photo(con, token, request, photo_id):
         order = mvp._order_by_token(con, token)

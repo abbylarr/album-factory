@@ -32,7 +32,7 @@ class V2Tests(unittest.TestCase):
             if person:
                 con.execute('INSERT OR IGNORE INTO persons VALUES (?,?,?,?)', (person, order, 'Имя', s.now()))
             con.execute('INSERT INTO photos (id,order_id,filename,sha,status,person_id,uncertain,created_at) VALUES (?,?,?,?,?,?,?,?)', (pid,order,'a.jpg',pid,status,person,uncertain,s.now()))
-        for suffix in ['.original','.jpg','.thumb.jpg']:
+        for suffix in ['.jpg','.thumb.jpg']:
             Image.new('RGB',(10,10)).save(s.DATA/'photos'/(pid+suffix),format='JPEG')
         return pid
 

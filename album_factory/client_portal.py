@@ -6,7 +6,7 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from . import mvp, notifications, order_stages, school_catalog
+from . import mvp, notifications, order_stages, school_catalog, storage
 
 
 DEFAULT_TEMPLATES = {
@@ -289,12 +289,14 @@ def install(app, s):
                 raise HTTPException(409, 'Портрет уже выбран. Изменить его может фотограф.')
             photo = con.execute("SELECT id FROM photos WHERE id=? AND order_id=? AND person_id=? AND status='ready'", (payload.photo_id, order['id'], person_id)).fetchone()
             if photo is None:
-                raise HTTPException(409, 'Фотография больше не доступна для этой персоны. Обновите страницу.')
+                raise HTTPException(409, 'Фотография больше не доступна для этого ученика. Обновите страницу.')
             con.execute('INSERT OR REPLACE INTO client_selections VALUES (?,?,?,?,?)', (person_id, payload.photo_id, first, last, quote))
             con.execute('UPDATE persons SET name=? WHERE id=?', (first + ' ' + last, person_id))
             con.execute('''INSERT INTO selection_state (person_id, photo_id, submitted) VALUES (?,?,0)
                 ON CONFLICT(person_id) DO UPDATE SET photo_id=excluded.photo_id WHERE submitted=0''', (person_id, payload.photo_id))
             notifications.forms_check(con, order['id'])
+            unchosen = storage.shrink_unchosen(con, person_id)
+        storage.drop_full_files(s.DATA, unchosen)
         return {'ok': True}
 
     @app.get('/client-api/{token}/photos/{photo_id}/{variant}')

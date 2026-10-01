@@ -5,7 +5,7 @@ import unittest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from album_factory import server as s
+from album_factory import school_catalog, server as s
 import test_server_v2
 from test_master_templates import master
 
@@ -44,6 +44,46 @@ class SchoolCatalogTests(unittest.TestCase):
         if manage:
             self.assertEqual(guest.post(base + '/manage', json={'pin': data['manage_pin']}).status_code, 200)
         return guest, base
+
+    def test_class_proposes_missing_teacher_and_photographer_confirms(self):
+        school = self.school()
+        known = self.teacher(school['id'], 'Алексеева', subject='Физика')
+        order = self.order_for(school['id'])
+        guest, base = self.portal(order)
+        same = guest.post(base + '/teacher-proposals', json={'last_name': 'алексеева', 'first_name': 'Мария', 'patronymic': 'Ивановна'})
+        self.assertEqual(same.status_code, 409)
+        self.assertEqual(guest.post(base + '/teacher-proposals', json={'last_name': 'Орлов', 'first_name': ' '}).status_code, 422)
+        body = guest.post(base + '/teacher-proposals', json={'last_name': 'Орлов', 'first_name': 'Пётр', 'subject': 'Химия'}).json()
+        offered = body['proposals'][0]
+        self.assertEqual((offered['name'], offered['subject']), ('Орлов Пётр', 'Химия'))
+        self.assertEqual(guest.post(base + '/teacher-proposals', json={'last_name': 'Орлов', 'first_name': 'Пётр'}).status_code, 409)
+        saved = guest.put(base + '/teachers', json={'teacher_ids': [known['id']], 'class_teacher_id': offered['id']})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()['class_teacher_id'], offered['id'])
+        self.assertEqual(guest.get(base + '/').json()['teachers']['proposed'], 1)
+        self.assertEqual(self.client.get(f'/api/orders/{order}').json()['teacher_proposals'], 1)
+        self.assertEqual(self.client.get('/api/notifications').json()['items'][0]['kind'], 'teacher_proposals')
+        # Not in the album until the photographer confirms.
+        with s.db() as con:
+            self.assertEqual([t['id'] for t in school_catalog.snapshot_teachers(con, order)], [known['id']])
+
+        accepted = self.client.post(f'/api/orders/{order}/teacher-proposals/{offered["id"]}/accept', json={})
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        view = accepted.json()
+        added = next(t for t in view['teachers'] if t['name'] == 'Орлов Пётр')
+        self.assertEqual((view['proposals'], view['class_teacher_id'], added['selected'], added['subject']), ([], added['id'], True, 'Химия'))
+        self.assertEqual(self.client.post(f'/api/orders/{order}/teacher-proposals/{offered["id"]}/accept', json={}).status_code, 404)
+        with s.db() as con:
+            self.assertEqual([t['last_name'] for t in school_catalog.snapshot_teachers(con, order)], ['Орлов', 'Алексеева'])
+
+        # A duplicate is matched to the catalogue teacher; a withdrawn or rejected one just goes.
+        twin = guest.post(base + '/teacher-proposals', json={'last_name': 'Алексеева', 'first_name': 'Мария', 'subject': 'Астрономия'}).json()['proposals'][0]
+        matched = self.client.post(f'/api/orders/{order}/teacher-proposals/{twin["id"]}/accept', json={'teacher_id': known['id']}).json()
+        self.assertEqual(next(t for t in matched['teachers'] if t['id'] == known['id'])['subject'], 'Астрономия')
+        gone = guest.post(base + '/teacher-proposals', json={'last_name': 'Ушла', 'first_name': 'Ирина'}).json()['proposals'][0]
+        self.assertEqual(guest.delete(f'{base}/teacher-proposals/{gone["id"]}').json()['proposals'], [])
+        nope = guest.post(base + '/teacher-proposals', json={'last_name': 'Нет', 'first_name': 'Такого'}).json()['proposals'][0]
+        self.assertEqual(self.client.delete(f'/api/orders/{order}/teacher-proposals/{nope["id"]}').json()['proposals'], [])
 
     def test_school_has_full_name_and_city_and_no_duplicates(self):
         school = self.school()
@@ -113,9 +153,9 @@ class SchoolCatalogTests(unittest.TestCase):
         self.assertFalse(view['chosen'])
         self.assertNotIn('updated_by', view)
         choice = {'teacher_ids': [first['id'], lead['id']], 'class_teacher_id': lead['id']}
-        self.assertEqual(guest.put(base + '/teachers', json=choice).status_code, 401)
-
-        guest, base = self.portal(order, manage=True)
+        # Any pupil saves the choice; no manage code needed.
+        stranger = TestClient(self.client.app, headers={'origin': 'http://testserver'})
+        self.assertEqual(stranger.put(base + '/teachers', json=choice).status_code, 401)
         self.assertEqual(guest.put(base + '/teachers', json={'teacher_ids': [first['id']], 'class_teacher_id': lead['id']}).status_code, 422)
         self.assertEqual(guest.put(base + '/teachers', json={'teacher_ids': ['missing']}).status_code, 422)
         saved = guest.put(base + '/teachers', json=choice)
