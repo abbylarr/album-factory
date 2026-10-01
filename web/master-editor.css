@@ -3321,8 +3321,8 @@ body.color-picking #canvas-host {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: calc(100% - 32px);
-  margin: 14px 16px 2px;
+  width: 100%;
+  margin: 0 0 10px;
   padding: 8px 9px;
   background: #f7f4f9;
   border-radius: 10px;
@@ -5899,12 +5899,6 @@ button.block-issue:focus-visible {
   color: var(--accent);
   box-shadow: 0 1px 3px #22222214;
 }
-.typography-section .text-case-field .segments {
-  margin: 0;
-}
-.typography-section .text-case-field .segments button {
-  height: 28px;
-}
 .case-glyph {
   font-size: 11px;
   font-weight: 600;
@@ -6203,60 +6197,26 @@ button.block-issue:focus-visible {
   width: 240px;
   margin-top: 8px;
 }
-.block-test-flags {
-  display: flex;
-  gap: 14px;
-  margin: 8px 0 0;
-}
-.block-test-flags label.check {
-  margin: 0;
-  font-size: 11px;
-  white-space: nowrap;
-}
 /* Inside a vignette card: its parts on the canvas, drop places for a caption, and the right panel. */
 .card-part {
   position: absolute;
   pointer-events: auto;
-  border: 1px dashed #b88ad6;
+  border: 1px dashed transparent;
   border-radius: 2px;
-  cursor: pointer;
+  cursor: grab;
   touch-action: none;
 }
-.card-part.name,
-.card-part.detail {
-  cursor: grab;
+.card-part.photo {
+  pointer-events: none;
 }
 .card-part:hover {
-  border-style: solid;
+  border: 1px solid #b88ad6;
 }
 .card-part.active {
-  border: 1.5px solid #7712b3;
-  box-shadow: 0 0 0 1px #ffffffcc;
+  border: 1px solid #7712b3;
 }
 .card-part.lifted {
   opacity: 0.35;
-}
-.card-part-label {
-  position: absolute;
-  left: -1px;
-  bottom: 100%;
-  margin-bottom: 2px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: #7712b3;
-  color: #fff;
-  font-size: 10px;
-  line-height: 14px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-}
-.card-part.active .card-part-label,
-.card-part:hover .card-part-label {
-  opacity: 1;
-}
-.card-part:not(.active):hover .card-part-label {
-  background: #b88ad6;
 }
 .card-zone {
   position: absolute;
@@ -6287,36 +6247,35 @@ button.block-issue:focus-visible {
   background: #7712b314;
   pointer-events: none;
 }
-.card-head {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  margin: 14px 16px 8px;
-}
-.card-head strong {
-  font-size: 14px;
-  color: #29282d;
-}
-.card-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 6px 2px 2px;
-  margin-left: -2px;
-  background: none;
-  font-size: 11px;
-  color: #8d8595;
-}
-.card-back:hover {
-  color: var(--accent);
-}
-.card-back svg {
-  width: 8px;
-  height: 12px;
-}
 .card-tabs {
-  margin: 0 16px 6px !important;
+  margin: 0 !important;
+}
+.card-section {
+  padding: 18px 16px;
+}
+.card-section > h3 {
+  margin: 0 0 10px;
+}
+.card-group {
+  margin-top: 16px;
+}
+.card-group:first-of-type {
+  margin-top: 14px;
+}
+.card-sub {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6f6a74;
+}
+.card-group .type-metrics {
+  margin-top: 0;
+}
+.card-group .card-zones + .type-metrics {
+  margin-top: 10px;
+}
+.card-group .vignette-detail-row {
+  margin: 0;
 }
 .card-ratio {
   margin: 0 0 12px !important;
@@ -6333,38 +6292,247 @@ button.block-issue:focus-visible {
 .card-zones .icon-toggle svg {
   margin: 0 auto;
 }
-.card-enter {
+/* Vignette section, like auto layout in Figma: size next to the alignment grid. */
+.vignette-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-top: 10px;
+}
+.vignette-layout .visual-label {
+  margin: 0 0 6px;
+}
+.anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+  height: 84px;
+  padding: 4px;
+  background: #f4f4f6;
+  border-radius: 10px;
+}
+.anchor-grid button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 6px;
+}
+.anchor-grid button:hover .anchor-dot {
+  background: #7712b3;
+  transform: scale(1.4);
+}
+.anchor-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #b7b2bb;
+  transition: transform 0.1s;
+}
+.anchor-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  padding: 3px 5px;
+}
+.anchor-bars b {
+  display: block;
+  height: 2.5px;
+  border-radius: 2px;
+  background: #7712b3;
+}
+.anchor-bars b:nth-child(1) {
+  width: 12px;
+}
+.anchor-bars b:nth-child(2) {
+  width: 8px;
+}
+.anchor-bars b:nth-child(3) {
+  width: 10px;
+}
+.vignette-section {
+  padding: 18px 16px;
+}
+.vignette-section > h3 {
+  margin: 0 0 10px;
+}
+.vignette-per-page {
+  margin: 0 0 6px;
+}
+.vignette-per-page label {
+  width: 64px;
+}
+.vignette-per-page input {
+  width: 100%;
+  min-width: 0;
+  text-align: right;
+}
+@keyframes field-flash {
+  0%,
+  60% {
+    box-shadow: 0 0 0 2px #7712b3;
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+.flash {
+  animation: field-flash 1.4s ease;
+}
+.type-extras .bar-divider {
+  flex: none;
+  width: 1px;
+  margin: 5px 2px;
+  background: #dedae3;
+}
+.vignette-cells {
+  margin: 0;
+}
+.vignette-section .card-group:first-of-type {
+  margin-top: 16px;
+}
+/* Cards per page: the limits, and the page the canvas shows between them. */
+.vignette-fits {
+  float: right;
+  font-weight: 400;
+  color: #a09aa4;
+}
+.vignette-shown {
+  display: block;
+  margin: 12px 0 0;
+}
+.vignette-shown > span {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #85818b;
+}
+.vignette-shown b {
+  color: #29282d;
+  font-weight: 600;
+}
+.vignette-shown input {
+  width: 100%;
+  accent-color: #7712b3;
+}
+/* Vignette section: size stacked beside the alignment grid. */
+.vignette-size {
+  display: grid;
+  gap: 6px;
+}
+.vignette-size .type-field .type-label {
+  display: none;
+}
+/* What stops more cards from fitting: a quiet link to that setting. */
+.vignette-limiter {
+  display: block;
+  margin: 6px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  color: #7712b3;
+  cursor: pointer;
+  text-align: left;
+}
+.vignette-limiter:hover {
+  text-decoration: underline;
+}
+/* Name size as a range: «от» – «до» in one cell of the type row. */
+.name-size-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+}
+.name-size-dash {
+  color: #a09aa4;
+}
+/* A caption beside the photo: how high it stands, from the photo top to its foot. */
+.caption-height {
+  display: block;
+  margin: 2px 0 0;
+}
+.caption-height > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #85818b;
+}
+.caption-height input {
+  width: 100%;
+  accent-color: #7712b3;
+}
+.caption-height small {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #a09aa4;
+}
+.caption-height i {
+  font-style: normal;
+}
+/* «Оформление» of a vignette folds away: a quiet row with a chevron; what is on shows in grey next to the title. */
+.look-group > summary {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 9px 10px;
-  background: #f7f4f9;
-  border-radius: 10px;
-  text-align: left;
-  white-space: normal;
+  gap: 6px;
+  margin: 0;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
 }
-.card-enter:hover {
-  background: #f1eaf6;
+.look-group > summary::-webkit-details-marker {
+  display: none;
 }
-.card-enter-copy {
-  flex: 1;
-  min-width: 0;
+.look-group > summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.4px solid currentColor;
+  border-bottom: 1.4px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.12s;
 }
-.card-enter-copy strong {
-  display: block;
-  font-size: 11px;
+.look-group[open] > summary::before {
+  transform: rotate(45deg);
+}
+.look-group[open] > summary {
+  margin-bottom: 8px;
+}
+.look-state {
+  font-weight: 400;
+  color: #a09aa4;
+}
+/* The name size the canvas really uses, under the size range, when it stays below «до». */
+.name-size-limiter {
+  margin: -2px 0 8px;
+}
+/* Vignette status pinned to the bottom of the panel: how many cards fit and the name size, live while dragging. */
+.vignette-status {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid #ece9ef;
+  background: #fff;
+  font-size: 12px;
+  color: #85818b;
+}
+.vignette-status b {
+  color: #29282d;
   font-weight: 600;
-  color: #39343f;
 }
-.card-enter-copy small {
-  display: block;
-  margin-top: 2px;
-  font-size: 10px;
-  color: #918a95;
-}
-.card-enter-go {
-  flex: none;
-  font-size: 11px;
-  color: var(--accent);
+.vignette-last-row {
+  margin: 12px 0 0;
 }

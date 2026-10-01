@@ -7,7 +7,7 @@ import json
 import math
 import re
 from .photo_pick import RELAX_TEXT
-from .master_plan import CARD_ZONES, PHOTO_RATIOS
+from .master_plan import CARD_ANCHORS, CARD_ZONES, PHOTO_RATIOS
 RELAX_MESSAGES = set(RELAX_TEXT.values())
 from PIL import Image
 from fastapi import HTTPException
@@ -333,9 +333,11 @@ def validate(document):
                         check(section['kind'] == 'flow', 'Автовиньетка требует расширяемого раздела')
                         check(layer.get('source') in {'students','teachers'}, 'Неверный список виньеток')
                         check(isinstance(layer.get('showDetail', False), bool), 'Неверная настройка дополнительной подписи')
+                        check(isinstance(layer.get('centerLastRow', False), bool), 'Неверная настройка неполного ряда')
                         check(layer.get('detailFont', layer.get('font')) in known_fonts and number(layer.get('detailFontSize', 9), 4, 120) and color(layer.get('detailColor', layer.get('color'))), 'Неверный стиль дополнительной подписи')
                         check(layer.get('align', 'center') in {'left','center','right','justify'} and layer.get('detailAlign', 'center') in {'left','center','right','justify'}, 'Неверное выравнивание виньеток')
                         check(number(layer.get('detailLineHeight', 1.25), 0.8, 3) and number(layer.get('detailLetterSpacing', 0), -20, 80), 'Неверные интервалы дополнительной подписи')
+                        check(number(layer.get('detailSkew', 0), -30, 30), 'Наклон подписи — от −30° до 30°')
                         for flag in ('detailBold','detailItalic','detailUnderline','detailStrike'):
                             if flag in layer: check(isinstance(layer[flag], bool), 'Неверное начертание дополнительной подписи')
                         grid_sources.add(layer['source'])
@@ -345,11 +347,21 @@ def validate(document):
                             check(number(layer.get('min'),1,100) and number(layer.get('max'),1,100) and layer['min'] <= layer['max'], 'Неверные границы виньеток')
                         check(number(layer.get('gap'),0,30) and number(layer.get('minPhotoWidth'),5,180), 'Неверные отступы или ширина фото')
                         check(number(layer.get('minPhotoWidth'),5,180) and number(layer.get('photoWidth', 85),5,180) and layer['minPhotoWidth'] <= layer.get('photoWidth', 85), 'Неверный диапазон ширины фото')
-                        check(number(layer.get('photoNameGap',3),0,20) and number(layer.get('nameDetailGap',2),0,20), 'Неверное расстояние между фото и подписями')
+                        check(number(layer.get('photoNameGap',3),0,20) and number(layer.get('nameDetailGap',2),0,20) and number(layer.get('overInset',3),0,20), 'Неверное расстояние между фото и подписями')
                         check(number(layer.get('minFontSize'),4,layer['fontSize']), 'Неверный минимальный кегль')
+                        check(number(layer.get('detailMinFontSize', layer.get('detailFontSize', 9)), 4, layer.get('detailFontSize', 9)), 'Неверный минимальный кегль подписи')
                         check(layer.get('nameAt', 'below') in CARD_ZONES and layer.get('detailAt', 'below') in CARD_ZONES, 'Неверное место подписи в карточке')
                         check(any(abs(layer.get('photoRatio', .75) - r) < 1e-3 for r in PHOTO_RATIOS) if isinstance(layer.get('photoRatio', .75), (int, float)) else False, 'Неверные пропорции фото в карточке')
                         check(number(layer.get('captionWidth', 40), 10, 150), 'Неверная ширина подписи сбоку')
+                        check(number(layer.get('sideAlign', .5), 0, 1), 'Неверная высота подписи сбоку')
+                        for prefix in ('name', 'detail'):
+                            stroke, shadow = layer.get(prefix+'Stroke'), layer.get(prefix+'Shadow')
+                            if stroke is not None:
+                                check(isinstance(stroke, dict) and color(stroke.get('color')) and number(stroke.get('width'), 0.05, 2), 'Неверная обводка подписи')
+                            if shadow is not None:
+                                check(isinstance(shadow, dict) and color(shadow.get('color')) and number(shadow.get('offsetX', 0), -5, 5) and number(shadow.get('offsetY', 0), -5, 5) and number(shadow.get('blur', 0), 0, 5) and number(shadow.get('opacity', 50), 0, 100), 'Неверная тень подписи')
+                        check(layer.get('anchor', 'center') in CARD_ANCHORS, 'Неверное выравнивание карточек')
+                        check(layer.get('textCase', '') in ('', *auto_text.CASES) and layer.get('detailTextCase', '') in ('', *auto_text.CASES), 'Неверный регистр подписей')
         check(len(grid_sources) <= 1, 'В одном разделе нужен один источник виньеток')
     return document
 
@@ -454,7 +466,7 @@ def preview_photos(document, students, teachers, owner, categories=None):
     from .master_layout import generate
     from .test_shoot import synthetic
     people = [{'id': f's{i}', 'first_name': 'Ученик', 'last_name': str(i + 1), 'quote': ''} for i in range(students)]
-    staff = [{'id': f't{i}', 'first_name': 'Учитель', 'last_name': str(i + 1), 'school_subject': ''} for i in range(teachers)]
+    staff = [{'id': f't{i}', 'first_name': 'Учитель', 'last_name': str(i + 1), 'school_subject': '', 'is_class_teacher': i == 0} for i in range(teachers)]
     entries, photos = synthetic(people)
     for person in people + staff:
         photos['portrait-' + person['id']] = {'width': 3000, 'height': 4000, 'path': ''}

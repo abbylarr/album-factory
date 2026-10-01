@@ -9,7 +9,8 @@
 (function(root){
   const ROLES=['intro','repeat','last','outro'];
   const PEOPLE=['all','others','owner','off'];
-  const LIST_DEFAULT={source:'students',min:4,max:12,strictMin:false,excludeLead:false};
+  /* max 100 means «as many as fit»: the page is limited by the photo size only. */
+  const LIST_DEFAULT={source:'students',min:4,max:100,strictMin:false,excludeLead:false};
   const roleOf=spread=>ROLES.includes(spread?.role)?spread.role:'repeat';
   const hasGrid=page=>(page.layers||[]).some(l=>l.type==='grid');
   const gridPages=spread=>(spread.pages||[]).filter(hasGrid).length;
@@ -43,6 +44,14 @@
       pages=Math.min(pages,Math.max(room,fixed,1));
     }
     const cut=pages<whole;
+    /* Without a «last» spread a list ending mid-spread leaves a vignette page empty: take the page count up to the end of
+       that spread while every page keeps the minimum, else down to the end of the one before while the cards still fit. */
+    if(n&&!cut&&!last&&cycleHasGrid){
+      let lower=fixed,upper=fixed,turn=0;
+      while(upper<pages){lower=upper;upper+=gridPages(repeat[turn++%repeat.length]);}
+      if(upper>pages&&Math.floor(n/upper)>=min)pages=upper;
+      else if(upper>pages&&lower>=1&&lower>=Math.ceil(n/cap))pages=lower;
+    }
     const middle=[];let rest=pages-fixed,turn=0;
     while(rest>0){
       if(!cycleHasGrid){

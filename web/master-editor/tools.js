@@ -203,13 +203,6 @@ canvas.on('mouse:up', opt => {
 });
 canvas.on('mouse:dblclick', opt => {
   const layer = allLayers().find(l => l.id === opt.target?.masterId);
-  if (layer?.type === 'grid' && selected.length === 1 && selected[0] === layer.id) {
-    opt.e.preventDefault();
-    const part = cardPartAt(layer, canvas.getScenePoint(opt.e));
-    if (cardLayer()) pickCardPart(part);
-    else enterCard(layer, part);
-    return;
-  }
   if (layer?.type === 'text' && selected.length === 1 && selected[0] === layer.id) {
     opt.e.preventDefault();
     startTextEdit(layer);
@@ -444,6 +437,12 @@ function addLayer(type, box, at, source) {
       detailAlign: 'center',
       styleGroup: section().id,
     });
+  /* The card design is one for the block: a new vignette takes it from the ones already there, keeping its own place. */
+  const model = type === 'grid' ? blockGrids()[0] : null;
+  if (model) {
+    const { id, name, box: _, hidden, locked, z, ...design } = clone(model);
+    Object.assign(l, design);
+  }
   if (type === 'collage') {
     Object.assign(l, {
       fill: '#e6e1ea',
@@ -526,6 +525,14 @@ function resizeDesign(cover, newW, newH) {
   if (cover) coverSection().pageSize = [newW, newH];
   else doc.pageSize = [newW, newH];
 }
+/* Every vignette of the block: the card design is one for the whole block. */
+function blockGrids(s = section()) {
+  return s.spreads.flatMap(sp => sp.pages.flatMap(p => p.layers)).filter(item => item.type === 'grid');
+}
+/* The portrait's outline and shadow belong to the card design too. */
+const vignetteLook = key =>
+  /^(strokeOn|strokeWidth|strokeMode|strokeAlign|strokeDash|strokeCap|strokeJoin|strokeOpacity|stroke|shadowOn)$/.test(key) ||
+  key.startsWith('shadow.');
 function property(key, value) {
   if (preview) return;
   const l = selectedLayer();
@@ -599,6 +606,7 @@ function property(key, value) {
         'photoWidth',
         'photoNameGap',
         'nameDetailGap',
+        'overInset',
         'font',
         'fontSize',
         'minFontSize',
@@ -615,6 +623,7 @@ function property(key, value) {
         'showDetail',
         'detailFont',
         'detailFontSize',
+        'detailMinFontSize',
         'detailColor',
         'detailAlign',
         'detailBold',
@@ -627,11 +636,17 @@ function property(key, value) {
         'detailAt',
         'photoRatio',
         'captionWidth',
-      ].includes(key)
+        'sideAlign',
+        'anchor',
+        'centerLastRow',
+        'textCase',
+        'detailTextCase',
+        'skew',
+        'detailSkew',
+      ].includes(key) ||
+      (l.type === 'grid' && vignetteLook(key))
     )
-      layers = section()
-        .spreads.flatMap(sp => sp.pages.flatMap(p => p.layers))
-        .filter(i => i.type === 'grid');
+      layers = blockGrids();
     for (const item of layers) {
       if (key === 'strokeOn') {
         item.strokeOn = !!value;

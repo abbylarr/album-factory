@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from album_factory.master_layout import flex_frames, geometry
+from album_factory.master_layout import caption_floor, flex_frames, geometry
 from album_factory.master_plan import list_plan, people, personal_take
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +38,8 @@ SECTIONS = [
     {'id': 'h', 'target': 1, 'limit': 2, 'list': {'min': 4, 'max': 12}, 'spreads': [spread('i', 'intro', False, True), spread('r', 'repeat', True, True), spread('z', 'last', True)]},
     # A limit shorter than the opening spreads keeps them and one vignette page.
     {'id': 'k', 'target': 3, 'limit': 1, 'list': {'min': 2, 'max': 8}, 'spreads': [spread('i', 'intro'), spread('r', 'repeat', True), spread('o', 'outro')]},
+    # One vignette spread repeating, no last spread: the list ends on a whole spread when it can.
+    {'id': 'm', 'target': 2, 'list': {'min': 2, 'max': 12}, 'spreads': [spread('r', 'repeat', True, True)]},
 ]
 CASES = [(section, n, cap) for section in SECTIONS for n in (0, 1, 5, 12, 22, 37, 80) for cap in (0, 6, 12)]
 ASPECTS = [[1.5], [0.75], [1.5, 1.5], [1.5, 0.66], [0.66, 0.66, 1.5], [1.5, 1.5, 1.5, 1.5], [0.75, 1.33, 1.5, 0.8], [1.5] * 5, [1.2] * 6]
@@ -45,7 +47,12 @@ BOXES = [(178, 120, 4, 4), (90, 230, 3, 6), (182, 230, 0, 0)]
 CARD_BASE = {'gap': 5, 'minPhotoWidth': 20, 'photoWidth': 85, 'fontSize': 12, 'photoNameGap': 3, 'nameDetailGap': 2, 'detailFontSize': 9}
 CARDS = [{}, {'showDetail': True}, {'showDetail': True, 'detailAt': 'above'}, {'nameAt': 'right', 'captionWidth': 50},
          {'showDetail': True, 'nameAt': 'left', 'detailAt': 'left', 'photoRatio': 1}, {'nameAt': 'over', 'showDetail': True, 'detailAt': 'over', 'photoRatio': 0.8},
-         {'showDetail': True, 'nameAt': 'above', 'detailAt': 'right', 'photoRatio': 2 / 3, 'lineHeight': 1.5}]
+         {'nameAt': 'over', 'overInset': 8, 'photoNameGap': 1, 'showDetail': True, 'detailAt': 'below'},
+         {'showDetail': True, 'nameAt': 'above', 'detailAt': 'right', 'photoRatio': 2 / 3, 'lineHeight': 1.5},
+         {'anchor': 'top-left'}, {'anchor': 'bottom', 'nameAt': 'right'}, {'anchor': 'right', 'photoRatio': 1},
+         {'minFontSize': 6, 'minPhotoWidth': 5}, {'minFontSize': 14, 'nameAt': 'below'},
+         {'source': 'teachers', 'textCase': 'upper', 'minFontSize': 9}, {'source': 'teachers', 'nameAt': 'right', 'captionWidth': 60},
+         {'showDetail': True, 'nameAt': 'left', 'detailAt': 'left', 'sideAlign': 0}, {'nameAt': 'right', 'sideAlign': 1}]
 
 
 @unittest.skipUnless(shutil.which('node'), 'node is not installed')
@@ -95,8 +102,19 @@ class PlanParityTest(unittest.TestCase):
         self.assertEqual([s['role'] for s in plan['spreads']], ['repeat', 'last'])
         self.assertEqual(plan['counts'], [10, 10, 10])
         self.assertNotIn('half', plan['issues'])
-        self.assertIn('half', list_plan({**SECTIONS[3], 'target': 1}, 40, 12)['issues'])
+        # A short list keeps the half spread only when neither more pages (below the minimum) nor fewer (cards do not fit) work.
+        self.assertIn('half', list_plan({**SECTIONS[3], 'target': 1}, 5, 12)['issues'])
         self.assertIn('no-repeat', list_plan(SECTIONS[4], 80, 12)['issues'])
+
+    def test_list_ends_on_a_whole_spread(self):
+        two = {'id': 'w', 'target': 1, 'list': {'min': 4, 'max': 12}, 'spreads': [spread('r', 'repeat', True, True)]}
+        # 25 people, 12 a page: three pages would leave the fourth empty, four pages keep the minimum.
+        self.assertEqual(list_plan(two, 25, 12)['counts'], [7, 6, 6, 6])
+        self.assertEqual(list_plan(two, 25, 12)['issues'], [])
+        # Five people: two pages would go below the minimum, so the second page stays empty and is reported.
+        self.assertEqual(list_plan(two, 5, 12)['issues'], ['half'])
+        # Stretched to three pages with a minimum of 2 and 7 people: back to two pages rather than up to four.
+        self.assertEqual(list_plan({**two, 'target': 2, 'list': {'min': 2, 'max': 12}}, 7, 12)['counts'], [4, 3])
 
     def test_personal_blocks(self):
         students = ['s0', 's1', 's2']
@@ -140,8 +158,29 @@ class PlanParityTest(unittest.TestCase):
         old = geometry(12, {**CARD_BASE, 'box': {'w': 178, 'h': 224}})
         self.assertEqual(old['cell_w'], old['photo_w'])
         self.assertEqual(old['parts']['name'][1], old['photo_h'] + 3)
+        top = geometry(4, {**CARD_BASE, 'anchor': 'top-left', 'box': {'w': 178, 'h': 224}})
+        self.assertEqual((top['offset_x'], top['offset_y']), (0, 0))
+        low = geometry(4, {**CARD_BASE, 'anchor': 'bottom-right', 'box': {'w': 178, 'h': 224}})
+        self.assertAlmostEqual(low['offset_y'] + 2*low['cell_h'] + 5, 224)
+        # Tiny photos do not count as fitting when the names under them could not be read.
+        tiny = {**CARD_BASE, 'minPhotoWidth': 5, 'minFontSize': 10, 'box': {'w': 178, 'h': 224}}
+        self.assertIsNone(geometry(80, tiny))
+        self.assertGreaterEqual(geometry(20, tiny)['parts']['name'][2], 15*.52*10*.3528)
+        # A teacher's name needs a wider caption than a student's, capitals wider still.
+        caps = lambda **extra: max(n for n in range(1, 60) if geometry(n, {**tiny, **extra}))
+        self.assertGreater(caps(), caps(source='teachers'))
+        self.assertGreaterEqual(caps(source='teachers'), caps(source='teachers', textCase='upper'))
+        self.assertGreater(caption_floor({**tiny, 'source': 'teachers', 'textCase': 'upper'}), caption_floor({**tiny, 'source': 'teachers'}))
+        # Beside the photo a teacher's name may wrap, so only its longest word has to fit the caption.
+        self.assertLess(caption_floor({**tiny, 'source': 'teachers', 'nameAt': 'left'}), caption_floor({**tiny, 'source': 'teachers'}))
         side = geometry(4, {**CARD_BASE, 'nameAt': 'right', 'captionWidth': 50, 'box': {'w': 178, 'h': 224}})
         self.assertAlmostEqual(side['cell_w'], side['photo_w'] + 53)
+        # A caption beside the photo stands at the set height: level with the photo top, centred, or down at its foot.
+        at = lambda align: geometry(4, {**CARD_BASE, 'nameAt': 'right', 'sideAlign': align, 'box': {'w': 178, 'h': 224}})['parts']
+        top, middle, foot = at(0), at(.5), at(1)
+        self.assertAlmostEqual(top['name'][1], top['photo'][1])
+        self.assertAlmostEqual(middle['name'][1] + middle['name'][3] / 2, middle['photo'][1] + middle['photo'][3] / 2)
+        self.assertAlmostEqual(foot['name'][1] + foot['name'][3], foot['photo'][1] + foot['photo'][3])
 
 
 if __name__ == '__main__':

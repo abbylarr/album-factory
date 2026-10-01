@@ -4,11 +4,10 @@ function renderInspector() {
   const l = selectedLayer(),
     sec = section();
   let html = '';
-  syncCardEdit();
-  if (l && cardLayer()) html = cardPanel(l);
-  else if (l) {
-    const multi = selected.length > 1;
-    if (!multi && l.type === 'grid') html += vignetteListLink();
+  if (l) {
+    const multi = selected.length > 1,
+      vignette = !multi && l.type === 'grid';
+    /* A vignette reads like a Figma auto layout: place, then the vignette (list, size, alignment, gap), then its card. */
     html += block(
       'Положение',
       `<div class="align-tools">${[
@@ -24,18 +23,18 @@ function renderInspector() {
         )
         .join(
           '',
-        )}</div><div class="field-grid">${number('X', 'box.x', l.box.x, l.type === 'grid' ? 0 : -pageWidth(), l.type === 'grid' ? pageWidth() : 2 * pageWidth())}${number('Y', 'box.y', l.box.y)}</div>${rotationRow(l)}`,
+        )}</div><div class="field-grid">${number('X', 'box.x', l.box.x, l.type === 'grid' ? 0 : -pageWidth(), l.type === 'grid' ? pageWidth() : 2 * pageWidth())}${number('Y', 'box.y', l.box.y)}</div>${l.type === 'grid' ? '' : rotationRow(l)}`,
     );
-    html += block(
+    if (vignette) html += vignetteSection(l) + cardsSection(l) + captionsSection(l);
+    else html += block(
       'Размер',
-      `<div class="size-line">${number('W', 'box.w', layerW(l), 1, l.type === 'grid' ? pageWidth() : sheetWidth())}${l.type === 'svg' ? `<button type="button" class="icon-toggle${l.lockAspect !== false ? ' active' : ''}" data-choice="lockAspect" title="Сохранять пропорции" aria-label="Сохранять пропорции" aria-pressed="${l.lockAspect !== false}">${glyph.link}</button>` : ''}${number('H', 'box.h', l.box.h, 1, pageHeight())}</div>${layerMetrics(l)}`,
+      `<div class="size-line">${number('W', 'box.w', layerW(l), 1, l.type === 'grid' ? pageWidth() : sheetWidth())}${l.type === 'svg' ? `<button type="button" class="icon-toggle${l.lockAspect !== false ? ' active' : ''}" data-choice="lockAspect" title="Сохранять пропорции" aria-label="Сохранять пропорции" aria-pressed="${l.lockAspect !== false}">${glyph.link}</button>` : ''}${number('H', 'box.h', l.box.h, 1, pageHeight())}</div>${l.type === 'grid' ? '' : layerMetrics(l)}`,
     );
     if (!multi && l.type === 'text')
       html +=
         block('Текст', autoTextField(l) + '<div class="text-overflow-note" data-text-overflow role="status" hidden><p data-overflow-message></p><button type="button" data-choice="fit">Уменьшать, чтобы влезло</button></div>') +
         `<section class="inspector-section typography-section"><div class="typography-heading"><h3>Типографика</h3></div>${textPanel(l)}</section>`;
     if (!multi && l.type === 'photo') html += photoContentPanel(l, { title: 'Что в кадре', key: l.id });
-    if (!multi && l.type === 'grid') html += vignettePanel(l);
     if (!multi && l.type === 'collage' && l.flex)
       html +=
         collagePanel(l) +

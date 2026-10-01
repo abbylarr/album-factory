@@ -11,41 +11,57 @@ let planning=[];
   /* A vignette card: the photo and its captions. Each caption sits in a zone around the photo (above, below, left, right) or over it; captions of one zone stack name first. Mirrors master_layout.card_frame. */
   const CARD_ZONES=['above','below','left','right','over'];
   function cardFrame(settings){
-    const ratio=Number(settings.photoRatio)||.75,gap=Number(settings.photoNameGap??3),between=Number(settings.nameDetailGap??2),side=Number(settings.captionWidth)||40,
+    const ratio=Number(settings.photoRatio)||.75,gap=Number(settings.photoNameGap??3),inset=Number(settings.overInset??3),between=Number(settings.nameDetailGap??2),side=Number(settings.captionWidth)||40,sideAlign=Math.min(1,Math.max(0,Number(settings.sideAlign??.5)||0)),
       nameH=settings.fontSize*.3528*(settings.lineHeight||1.25)*2,
       detailH=settings.showDetail?(settings.detailFontSize||9)*.3528*(settings.detailLineHeight||1.25)*2:0,
       texts=[{key:'name',zone:CARD_ZONES.includes(settings.nameAt)?settings.nameAt:'below',h:nameH}].concat(settings.showDetail?[{key:'detail',zone:CARD_ZONES.includes(settings.detailAt)?settings.detailAt:'below',h:detailH}]:[]),
       stack=zone=>{const items=texts.filter(t=>t.zone===zone);return items.length?items.reduce((sum,t)=>sum+t.h,0)+between*(items.length-1):0;},
       zones=Object.fromEntries(CARD_ZONES.map(zone=>[zone,stack(zone)]));
-    return {ratio,gap,between,side,nameH,detailH,texts,zones,
+    return {ratio,gap,inset,between,side,sideAlign,nameH,detailH,texts,zones,
       top:zones.above?zones.above+gap:0,bottom:zones.below?zones.below+gap:0,
       left:zones.left?side+gap:0,right:zones.right?side+gap:0,sideH:Math.max(zones.left,zones.right)};
   }
   /* Boxes of the photo and captions in card coordinates for a photo width. Caption boxes reserve two lines. */
   function cardParts(photoW,frame){
-    const f=frame,photoH=photoW/f.ratio,body=Math.max(photoH,f.sideH),parts={photo:{x:f.left,y:f.top,w:photoW,h:photoH}},pad=Math.min(f.gap,photoW/4);
+    const f=frame,photoH=photoW/f.ratio,body=Math.max(photoH,f.sideH),parts={photo:{x:f.left,y:f.top,w:photoW,h:photoH}},pad=Math.min(f.inset,photoW/4);
     for(const zone of CARD_ZONES){
       const items=f.texts.filter(t=>t.zone===zone);if(!items.length)continue;
       const h=f.zones[zone];let x=f.left,w=photoW,y;
       if(zone==='above')y=0;
       else if(zone==='below')y=f.top+body+f.gap;
       else if(zone==='over'){x=f.left+pad;w=Math.max(1,photoW-2*pad);y=f.top+photoH-pad-h;}
-      else{x=zone==='left'?0:f.left+photoW+f.gap;w=f.side;y=f.top+Math.max(0,(photoH-h)/2);}
+      else{x=zone==='left'?0:f.left+photoW+f.gap;w=f.side;y=f.top+Math.max(0,(photoH-h)*f.sideAlign);}
       for(const t of items){parts[t.key]={x,y,w,h:t.h,zone};y+=t.h+f.between;}
     }
     return {w:f.left+photoW+f.right,h:f.top+body+f.bottom,photoW,photoH,parts};
   }
+  const CARD_ANCHORS=['top-left','top','top-right','left','center','right','bottom-left','bottom','bottom-right'];
+  function cardAnchor(anchor){const i=CARD_ANCHORS.indexOf(anchor),at=i<0?4:i;return [(at%3)/2,Math.floor(at/3)/2];}
+  /* The narrowest caption a name still reads in at its smallest size: a teacher's first name and patronymic on one line
+     (about 22 letters), a student's longest word (about 15); capitals are wider. Beside the photo a name may take more
+     lines, so there only its longest word must fit. Mirrors master_layout.caption_floor. */
+  function captionFloor(settings){const side=settings.nameAt==='left'||settings.nameAt==='right',letters=settings.source==='teachers'&&!side?22:15,em=settings.textCase==='upper'?.62:.52;return letters*em*(Number(settings.minFontSize)||Number(settings.fontSize)||10)*.3528;}
+  /* The size every name of a vignette page is set in: the set size, reduced block-wide until the longest name fits two lines. */
+  /* Beside the photo a name may take as many lines as the photo height leaves (less the caption under it); elsewhere two. Mirrors master_layout.name_room. */
+  function nameRoom(layout){const zone=layout.parts.name.zone,detail=layout.parts.detail;if(zone!=='left'&&zone!=='right')return 0;return layout.photoH-(detail&&detail.zone===zone?layout.nameDetailGap+layout.detailH:0);}
+  function nameFont(settings,layout,people){const room=nameRoom(layout),lineH=(settings.lineHeight||1.25)*.3528;const fits=size=>people.every(person=>{const lines=nameLines(AutoText.applyCase(person.name,settings.textCase),layout.parts.name.w*.97,size,settings.font,settings);return lines&&(lines.length<=2||lines.length*size*lineH<=room+.1);});let size=settings.fontSize;while(size>settings.minFontSize&&!fits(size))size=Math.max(settings.minFontSize,size-.5);return {size,fits:fits(size)};}
   function gridGeometry(count,settings){if(count<=0)return null;const {w,h}=settings.box,gap=Number(settings.gap)||0,frame=cardFrame(settings);let best=null;
     for(let cols=1;cols<=Math.min(6,count);cols++){const rows=Math.ceil(count/cols),slotW=(w-(cols-1)*gap)/cols,slotH=(h-(rows-1)*gap)/rows,room=slotH-frame.top-frame.bottom;
       if(room<frame.sideH)continue;
       const photoW=Math.min(slotW-frame.left-frame.right,room*frame.ratio,Number(settings.photoWidth)||85);if(photoW<(Number(settings.minPhotoWidth)||5))continue;
-      const card=cardParts(photoW,frame),offsetX=(w-cols*card.w-(cols-1)*gap)/2,offsetY=(h-rows*card.h-(rows-1)*gap)/2,score=photoW*photoW*count-(cols*rows-count)*photoW*.01;
-      if(!best||score>best.score)best={cols,rows,cellW:card.w,cellH:card.h,photoW,photoH:card.photoH,parts:card.parts,nameH:frame.nameH,detailH:frame.detailH,photoNameGap:frame.gap,nameDetailGap:frame.between,offsetX,offsetY,score};}
+      /* A name must still read in two lines at the smallest size names may shrink to. */
+      if(cardParts(photoW,frame).parts.name.w<captionFloor(settings))continue;
+      /* Where the cards sit when they do not fill the area: one of nine anchors, as in Figma auto layout. */
+      const card=cardParts(photoW,frame),[ax,ay]=cardAnchor(settings.anchor),offsetX=(w-cols*card.w-(cols-1)*gap)*ax,offsetY=(h-rows*card.h-(rows-1)*gap)*ay,score=photoW*photoW*count-(cols*rows-count)*photoW*.01;
+      if(!best||score>best.score)best={cols,rows,cellW:card.w,cellH:card.h,photoW,photoH:card.photoH,parts:card.parts,nameH:frame.nameH,detailH:frame.detailH,photoNameGap:frame.gap,overInset:frame.inset,nameDetailGap:frame.between,offsetX,offsetY,score};}
     return best;}
   function capacity(settings){let result=0;for(let n=1;n<=settings.max;n++)if(gridGeometry(n,settings))result=n;return result;}
   function distribute(count,max,preferred,min){if(count===0)return [];const slots=Math.max(Math.ceil(count/max),Math.min(preferred,Math.max(1,Math.floor(count/min)))),base=Math.floor(count/slots),extra=count%slots;return Array.from({length:slots},(_,i)=>base+(i<extra?1:0));}
   const measure=document.createElement('canvas').getContext('2d');
-  function nameLines(name,width,fontSize,font,style){measure.font=`${style?.italic?'italic ':''}${style?.bold?'700 ':''}${fontSize*96/72}px "${font||'Arial'}"`;const widthPx=width*96/25.4,lines=[];let current='';for(const word of name.split(' ')){if(measure.measureText(word).width>widthPx)return null;const next=current?current+' '+word:word;if(measure.measureText(next).width>widthPx){lines.push(current);current=word}else current=next;}if(current)lines.push(current);return lines;}
+  /* Lines a caption wraps into, or null when a word is wider than the caption. Letter spacing counts, as in print. */
+  function nameLines(name,width,fontSize,font,style){const px=fontSize*96/72,spacing=px*(Number(style?.letterSpacing)||0)/100;measure.font=`${style?.italic?'italic ':''}${style?.bold?'700 ':''}${px}px "${font||'Arial'}"`;const wide=text=>measure.measureText(text).width+text.length*spacing,widthPx=width*96/25.4,lines=[];let current='';for(const word of name.split(/\s+/).filter(Boolean)){if(wide(word)>widthPx)return null;const next=current?current+' '+word:word;if(wide(next)>widthPx){lines.push(current);current=word}else current=next;}if(current)lines.push(current);return lines;}
+  /* The size of one card's subject or quote: each shrinks on its own, down to «от», within the two lines kept for it. Mirrors the detail sizing in master_layout. */
+  function detailFont(settings,layout,text){const max=Number(settings.detailFontSize)||9,min=Math.min(max,Number(settings.detailMinFontSize??max)||max),lineH=(settings.detailLineHeight||1.25)*.3528,style={bold:settings.detailBold,italic:settings.detailItalic,letterSpacing:settings.detailLetterSpacing};const fits=size=>{const lines=nameLines(text,layout.parts.detail.w*.97,size,settings.detailFont||settings.font,style);return !!lines&&lines.length*size*lineH<=layout.detailH+.1;};let size=max;while(size>min&&!fits(size))size=Math.max(min,size-.5);return {size,fits:fits(size)};}
   /* Cards that fit on the tightest vignette of a list block. */
   function listCapacity(section){const list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},grids=templatePages(section).flatMap(p=>p.layers.filter(l=>l.type==='grid'));return grids.length?Math.min(...grids.map(l=>capacity({...l,max:list.max}))):0;}
   const PLAN_TEXT={'no-grid':['warning','В блоке «по списку» нет виньетки — развороты выводятся по одному разу.'],'no-fit':['error','Карточки не помещаются при заданной ширине фото и отступах.'],'no-repeat':['error','Список не помещается: добавьте разворот с ролью «Повторяемый».'],'half':['warning','Список закончился на середине разворота — добавьте шаблон «Последний неполный».'],'below-min':['warning','На странице меньше карточек, чем минимум блока.'],'overflow':['error','Карточки не помещаются на страницу.'],'parts-order':['error','Продолжение списка стоит выше его начала — перетащите его ниже.']};
@@ -63,12 +79,12 @@ let planning=[];
     if(grids[0]&&settings.minFontSize>settings.fontSize)issues.push({severity:'error',text:'Минимальный кегль больше основного.'});
     const cap=listCapacity(section),result=MasterPlan.listPlan(section,rest.length,cap),counts=result.counts,layoutCount=Math.max(0,...counts);
     lists[section.id]={everyone,end:start+result.taken};
-    if(cap&&cap<list.max)issues.push({severity:'warning',text:`По размерам фото на страницу помещается ${cap} вместо максимума ${list.max}.`});
+    if(cap&&list.max<100&&cap<list.max)issues.push({severity:'warning',text:`По размерам фото на страницу помещается ${cap} вместо максимума ${list.max}.`});
     for(const code of result.issues){const [level,text]=PLAN_TEXT[code];issues.push({severity:code==='below-min'&&list.strictMin?'error':level,text});}
     if(rest.some(person=>person.missing))issues.push({severity:'error',text:'У участника отсутствует обязательный портрет.'});
     const chunks=[];let offset=0;for(const count of counts){chunks.push(rest.slice(offset,offset+count));offset+=count;}
     const layout=layoutCount&&grids[0]?gridGeometry(layoutCount,settings):null;let actualFont=settings.fontSize;
-    if(layout){const fits=size=>rest.every(person=>{const lines=nameLines(person.name,layout.parts.name.w*.97,size,settings.font,settings);return lines&&lines.length<=2;});while(actualFont>settings.minFontSize&&!fits(actualFont))actualFont=Math.max(settings.minFontSize,actualFont-.5);if(!fits(actualFont))issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
+    if(layout){const fit=nameFont(settings,layout,everyone);actualFont=fit.size;if(!fit.fits)issues.push({severity:'error',text:'Длинное имя не помещается при минимальном кегле.'});else if(actualFont<settings.fontSize)issues.push({severity:'warning',text:`Имена всего блока уменьшены до ${actualFont} pt.`});}
     for(const spread of result.spreads)for(const item of spread.pages){const template=getTemplatePage(item.page),grid=template.layers.some(l=>l.type==='grid');generated.push(item.part==null?{templateId:item.page,records:grid?[]:null,source:grid?source:'fixed',role:spread.role,actualFont,layoutCount}:{templateId:item.page,records:chunks[item.part],source,actualFont,layoutCount,part:item.part+1,parts:counts.length,role:spread.role});}
     return generated;
   }
@@ -93,7 +109,7 @@ let planning=[];
       const list={...MasterPlan.LIST_DEFAULT,...(section.list||{})},grids=pages.flatMap(p=>p.layers.filter(l=>l.type==='grid'));
       if(list.min>list.max)add('error','Минимум карточек больше максимума.');
       if(!grids.length)add(...PLAN_TEXT['no-grid']);
-      else{const cap=listCapacity(section);if(!cap)add(...PLAN_TEXT['no-fit']);else if(cap<list.max)add('warning',`На страницу помещается ${cap}, а не ${list.max}. Уменьшите фото или отступы.`);if(grids.some(g=>g.minFontSize>g.fontSize))add('error','Минимальный кегль больше основного.');}
+      else{const cap=listCapacity(section);if(!cap)add(...PLAN_TEXT['no-fit']);else if(list.min>cap)add(list.strictMin?'error':'warning',`На страницу помещается ${cap}, а минимум — ${list.min}.`);else if(list.max<100&&cap<list.max)add('warning',`На страницу помещается ${cap}, а не ${list.max}. Уменьшите фото или отступы.`);if(grids.some(g=>g.minFontSize>g.fontSize))add('error','Минимальный кегль больше основного.');}
     }
     if(section.continues&&documentModel.sections.findIndex(s=>s.id===section.continues)>documentModel.sections.indexOf(section))add(...PLAN_TEXT['parts-order']);
     for(const item of pages.flatMap(p=>p.layers))if(item.type==='photo'&&!item.hidden&&item.source==='custom'&&!item.dataUrl)add('error',`«${item.name}»: загруженная фотография не выбрана.`);
@@ -114,5 +130,5 @@ let planning=[];
   const TEXT_SAMPLES={'owner.quote':'Цитата владельца альбома','item.quote':'Цитата героя разворота','lead.subject':'Русский язык','class':'11 «А»','year':'2026','school':{full:'МБОУ «Средняя общеобразовательная школа № 5»',short:'Школа № 5'},'city':'Казань','shoot.title':'Никольская сопка','shoot.date':'27.09.2020'};
   function resolvedText(item,generated){return AutoText.resolve(item.text,field=>{if(field.endsWith('.name')){const person=photoPerson(field.split('.')[0],generated.personId);if(!person)return 'Нет данных';const words=person.name.split(' ');return words.length>2?{first:words[0],middle:words[1],last:words.slice(2).join(' ')}:{first:words[0],middle:'',last:words.slice(1).join(' ')};}return TEXT_SAMPLES[field];});}
 
-return {plan,designIssues,people,gridGeometry,cardFrame,cardParts,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
+return {plan,designIssues,people,gridGeometry,nameFont,detailFont,cardFrame,cardParts,placeholderSvg,resolvedPhoto,resolvedText,getTemplatePage,listCapacity};
 };

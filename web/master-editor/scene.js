@@ -242,15 +242,15 @@ async function vignetteChildren(l, g, background) {
     const part = geo.parts,
       photoX = part.photo.x,
       photoY = part.photo.y,
-      pad = Math.min(geo.photoNameGap, geo.photoW / 4),
-      editing = cardEdit?.id === l.id;
+      pad = Math.min(geo.overInset, geo.photoW / 4);
+    /* A short last row may stand in the middle of the full rows above it. */
+    const lastStart = records.length - (records.length % geo.cols || geo.cols),
+      lastShift = l.centerLastRow ? ((geo.cols - (records.length - lastStart)) * (geo.cellW + l.gap)) / 2 : 0;
     for (let i = 0; i < records.length; i++) {
-      const x = geo.offsetX + (i % geo.cols) * (geo.cellW + l.gap),
+      const x = geo.offsetX + (i % geo.cols) * (geo.cellW + l.gap) + (i >= lastStart ? lastShift : 0),
         y = geo.offsetY + Math.floor(i / geo.cols) * (geo.cellH + l.gap),
         px = x + photoX,
-        py = y + photoY,
-        /* Inside a card the others fade, like a component's instances around the main one. */
-        fade = editing && i ? 0.25 : 1;
+        py = y + photoY;
       const el = await imageElement(planner.placeholderSvg(records[i]));
       /* The portrait covers the photo box whatever its proportions. */
       const cover = Math.max(geo.photoW / el.naturalWidth, geo.photoH / el.naturalHeight),
@@ -261,7 +261,7 @@ async function vignetteChildren(l, g, background) {
           originY: 'center',
           scaleX: cover,
           scaleY: cover,
-          opacity: (records[i].missing ? 0.2 : 1) * fade,
+          opacity: records[i].missing ? 0.2 : 1,
         }),
         corner = Math.min(Number(l.radius) || 0, geo.photoW / 2, geo.photoH / 2);
       photo.clipPath = new fabric.Rect({
@@ -284,7 +284,6 @@ async function vignetteChildren(l, g, background) {
             fill: background || '#fff',
             strokeWidth: 0,
             shadow: shadowPaint(l.shadow),
-            opacity: fade,
             evented: false,
           }),
         );
@@ -307,12 +306,11 @@ async function vignetteChildren(l, g, background) {
             strokeDashArray: dashArray(l.strokeDash, sw),
             strokeLineCap: l.strokeCap || 'butt',
             strokeLineJoin: l.strokeJoin || 'miter',
-            opacity: fade,
             evented: false,
             objectCaching: false,
           }),
         );
-      const nameBox = new fabric.Textbox(records[i].name, {
+      const nameBox = new fabric.Textbox(AutoText.applyCase(records[i].name, l.textCase), {
         left: x + part.name.x,
         top: y + part.name.y,
         width: part.name.w,
@@ -326,12 +324,11 @@ async function vignetteChildren(l, g, background) {
         charSpacing: (Number(l.letterSpacing) || 0) * 10,
         textAlign: l.align || 'center',
         fill: l.color,
-        opacity: fade,
-        strokeWidth: 0,
+        ...captionLookPaint(l, 'name'),
       });
-      const detailBox =
-        l.showDetail && records[i].detail && part.detail
-          ? new fabric.Textbox(records[i].detail, {
+      const detailText = l.showDetail && records[i].detail && part.detail ? AutoText.applyCase(records[i].detail, l.detailTextCase) : '',
+        detailBox = detailText
+          ? new fabric.Textbox(detailText, {
               left: x + part.detail.x,
               top: y + part.detail.y,
               width: part.detail.w,
@@ -340,17 +337,34 @@ async function vignetteChildren(l, g, background) {
               fontStyle: l.detailItalic ? 'italic' : 'normal',
               underline: !!l.detailUnderline,
               linethrough: !!l.detailStrike,
-              fontSize: (l.detailFontSize || 9) * 0.3528,
+              /* Each subject or quote shrinks on its own card, as in print. */
+              fontSize: planner.detailFont(l, geo, detailText).size * 0.3528,
               lineHeight: l.detailLineHeight || 1.25,
               charSpacing: (Number(l.detailLetterSpacing) || 0) * 10,
               textAlign: l.detailAlign || 'center',
               fill: l.detailColor || l.color,
-              opacity: fade,
-              strokeWidth: 0,
+              ...captionLookPaint(l, 'detail'),
             })
           : null;
-      /* Captions of one zone hug each other; over the photo they rest on its bottom edge (as in master_layout). */
-      const floor = py + geo.photoH - pad;
+      /* Slanted like page texts: each line leans around its own baseline, as in print. */
+      applyTextSkew(nameBox, l.skew);
+      if (detailBox) applyTextSkew(detailBox, l.detailSkew);
+      /* Captions of one zone hug each other; over the photo they rest on its bottom edge, beside it they stand at the
+         set height by the text they really have, so «низ» puts the last line at the photo foot (as in master_layout). */
+      const floor = py + geo.photoH - pad,
+        beside = zone => zone === 'left' || zone === 'right',
+        height = clamp(Number(l.sideAlign ?? 0.5) || 0, 0, 1),
+        stand = h => py + Math.max(0, (geo.photoH - h) * height);
+      if (beside(part.name.zone))
+        nameBox.set(
+          'top',
+          stand(
+            nameBox.height +
+              (detailBox && part.detail.zone === part.name.zone ? geo.nameDetailGap + detailBox.height : 0),
+          ),
+        );
+      if (detailBox && beside(part.detail.zone) && part.detail.zone !== part.name.zone)
+        detailBox.set('top', stand(detailBox.height));
       if (detailBox && part.detail.zone === 'over') detailBox.set('top', floor - detailBox.height);
       if (part.name.zone === 'over')
         nameBox.set(
@@ -395,7 +409,9 @@ async function renderScene() {
             personId: view.owner,
             records: planner.people(p.layers.find(l => l.type === 'grid')?.source || 'students').slice(0, 8),
           },
-      );
+      )
+      /* Vignette pages show the chosen number of cards, not the whole test class (card.js). */
+      .map((g, side) => previewPage(sec.spreads[view.spread].pages[side], g));
   const objects = [],
     backs = [],
     spineFills = [];
@@ -539,10 +555,10 @@ async function renderScene() {
           subTargetCheck: false,
           objectCaching: false,
         });
-        object.vignette = { geo: built.geo, cards: built.cards };
-        /* Inside a card the vignette itself stays in place, like a component frame in Figma. */
-        if (cardEdit?.id === l.id)
-          object.set({ lockMovementX: true, lockMovementY: true, hasControls: false, hoverCursor: 'default' });
+        object.vignette = { geo: built.geo, cards: built.cards, part: g?.part || 1, parts: g?.parts || 1 };
+        /* A vignette is never rotated or mirrored. */
+        object.set({ lockRotation: true });
+        object.setControlVisible('mtr', false);
       } else if (l.type === 'collage') {
         const frames = l.flex ? flexLayout(l, sec.id, pageIndex) : collageFrames(l),
           radius = Number(l.radius) || 0,

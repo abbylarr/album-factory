@@ -195,18 +195,23 @@ document.addEventListener(
 );
 $('#inspector').oninput = e => {
   const el = e.target;
+  /* Number cells grow with their value; sliders keep their width. */
   if (
-    el.dataset?.live === 'letterSpacing' ||
+    el.type !== 'range' &&
+    (el.dataset?.live === 'letterSpacing' ||
     el.dataset?.live === 'skew' ||
-    el.dataset?.live in vignetteGapMax ||
+    vignetteLiveKeys.has(el.dataset?.live) ||
+    el.closest?.('.vignette-max') ||
     el.closest('.collage-gaps') ||
-    el.closest('.layer-metrics')
+    el.closest('.layer-metrics'))
   )
     el.style.width = Math.max(1, el.value.length) + 'ch';
   if (!el.dataset?.live || el.value === '' || !el.validity.valid) return;
   const value = Number(el.value);
-  if (selectedLayer()?.type === 'grid' && vignetteLiveKeys.has(el.dataset.live))
+  if (selectedLayer()?.type === 'grid' && (vignetteLiveKeys.has(el.dataset.live) || captionLookKey(el.dataset.live)))
     vignetteLive(el.dataset.live, value);
+  else if (selectedLayer()?.type === 'grid' && (el.dataset.live === 'box.w' || el.dataset.live === 'box.h'))
+    vignetteBoxLive(el.dataset.live.slice(4), value);
   else liveProperty(el.dataset.live, value);
   const badge = el.parentElement?.querySelector('b');
   if (badge) badge.textContent = String(String(el.step).includes('.') ? round(value) : Math.round(value));
@@ -218,6 +223,14 @@ $('#inspector').onpointerdown = e => {
 $('#inspector').onchange = async e => {
   if (MasterPhotos.change(e)) return;
   const el = e.target;
+  /* Cards-per-page limits of the block's list. A typed «до» stays a limit even when more would fit later; an empty one
+     means as many as fit, and the page follows the area when it changes. */
+  if (el.dataset.list) {
+    cardsPreview = 0;
+    if (el.dataset.list === 'max' && el.value === '') return blockSet('max', 100);
+    if (el.value === '' || !el.validity.valid) return el.reportValidity();
+    return blockSet(el.dataset.list, value);
+  }
   if (el.dataset.flex) {
     const l = selectedLayer();
     if (!l?.flex) return;
@@ -305,14 +318,14 @@ let scrub = null;
 document.addEventListener('pointerdown', e => {
   const field = e.target.closest('.type-value[data-scrub]');
   if (!field || e.button !== 0 || e.target.tagName === 'INPUT') return;
-  const input = field.querySelector('input[data-live],input[data-album-size],input[data-sheet-thickness]');
+  const input = field.querySelector('input[data-live],input[data-list],input[data-album-size],input[data-sheet-thickness]');
   if (!input) return;
   scrub = {
     field,
     input,
     pointerId: e.pointerId,
     startX: e.clientX,
-    start: Number(input.value),
+    start: Number(input.value || input.placeholder),
     step: Number(field.dataset.step),
     min: Number(field.dataset.min),
     max: Number(field.dataset.max),
@@ -343,7 +356,7 @@ function endScrub(e) {
   scrub = null;
   field.classList.remove('scrubbing');
   if (dragging) {
-    if (input.dataset.albumSize || input.hasAttribute('data-sheet-thickness'))
+    if (input.dataset.albumSize || input.dataset.list || input.hasAttribute('data-sheet-thickness'))
       input.dispatchEvent(new Event('change', { bubbles: true }));
     else finishSlide();
   } else if (e.type === 'pointerup') {
@@ -452,10 +465,23 @@ $('#inspector').onclick = e => {
     return;
   }
   if (e.target.closest('[data-open-block]')) return openBlockSettings();
-  if (e.target.closest('[data-card-enter]')) return enterCard(selectedLayer());
-  if (e.target.closest('[data-card-exit]')) return exitCard();
   const cardPick = e.target.closest('[data-card-pick]');
   if (cardPick) return pickCardPart(cardPick.dataset.cardPick);
+  /* «мешает …» leads to the setting it names: the photo width right there, the name size in «Подписи». */
+  const limiter = e.target.closest('[data-limiter]');
+  if (limiter) {
+    const key = limiter.dataset.limiter;
+    if (!key) return;
+    if (['minFontSize', 'captionWidth', 'photoNameGap'].includes(key)) pickCardPart('name');
+    const field = $(`#inspector [data-live="${key}"], #inspector [data-list="${key}"]`);
+    if (!field) return;
+    const box = field.closest('.type-value');
+    box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    box.classList.remove('flash');
+    void box.offsetWidth;
+    box.classList.add('flash');
+    return field.focus({ preventScroll: true });
+  }
   const safetyButton = e.target.closest('[data-open-safety]');
   if (safetyButton) return openSafety(safetyButton.dataset.openSafety);
   const colorBtn = e.target.closest('[data-color-key]');
@@ -537,6 +563,8 @@ $('#inspector').onclick = e => {
     if (key === 'photoRatio') return property(key, Number(choice.dataset.value));
     if (key === 'strokeOn') return property('strokeOn', !strokeOpen(l));
     if (key === 'shadowOn') return property('shadowOn', !l.shadow);
+    const look = l.type === 'grid' && captionLookKey(key);
+    if (look) return commit(() => setCaptionLook(key, !l[look.field]));
     if (key === 'lockAspect') return property('lockAspect', l.lockAspect === false);
     if (
       key === 'flipX' ||
@@ -550,7 +578,8 @@ $('#inspector').onclick = e => {
       key === 'detailItalic' ||
       key === 'detailUnderline' ||
       key === 'detailStrike' ||
-      key === 'showDetail'
+      key === 'showDetail' ||
+      key === 'centerLastRow'
     )
       return property(key, !l[key]);
     return property(key, choice.dataset.value);
@@ -981,10 +1010,6 @@ document.addEventListener('keydown', e => {
       closeObjectMenu();
       return;
     }
-    if (cardEdit && !colorPop) {
-      exitCard();
-      return;
-    }
     if (colorPop) {
       closeColor();
       return;
@@ -1012,25 +1037,6 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (preview) return;
-  /* Inside a card the vignette stays put: Delete only hides the second caption, Enter enters the card. */
-  if (cardLayer()) {
-    if (['Delete', 'Backspace'].includes(e.key)) {
-      e.preventDefault();
-      if (cardEdit.part === 'detail' && selectedLayer().showDetail) {
-        cardEdit.part = 'photo';
-        property('showDetail', false);
-      }
-      return;
-    }
-    if (e.key.startsWith('Arrow')) {
-      e.preventDefault();
-      return;
-    }
-  } else if (e.key === 'Enter' && !e.target.closest('button,a,summary') && selectedLayer()?.type === 'grid' && selected.length === 1) {
-    e.preventDefault();
-    enterCard(selectedLayer());
-    return;
-  }
   if (['Delete', 'Backspace'].includes(e.key)) {
     e.preventDefault();
     const collage = activeCollage();

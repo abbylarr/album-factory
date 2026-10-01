@@ -1,7 +1,27 @@
 /* Master editor · Vignette live values, photo content and collage panels. */
 'use strict';
-/* Card sizes and spacing of every vignette in the block change together while dragging. */
-const vignetteLiveKeys = new Set(['gap', 'photoNameGap', 'nameDetailGap', 'minPhotoWidth', 'photoWidth', 'minFontSize', 'captionWidth']);
+/* Card sizes, spacing and caption type of every vignette in the block change together while dragging; the block is
+   planned again at each step, since the name size on the canvas comes from the plan (long names shrink block-wide). */
+const vignetteLiveKeys = new Set([
+  'gap',
+  'photoNameGap',
+  'nameDetailGap',
+  'overInset',
+  'minPhotoWidth',
+  'photoWidth',
+  'minFontSize',
+  'captionWidth',
+  'sideAlign',
+  'fontSize',
+  'lineHeight',
+  'letterSpacing',
+  'skew',
+  'detailFontSize',
+  'detailMinFontSize',
+  'detailLineHeight',
+  'detailLetterSpacing',
+  'detailSkew',
+]);
 function vignetteLive(key, value, input) {
   const l = selectedLayer();
   if (!l || l.type !== 'grid' || !Number.isFinite(value)) return;
@@ -9,21 +29,43 @@ function vignetteLive(key, value, input) {
   const grids = section()
     .spreads.flatMap(sp => sp.pages.flatMap(p => p.layers))
     .filter(item => item.type === 'grid');
-  if (key === 'minFontSize') value = Math.min(value, l.fontSize);
+  /* The middle holds the thumb a little: top, middle and foot are the usual places, anything between still works. */
+  if (key === 'sideAlign' && Math.abs(value - 0.5) < 0.05) {
+    value = 0.5;
+    input ??= $('#inspector [data-live="sideAlign"]');
+  }
+  if (setCaptionLook(key, value)) {
+    if (input && Number(input.value) !== value) input.value = String(value);
+    return renderScene();
+  }
+  /* «от» and «до» pairs push each other, as in the block's cards-per-page limits. */
   for (const item of grids) {
     item[key] = value;
     if (key === 'minPhotoWidth' && (item.photoWidth ?? 85) < value) item.photoWidth = value;
     if (key === 'photoWidth' && item.minPhotoWidth > value) item.minPhotoWidth = value;
+    if (key === 'minFontSize' && item.fontSize < value) item.fontSize = value;
+    if (key === 'fontSize' && item.minFontSize > value) item.minFontSize = value;
+    if (key === 'detailMinFontSize' && (item.detailFontSize ?? 9) < value) item.detailFontSize = value;
+    if (key === 'detailFontSize' && item.detailMinFontSize > value) item.detailMinFontSize = value;
   }
   if (input && Number(input.value) !== value) input.value = String(value);
-  const paired = { photoWidth: 'minPhotoWidth', minPhotoWidth: 'photoWidth' }[key];
+  const paired = {
+    photoWidth: 'minPhotoWidth',
+    minPhotoWidth: 'photoWidth',
+    fontSize: 'minFontSize',
+    minFontSize: 'fontSize',
+    detailFontSize: 'detailMinFontSize',
+    detailMinFontSize: 'detailFontSize',
+  }[key];
   if (paired) {
-    const other = $(`#inspector [data-live="${paired}"]`);
-    if (other && other !== document.activeElement) other.value = String(round(l[paired] ?? 85));
+    const other = $(`#inspector [data-live="${paired}"]`),
+      fallback = { minPhotoWidth: 32, photoWidth: 85, detailFontSize: 9, detailMinFontSize: l.detailFontSize ?? 9 }[paired];
+    if (other && other !== document.activeElement) other.value = String(round(l[paired] ?? fallback ?? l.fontSize));
   }
   planner = MasterPlanner(doc, view);
   plans = planner.plan();
   renderScene();
+  refreshCardsFit();
 }
 const staticPhotoIcon = '<span class="static-photo-icon" aria-hidden="true"></span>';
 /* What fills a photo layer or a collage frame. One panel for both, so they are set up the same way. */
@@ -126,4 +168,16 @@ function pickKey(id) {
   const template = sec.spreads.flatMap(sp => sp.pages).find(p => p.layers.some(x => x.id === layerId));
   const index = plan.pages.findIndex(g => g.templateId === template?.id);
   return index < 0 ? '' : `${sec.id}:${index}/${id}`;
+}
+/* A vignette's area changes live too: how many cards fit and their size follow the area at every step. */
+function vignetteBoxLive(axis, value) {
+  const l = selectedLayer();
+  if (!l || l.type !== 'grid' || !Number.isFinite(value)) return;
+  if (!slide) slide = { start: clone(doc) };
+  l.box[axis] = clamp(value, 1, axis === 'w' ? pageWidth() : pageHeight());
+  settle(l);
+  planner = MasterPlanner(doc, view);
+  plans = planner.plan();
+  renderScene();
+  refreshCardsFit();
 }

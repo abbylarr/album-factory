@@ -15,8 +15,11 @@ ROLES = ('intro', 'repeat', 'last', 'outro')
 PEOPLE = ('all', 'others', 'owner', 'off')
 # Where a caption sits in a vignette card, and the photo proportions (width / height) a card may use.
 CARD_ZONES = ('above', 'below', 'left', 'right', 'over')
+# Where the cards of a vignette sit in its area when they do not fill it, read row by row.
+CARD_ANCHORS = ('top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right')
 PHOTO_RATIOS = (0.75, 0.8, 1, 2 / 3)
-LIST_DEFAULT = {'source': 'students', 'min': 4, 'max': 12, 'strictMin': False, 'excludeLead': False}
+# max 100 means «as many as fit»: the page is limited by the photo size only.
+LIST_DEFAULT = {'source': 'students', 'min': 4, 'max': 100, 'strictMin': False, 'excludeLead': False}
 
 
 def role_of(spread):
@@ -71,6 +74,19 @@ def list_plan(section, n, cap):
             room += grid_pages(repeat[i % len(repeat)])
         pages = min(pages, max(room, fixed, 1))
     cut = pages < whole
+    # Without a «last» spread a list ending mid-spread leaves a vignette page empty: take the page count up to the end
+    # of that spread while every page keeps the minimum, else down to the end of the one before while the cards fit.
+    if n and not cut and not last and cycle_has_grid:
+        lower = upper = fixed
+        turn = 0
+        while upper < pages:
+            lower = upper
+            upper += grid_pages(repeat[turn % len(repeat)])
+            turn += 1
+        if upper > pages and n // upper >= minimum:
+            pages = upper
+        elif upper > pages and lower >= 1 and lower >= math.ceil(n / cap):
+            pages = lower
     middle, rest, turn = [], pages - fixed, 0
     while rest > 0:
         if not cycle_has_grid:

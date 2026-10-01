@@ -52,7 +52,7 @@ def master():
 
 def snapshot(students=12, teachers=5):
     return {'students': [{'id': f's{i}', 'first_name': 'Ученик', 'last_name': str(i)} for i in range(students)],
-            'teachers': [{'id': f't{i}', 'first_name': 'Учитель', 'last_name': str(i)} for i in range(teachers)],
+            'teachers': [{'id': f't{i}', 'first_name': 'Учитель', 'last_name': str(i), 'is_class_teacher': i == 0} for i in range(teachers)],
             'photos': {}, 'selections': [], 'order': {'class_name': '11А', 'year': '2026'}}
 
 

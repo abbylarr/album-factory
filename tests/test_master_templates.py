@@ -343,10 +343,11 @@ class MasterTests(unittest.TestCase):
         doc=master();doc['sections']=doc['sections'][:1];section=doc['sections'][0];section['id']='teachers'
         grid=section['spreads'][0]['pages'][0]['layers'][0];grid['source']='teachers';grid['excludeLead']=True
         section['spreads'][0]['pages'][1]['layers']=[{'id':'lead','type':'photo','box':{'x':10,'y':10,'w':100,'h':150},'source':'lead'}]
-        snapshot={'students':[{'id':'s','first_name':'Ученик'}],'teachers':[{'id':str(i),'first_name':'Учитель','last_name':str(i)} for i in range(20)],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+        snapshot={'students':[{'id':'s','first_name':'Ученик'}],'teachers':[{'id':str(i),'first_name':'Учитель','last_name':str(i),'is_class_teacher':i==3} for i in range(20)],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
         generated=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
         names=[e['text'] for spread in generated['variant_spreads']['student:s'].values() for e in spread['elements'] if e['key'].endswith('/name')]
-        self.assertEqual(len(names),19);self.assertNotIn('Учитель 0',names)
+        # The class teacher is the one marked in the order's teacher choice, wherever the list puts them.
+        self.assertEqual(len(names),19);self.assertNotIn('Учитель 3',names);self.assertIn('Учитель 0',names)
 
     def test_vignette_detail_uses_quote_or_school_subject(self):
         doc=master()
@@ -406,9 +407,95 @@ class MasterTests(unittest.TestCase):
         self.assertAlmostEqual(name['box'][2],45)
         self.assertLess(detail['box'][1]+detail['box'][3],photo['box'][1]+1e-6)
         self.assertAlmostEqual(detail['box'][0],photo['box'][0])
-        for bad in ({'nameAt':'middle'},{'photoRatio':0.5},{'captionWidth':5}):
+        for bad in ({'nameAt':'middle'},{'photoRatio':0.5},{'captionWidth':5},{'sideAlign':1.5}):
             broken=master();broken['sections'][0]['spreads'][0]['pages'][0]['layers'][0].update(bad)
             self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,bad)
+
+    def test_vignette_side_captions_stand_at_the_set_height_by_their_real_text(self):
+        def card(align):
+            doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+            grid.update(showDetail=True,nameAt='right',detailAt='right',sideAlign=align,photoWidth=40,minPhotoWidth=20)
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+            people=[{'id':str(i),'first_name':'Анна','last_name':'Иванова','quote':'Привет'} for i in range(4)]
+            snapshot={'students':people,'teachers':[],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+            compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+            elements=[e for spread in compiled['variant_spreads']['student:0'].values() for e in spread['elements'] if '/card[student:0]' in e['key']]
+            return (next(e for e in elements if e['key'].endswith(k)) for k in ('/photo','/name','/detail'))
+        photo,name,_=card(0)
+        self.assertAlmostEqual(name['box'][1],photo['box'][1])
+        photo,_,detail=card(1)
+        detail_height=measurer().height(detail['text'],detail['font'],detail['size'],detail['leading'],detail['box'][2],detail.get('letterSpacing') or 0)
+        self.assertAlmostEqual(detail['box'][1]+detail_height,photo['box'][1]+photo['box'][3])
+
+    def test_vignette_name_beside_the_photo_may_take_more_lines_at_a_larger_size(self):
+        def name_of(**card):
+            doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+            grid.update(fontSize=14,minFontSize=6,**card)
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+            people=[{'id':str(i),'first_name':'Александра','patronymic':'Константиновна','last_name':'Рождественская'} for i in range(4)]
+            snapshot={'students':people,'teachers':[],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+            compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+            return next(e for spread in compiled['variant_spreads']['student:0'].values() for e in spread['elements'] if e['key'].endswith('/card[student:0]/name'))
+        below=name_of(nameAt='below',photoWidth=30,minPhotoWidth=30)
+        beside=name_of(nameAt='left',captionWidth=30,photoWidth=60,minPhotoWidth=60)
+        self.assertGreater(beside['size'],below['size'])
+        height=measurer().height(beside['text'],beside['font'],beside['size'],beside['leading'],beside['box'][2],0)
+        self.assertGreaterEqual(beside['box'][3]+1e-6,height)
+        self.assertLessEqual(max(measurer().width(word,beside['font'],beside['size']) for word in beside['text'].split()),beside['box'][2])
+
+    def test_vignette_reports_captions_that_do_not_fit(self):
+        doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        grid.update(showDetail=True,fontSize=12,minFontSize=10,detailFontSize=9,detailMinFontSize=7)
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        quote='Мы прошли этот путь вместе и запомним каждый день, каждый урок и каждую перемену навсегда, что бы ни случилось потом'
+        people=[{'id':'0','first_name':'Анна','last_name':'Иванова','quote':'Привет'},
+                {'id':'1','first_name':'Анна','last_name':'Петрова','quote':'Вперёд, к новым вершинам'},
+                {'id':'2','first_name':'Анна','last_name':'Сидорова','quote':quote},
+                {'id':'3','first_name':'Анна','last_name':'Рождественская-Воскресенская-Преображенская','quote':''}]
+        snapshot={'students':people,'teachers':[],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        details={e['key'].split('/card[student:')[1][0]:e for spread in compiled['variant_spreads']['student:0'].values() for e in spread['elements'] if e['key'].endswith('/detail')}
+        # A quote shrinks on its own card only; one that does not fit even at «от» is reported, never cut silently.
+        self.assertEqual(details['0']['size'],9)
+        messages=[i['message'] for i in compiled['issues'] if i['level']=='error']
+        self.assertIn('Цитата не помещается в подпись: Анна Сидорова',messages)
+        self.assertIn('Имя не помещается в подпись: Анна Рождественская-Воскресенская-Преображенская',messages)
+        self.assertFalse(any('Петрова' in m for m in messages))
+
+    def test_vignette_captions_carry_their_outline_and_shadow(self):
+        doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        shadow={'color':'#000000','offsetX':0,'offsetY':0.4,'blur':0.6,'opacity':50}
+        grid.update(showDetail=True,nameStroke={'color':'#ffffff','width':0.3},detailShadow=shadow)
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        people=[{'id':str(i),'first_name':'Анна','last_name':'Иванова','quote':'Привет'} for i in range(4)]
+        snapshot={'students':people,'teachers':[],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        card=[e for spread in compiled['variant_spreads']['student:0'].values() for e in spread['elements'] if '/card[student:0]' in e['key']]
+        photo,name,detail=(next(e for e in card if e['key'].endswith(k)) for k in ('/photo','/name','/detail'))
+        self.assertEqual((name['stroke'],name['strokeWidth'],name['strokeAlign']),('#ffffff',0.3,'outside'))
+        self.assertNotIn('shadow',name)
+        self.assertEqual(detail['shadow'],shadow)
+        self.assertNotIn('strokeAlign',detail)
+        self.assertNotIn('strokeAlign',photo)
+        for bad in ({'nameStroke':{'color':'white','width':0.3}},{'nameStroke':{'color':'#ffffff','width':9}},{'detailShadow':{'color':'#000000','blur':50}}):
+            broken=master();broken['sections'][0]['spreads'][0]['pages'][0]['layers'][0].update(bad)
+            self.assertEqual(self.client.post('/api/master-templates',json={'document':broken}).status_code,422,bad)
+
+    def test_vignette_captions_follow_letter_case(self):
+        doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
+        grid.update(textCase='upper',showDetail=True,detailTextCase='lower')
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        snapshot={'students':[{'id':'s','first_name':'Анна','last_name':'Иванова','quote':'Мечтай Смело'}],'teachers':[],'photos':{},'selections':[],'order':{'class_name':'11А','year':'2026'}}
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        texts={e['key'].rsplit('/',1)[1]:e['text'] for spread in compiled['variant_spreads']['student:s'].values() for e in spread['elements'] if '/card[' in e['key'] and e['type']=='text'}
+        self.assertEqual(texts,{'name':'АННА ИВАНОВА','detail':'мечтай смело'})
+        grid.update(skew=12,detailSkew=-8)
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,201)
+        compiled=generate({'id':'test','version':1,'master':doc},snapshot,measurer())
+        slant={e['key'].rsplit('/',1)[1]:e.get('skew') for spread in compiled['variant_spreads']['student:s'].values() for e in spread['elements'] if '/card[' in e['key'] and e['type']=='text'}
+        self.assertEqual(slant,{'name':12,'detail':-8})
+        grid['textCase']='shout'
+        self.assertEqual(self.client.post('/api/master-templates',json={'document':doc}).status_code,422)
 
     def test_vignette_radius_and_shadow_go_to_card_photos(self):
         doc=master();grid=doc['sections'][0]['spreads'][0]['pages'][0]['layers'][0]
