@@ -467,12 +467,18 @@ $('#inspector').onclick = e => {
   if (e.target.closest('[data-open-block]')) return openBlockSettings();
   const cardPick = e.target.closest('[data-card-pick]');
   if (cardPick) return pickCardPart(cardPick.dataset.cardPick);
-  /* «мешает …» leads to the setting it names: the photo width right there, the name size in «Подписи». */
+  /* «мешает …» leads to the setting it names, on the level that holds it: the vignette, the photo or the name. */
   const limiter = e.target.closest('[data-limiter]');
   if (limiter) {
     const key = limiter.dataset.limiter;
     if (!key) return;
-    if (['minFontSize', 'captionWidth', 'photoNameGap'].includes(key)) pickCardPart('name');
+    pickCardPart(
+      ['minFontSize', 'captionWidth', 'photoNameGap'].includes(key)
+        ? 'name'
+        : ['minPhotoWidth', 'photoWidth'].includes(key)
+          ? 'photo'
+          : null,
+    );
     const field = $(`#inspector [data-live="${key}"], #inspector [data-list="${key}"]`);
     if (!field) return;
     const box = field.closest('.type-value');
@@ -560,7 +566,7 @@ $('#inspector').onclick = e => {
       l = selectedLayer();
     if (!l) return;
     if (key === 'showDetail') return property('showDetail', !l.showDetail);
-    if (key === 'photoRatio') return property(key, Number(choice.dataset.value));
+    if (key === 'photoRatio' || key === 'leadRatio') return property(key, Number(choice.dataset.value));
     if (key === 'strokeOn') return property('strokeOn', !strokeOpen(l));
     if (key === 'shadowOn') return property('shadowOn', !l.shadow);
     const look = l.type === 'grid' && captionLookKey(key);
@@ -1023,6 +1029,10 @@ document.addEventListener('keydown', e => {
       focusCell = null;
       renderInspector();
       placeCollageUi();
+      return;
+    }
+    if (cardPart && activeCardLayer()) {
+      pickCardPart(null);
       return;
     }
     if (!$('#pointer-pop').hidden || !$('#frame-pop').hidden || !$('#shape-pop').hidden) {

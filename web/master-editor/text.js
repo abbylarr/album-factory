@@ -528,6 +528,14 @@ function vignetteSection(l) {
       .join('');
   return `<section class="inspector-section typography-section vignette-section"><h3>Виньетка</h3><button type="button" class="vignette-list-link" data-open-block title="Кого разместить и как делить по страницам — в настройках блока"><span class="vignette-list-icon">${kindIcon('flow')}</span><span class="vignette-list-copy"><strong>${teachers ? 'Учителя' : 'Ученики'}</strong><small>Блок «${esc(section().name)}»</small></span><svg class="vignette-list-go" viewBox="0 0 8 12" aria-hidden="true"><path d="M2 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` +
     `<div class="vignette-layout"><div><p class="visual-label">Размер</p><div class="vignette-size">${vignetteCell('Ширина', 'box.w', round(layerW(l)), round(pageWidth()), 'W')}${vignetteCell('Высота', 'box.h', round(l.box.h), round(pageHeight()), 'H')}</div></div><div><p class="visual-label">Выравнивание</p><div class="anchor-grid" role="group" aria-label="Где стоят карточки">${anchors}</div></div></div>` +
+    (teachers && spreadsFill()
+      ? `<div class="vignette-lead-row"><span class="type-label">Классный руководитель</span><div class="segments" role="radiogroup" aria-label="Классный руководитель">${[
+          ['card', 'Как все'],
+          ['big', 'Крупнее'],
+        ]
+          .map(([id, name]) => `<button type="button" role="radio" data-choice="lead" data-value="${id}" class="${(l.lead || 'card') === id ? 'active' : ''}" aria-checked="${(l.lead || 'card') === id}">${name}</button>`)
+          .join('')}</div></div>`
+      : '') +
     `<div class="vignette-detail-row vignette-last-row"><span>Неполный ряд по центру</span><button type="button" class="switch${l.centerLastRow ? ' on' : ''}" data-choice="centerLastRow" aria-pressed="${!!l.centerLastRow}" aria-label="Неполный ряд по центру"></button></div>` +
     `</section>`;
 }

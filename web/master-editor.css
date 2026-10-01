@@ -3198,7 +3198,7 @@ body.color-picking #canvas-host {
   background: #eae3f1;
   border-color: #c7a8d9;
 }
-:is(.typography-section, .collage-section, .layer-metrics) .type-value input {
+:is(.typography-section, .collage-section, .layer-metrics, .card-width-fields) .type-value input {
   height: 28px;
   flex: 1;
   min-width: 0;
@@ -3208,15 +3208,15 @@ body.color-picking #canvas-host {
   background: transparent;
   font-variant-numeric: tabular-nums;
 }
-:is(.typography-section, .collage-section, .layer-metrics) .type-value input {
+:is(.typography-section, .collage-section, .layer-metrics, .card-width-fields) .type-value input {
   cursor: text;
   user-select: text;
   -webkit-user-select: text;
 }
-:is(.typography-section, .collage-section, .layer-metrics) .type-value-suffixed input {
+:is(.typography-section, .collage-section, .layer-metrics, .card-width-fields) .type-value-suffixed input {
   flex: none;
   min-width: 1ch;
-  max-width: 4ch;
+  max-width: 5.5ch;
 }
 .type-size-icon {
   font-size: 13px;
@@ -6535,4 +6535,186 @@ button.block-issue:focus-visible {
 }
 .vignette-last-row {
   margin: 12px 0 0;
+}
+/* Vignette levels: the vignette, then a part of its cards (photo, name, subject or quote). */
+.card-part.hover {
+  border: 1px solid #c8a6e0;
+  background: #7712b30d;
+}
+.card-parts {
+  display: grid;
+  gap: 4px;
+}
+.card-part-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  background: #f7f4f9;
+  border-radius: 10px;
+  text-align: left;
+  white-space: normal;
+}
+.card-part-link:hover {
+  background: #f1eaf6;
+}
+.card-part-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent);
+}
+.card-part-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.card-part-copy {
+  flex: 1;
+  min-width: 0;
+}
+.card-part-copy strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #39343f;
+}
+.card-part-copy small {
+  display: block;
+  font-size: 11px;
+  color: #918a95;
+}
+.card-nav {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 0;
+}
+.card-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: #7712b3;
+  cursor: pointer;
+}
+.card-back svg {
+  width: 8px;
+  height: 12px;
+}
+.card-back:hover {
+  text-decoration: underline;
+}
+.card-nav + .card-section {
+  border-top: 0;
+}
+/* Pinned to the panel foot on every vignette level: the cards shown, how many fit, what stops more. */
+.vignette-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: auto;
+  padding: 10px 16px 12px;
+  border-top: 1px solid #ece9ef;
+  background: #fff;
+}
+.vignette-dock .vignette-shown {
+  margin: 0 0 6px;
+}
+.vignette-dock .vignette-status {
+  position: static;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.vignette-dock .vignette-limiter {
+  margin-top: 4px;
+}
+/* The bar over a vignette photo: small buttons for the shape and the width, each opening a small menu. */
+.card-bar-ui {
+  z-index: 4;
+}
+.card-bar > .card-bar-btn {
+  gap: 5px;
+  padding: 0 6px 0 7px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.card-bar > .card-bar-btn[aria-expanded="true"] {
+  background: #f3eafa;
+  color: #7712b3;
+}
+.card-bar-width {
+  min-width: 5ch;
+}
+.card-bar-menu {
+  width: 190px;
+}
+.card-bar-menu .ratio-glyph {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #f4f4f6;
+  color: #6f6a74;
+  flex: none;
+}
+.card-bar-menu .ratio-glyph svg {
+  width: 16px;
+  height: 16px;
+}
+.card-width-menu {
+  width: 220px;
+  padding: 6px 8px 8px;
+}
+.card-width-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 2px 0 0;
+}
+.card-width-fields .type-label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: #85818b;
+}
+.card-width-fields .type-value {
+  height: 30px;
+  padding: 0 7px 0 6px;
+}
+.card-width-fields .type-inline-scrub svg {
+  width: 13px;
+  height: 13px;
+}
+.card-width-fields .type-value-suffixed input {
+  width: 4.5ch !important;
+  min-width: 4.5ch;
+}
+.card-bar-note {
+  margin: 8px 2px 0;
+  font-size: 11px;
+  color: #7712b3;
+}
+
+.vignette-lead-row {
+  margin: 12px 0 0;
+}
+.vignette-lead-row .type-label {
+  display: block;
+  margin-bottom: 6px;
+}
+/* Part tabs size to their words, so «Руководитель» reads whole beside the short ones. */
+.card-nav .card-tabs button {
+  flex: 1 1 auto;
+  padding: 4px 4px;
 }

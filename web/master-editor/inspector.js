@@ -8,7 +8,7 @@ function renderInspector() {
     const multi = selected.length > 1,
       vignette = !multi && l.type === 'grid';
     /* A vignette reads like a Figma auto layout: place, then the vignette (list, size, alignment, gap), then its card. */
-    html += block(
+    const place = block(
       'Положение',
       `<div class="align-tools">${[
         ['left', 'По левому краю'],
@@ -25,8 +25,8 @@ function renderInspector() {
           '',
         )}</div><div class="field-grid">${number('X', 'box.x', l.box.x, l.type === 'grid' ? 0 : -pageWidth(), l.type === 'grid' ? pageWidth() : 2 * pageWidth())}${number('Y', 'box.y', l.box.y)}</div>${l.type === 'grid' ? '' : rotationRow(l)}`,
     );
-    if (vignette) html += vignetteSection(l) + cardsSection(l) + captionsSection(l);
-    else html += block(
+    if (vignette) html += vignettePanel(l, place);
+    else html += place + block(
       'Размер',
       `<div class="size-line">${number('W', 'box.w', layerW(l), 1, l.type === 'grid' ? pageWidth() : sheetWidth())}${l.type === 'svg' ? `<button type="button" class="icon-toggle${l.lockAspect !== false ? ' active' : ''}" data-choice="lockAspect" title="Сохранять пропорции" aria-label="Сохранять пропорции" aria-pressed="${l.lockAspect !== false}">${glyph.link}</button>` : ''}${number('H', 'box.h', l.box.h, 1, pageHeight())}</div>${l.type === 'grid' ? '' : layerMetrics(l)}`,
     );

@@ -1,11 +1,12 @@
 """The editor (web/master-plan-core.js, web/collage-core.js) and generation (master_plan.py, flex_frames) must agree."""
 import json
+import math
 import shutil
 import subprocess
 import unittest
 from pathlib import Path
 
-from album_factory.master_layout import caption_floor, flex_frames, geometry
+from album_factory.master_layout import caption_floor, card_slots, fill_capacity, fill_pages, flex_frames, geometry, row_counts
 from album_factory.master_plan import list_plan, people, personal_take
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,6 +117,55 @@ class PlanParityTest(unittest.TestCase):
         # Stretched to three pages with a minimum of 2 and 7 people: back to two pages rather than up to four.
         self.assertEqual(list_plan({**two, 'target': 2, 'list': {'min': 2, 'max': 12}}, 7, 12)['counts'], [4, 3])
 
+    def test_rows_take_one_more_and_never_leave_one_alone(self):
+        self.assertEqual(row_counts(13, 4, 4), [4, 4, 3, 2])
+        self.assertEqual(row_counts(13, 4, 3), [5, 4, 4])
+        self.assertEqual(row_counts(14, 4, 3), [5, 5, 4])
+        self.assertEqual(row_counts(11, 5, 3), [4, 4, 3])
+        self.assertEqual(row_counts(7, 6, 2), [4, 3])
+        self.assertEqual(row_counts(3, 4, 1), [3])
+        # Thirteen cards fit as five, five and three: no row is squeezed while the cards fit without it.
+        layer = {**CARD_BASE, 'minPhotoWidth': 30, 'minFontSize': 8, 'box': {'w': 178, 'h': 224}}
+        self.assertIsNone(geometry(13, layer)['tight'])
+        # With twelve a page, the thirteenth squeezes into the first row instead.
+        geo = geometry(13, {**layer, 'max': 12})
+        self.assertEqual((geo['cols'], geo['rows']), (4, 3))
+        self.assertLess(geo['tight']['photo_w'], geo['photo_w'])
+
+    def test_teachers_share_one_spread_the_same(self):
+        teachers = {**CARD_BASE, 'gap': 4, 'source': 'teachers', 'minFontSize': 8, 'minPhotoWidth': 30, 'showDetail': True, 'max': 12}
+        layouts = [[{**teachers, 'box': {'w': 178, 'h': 224}}, {**teachers, 'box': {'w': 178, 'h': 224}}],
+                   [{**teachers, 'box': {'w': 178, 'h': 224}, 'photoRatio': 1, 'leadRatio': 2 / 3, 'anchor': 'top'}, {**teachers, 'box': {'w': 178, 'h': 224}, 'photoRatio': 1}],
+                   [{**teachers, 'box': {'w': 202, 'h': 264}}, {**teachers, 'box': {'w': 178, 'h': 224}, 'gap': 0, 'anchor': 'bottom'}],
+                   [{**teachers, 'box': {'w': 178, 'h': 224}, 'nameAt': 'right', 'captionWidth': 40}]]
+        payload = [[grids, n, big] for grids in layouts for n in (1, 2, 5, 9, 12, 13, 14, 18, 19, 24, 30) for big in (True, False)]
+        js = self.run_js("vm.runInContext(fs.readFileSync('web/master-planner.js','utf8'),Object.assign(c,{MasterPlan:c.window.MasterPlan,document:{createElement:()=>({getContext:()=>({})})}}));"
+                         "const p=c.window.MasterPlanner({sections:[]},{});process.stdout.write(JSON.stringify(input.map(([g,n,b])=>[p.fillPages(g,n,b,4),p.fillCapacity(g,b,4)])));", payload)
+        for (grids, n, big), (plan, most) in zip(payload, js):
+            with self.subTest(grids=len(grids), n=n, big=big):
+                ours = fill_pages(grids, n, big, 4)
+                self.assertEqual((ours['fits'], ours['lead_card']), (plan['fits'], plan['leadCard']))
+                for a, b in zip(ours['pages'], plan['pages']):
+                    self.assertEqual((a['count'], a['top']), (b['count'], b['top']))
+                    self.assertAlmostEqual(a['cap'], b['cap'], places=9)
+                    self.assertAlmostEqual(a['push'], b['push'], places=9)
+                    self.assertEqual(a['lead'] is None, b['lead'] is None)
+                    if a['lead']:
+                        for k, j in (('x', 'x'), ('y', 'y'), ('photo_w', 'photoW')):
+                            self.assertAlmostEqual(a['lead'][k], b['lead'][j], places=9)
+                self.assertEqual(fill_capacity(grids, big, 4), most)
+        # Twelve teachers and the class teacher: the class teacher takes a page of his own, the teachers the other.
+        two = layouts[0]
+        plan = fill_pages(two, 13, True, 4)
+        self.assertEqual(sorted(p['count'] for p in plan['pages']), [0, 12])
+        self.assertTrue(any(p['lead'] for p in plan['pages']))
+        # Eighteen: the class teacher shares a page with a short row, the other page squeezes a row rather than leave one alone.
+        plan = fill_pages(two, 18, True, 4)
+        self.assertFalse(plan['lead_card'])
+        self.assertTrue(all(p['count'] >= 4 for p in plan['pages']))
+        # Too many for a larger portrait: the class teacher is a card like the others.
+        self.assertTrue(fill_pages(two, 25, True, 4)['lead_card'])
+
     def test_personal_blocks(self):
         students = ['s0', 's1', 's2']
         payload = [[{'people': mode}, students, 's1'] for mode in ('all', 'others', 'owner', 'off', None)]
@@ -138,18 +188,29 @@ class PlanParityTest(unittest.TestCase):
         self.assertEqual(flex_frames(90, 120, [0.75])[0], {'x': 0, 'y': 0, 'w': 90, 'h': 120})
 
     def test_vignette_cards_measure_the_same(self):
-        payload = [[{**CARD_BASE, **card, 'box': {'w': w, 'h': h}}, n] for card in CARDS for w, h in ((178, 224), (90, 230)) for n in (1, 4, 9, 13)]
+        payload = [[{**CARD_BASE, **card, 'box': {'w': w, 'h': h}}, n] for card in CARDS + [{'centerLastRow': True}, {'max': 8}] for w, h in ((178, 224), (90, 230), (202, 120)) for n in (1, 4, 9, 13, 17)]
         js = self.run_js("vm.runInContext(fs.readFileSync('web/master-planner.js','utf8'),Object.assign(c,{document:{createElement:()=>({getContext:()=>({})})}}));"
-                         "const p=c.window.MasterPlanner({sections:[]},{});process.stdout.write(JSON.stringify(input.map(([l,n])=>p.gridGeometry(n,l))));", payload)
+                         "const p=c.window.MasterPlanner({sections:[]},{});process.stdout.write(JSON.stringify(input.map(([l,n])=>{const g=p.gridGeometry(n,l);return g&&{...g,slots:[n,n-1,Math.ceil(n/2)].map(k=>p.cardSlots(k,g,l))};})));", payload)
         for (layer, n), geo in zip(payload, js):
             with self.subTest(layer=layer, n=n):
                 py = geometry(n, layer)
                 self.assertEqual(py is None, geo is None)
                 if py is None:
                     continue
-                self.assertEqual(py['cols'], geo['cols'])
-                for a, b in (('cell_w', 'cellW'), ('cell_h', 'cellH'), ('photo_w', 'photoW'), ('photo_h', 'photoH'), ('offset_x', 'offsetX'), ('offset_y', 'offsetY')):
+                self.assertEqual((py['cols'], py['rows']), (geo['cols'], geo['rows']))
+                for a, b in (('cell_w', 'cellW'), ('cell_h', 'cellH'), ('photo_w', 'photoW'), ('photo_h', 'photoH'), ('offset_x', 'offsetX'), ('offset_y', 'offsetY'), ('block_w', 'blockW'), ('full_w', 'fullW')):
                     self.assertAlmostEqual(py[a], geo[b], places=9)
+                self.assertEqual(py['tight'] is None, geo['tight'] is None)
+                if py['tight']:
+                    self.assertAlmostEqual(py['tight']['photo_w'], geo['tight']['photoW'], places=9)
+                    self.assertAlmostEqual(py['tight']['cell_w'], geo['tight']['cellW'], places=9)
+                for k, slots in zip((n, n-1, math.ceil(n/2)), geo['slots']):
+                    ours = card_slots(k, py, layer)
+                    self.assertEqual(len(ours), len(slots))
+                    for (x, y, squeezed), slot in zip(ours, slots):
+                        self.assertAlmostEqual(x, slot['x'], places=9)
+                        self.assertAlmostEqual(y, slot['y'], places=9)
+                        self.assertEqual(squeezed, slot['tight'])
                 self.assertEqual(set(py['parts']), set(geo['parts']))
                 for key, box in py['parts'].items():
                     for value, k in zip(box, 'xywh'):

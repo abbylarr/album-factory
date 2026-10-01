@@ -218,7 +218,8 @@ function boxGroup(children, options) {
 async function vignetteChildren(l, g, background) {
   const b = l.box;
   const records = g.records || [],
-    geo = planner.gridGeometry(g.layoutCount || Math.max(1, records.length), l),
+    settings = planner.pageSettings(l, g),
+    geo = planner.gridGeometry(g.layoutCount || Math.max(1, records.length), settings),
     children = [
       new fabric.Rect({
         left: 0,
@@ -239,34 +240,50 @@ async function vignetteChildren(l, g, background) {
     inset = align === 'inside' ? sw / 2 : align === 'outside' ? -sw / 2 : 0,
     reach = align === 'outside' ? sw : align === 'center' ? sw / 2 : 0;
   if (geo) {
-    const part = geo.parts,
-      photoX = part.photo.x,
-      photoY = part.photo.y,
-      pad = Math.min(geo.overInset, geo.photoW / 4);
-    /* A short last row may stand in the middle of the full rows above it. */
-    const lastStart = records.length - (records.length % geo.cols || geo.cols),
-      lastShift = l.centerLastRow ? ((geo.cols - (records.length - lastStart)) * (geo.cellW + l.gap)) / 2 : 0;
-    for (let i = 0; i < records.length; i++) {
-      const x = geo.offsetX + (i % geo.cols) * (geo.cellW + l.gap) + (i >= lastStart ? lastShift : 0),
-        y = geo.offsetY + Math.floor(i / geo.cols) * (geo.cellH + l.gap),
-        px = x + photoX,
-        py = y + photoY;
-      const el = await imageElement(planner.placeholderSvg(records[i]));
+    /* Every card of the page, and the class teacher's larger card on the free space when the block lays one out. */
+    const items = planner.cardSlots(records.length, geo, settings).map((slot, i) => {
+        const card = slot.tight ? planner.narrowest(geo) : geo;
+        return { record: records[i], x: slot.x, y: slot.y, card };
+      });
+    if (g.lead) {
+      const big = planner.cardParts(g.lead.photoW, planner.leadFrame(l));
+      items.push({
+        record: g.lead.record,
+        x: g.lead.x,
+        y: g.lead.y,
+        lead: true,
+        card: { ...geo, photoW: big.photoW, photoH: big.photoH, parts: big.parts, cellW: big.w, cellH: big.h },
+      });
+    }
+    for (const item of items) {
+      /* A squeezed row holds narrower cards: their photo and captions follow that width. */
+      const record = item.record,
+        card = item.card,
+        part = card.parts,
+        cardGeo = card,
+        photoW = card.photoW,
+        photoH = card.photoH,
+        pad = Math.min(geo.overInset, photoW / 4),
+        x = item.x,
+        y = item.y,
+        px = x + part.photo.x,
+        py = y + part.photo.y;
+      const el = await imageElement(planner.placeholderSvg(record));
       /* The portrait covers the photo box whatever its proportions. */
-      const cover = Math.max(geo.photoW / el.naturalWidth, geo.photoH / el.naturalHeight),
+      const cover = Math.max(photoW / el.naturalWidth, photoH / el.naturalHeight),
         photo = new fabric.FabricImage(el, {
-          left: px + geo.photoW / 2,
-          top: py + geo.photoH / 2,
+          left: px + photoW / 2,
+          top: py + photoH / 2,
           originX: 'center',
           originY: 'center',
           scaleX: cover,
           scaleY: cover,
-          opacity: records[i].missing ? 0.2 : 1,
+          opacity: record.missing ? 0.2 : 1,
         }),
-        corner = Math.min(Number(l.radius) || 0, geo.photoW / 2, geo.photoH / 2);
+        corner = Math.min(Number(l.radius) || 0, photoW / 2, photoH / 2);
       photo.clipPath = new fabric.Rect({
-        width: geo.photoW / cover,
-        height: geo.photoH / cover,
+        width: photoW / cover,
+        height: photoH / cover,
         rx: corner / cover,
         ry: corner / cover,
         originX: 'center',
@@ -277,8 +294,8 @@ async function vignetteChildren(l, g, background) {
           new fabric.Rect({
             left: px - reach,
             top: py - reach,
-            width: geo.photoW + 2 * reach,
-            height: geo.photoH + 2 * reach,
+            width: photoW + 2 * reach,
+            height: photoH + 2 * reach,
             rx: corner && corner + reach,
             ry: corner && corner + reach,
             fill: background || '#fff',
@@ -291,12 +308,12 @@ async function vignetteChildren(l, g, background) {
       if (sw)
         children.push(
           new fabric.Rect({
-            left: px + geo.photoW / 2,
-            top: py + geo.photoH / 2,
+            left: px + photoW / 2,
+            top: py + photoH / 2,
             originX: 'center',
             originY: 'center',
-            width: Math.max(geo.photoW - 2 * inset, 0.2),
-            height: Math.max(geo.photoH - 2 * inset, 0.2),
+            width: Math.max(photoW - 2 * inset, 0.2),
+            height: Math.max(photoH - 2 * inset, 0.2),
             rx: Math.max(0, corner - inset),
             ry: Math.max(0, corner - inset),
             fill: 'transparent',
@@ -310,7 +327,7 @@ async function vignetteChildren(l, g, background) {
             objectCaching: false,
           }),
         );
-      const nameBox = new fabric.Textbox(AutoText.applyCase(records[i].name, l.textCase), {
+      const nameBox = new fabric.Textbox(AutoText.applyCase(record.name, l.textCase), {
         left: x + part.name.x,
         top: y + part.name.y,
         width: part.name.w,
@@ -326,7 +343,7 @@ async function vignetteChildren(l, g, background) {
         fill: l.color,
         ...captionLookPaint(l, 'name'),
       });
-      const detailText = l.showDetail && records[i].detail && part.detail ? AutoText.applyCase(records[i].detail, l.detailTextCase) : '',
+      const detailText = l.showDetail && record.detail && part.detail ? AutoText.applyCase(record.detail, l.detailTextCase) : '',
         detailBox = detailText
           ? new fabric.Textbox(detailText, {
               left: x + part.detail.x,
@@ -338,7 +355,7 @@ async function vignetteChildren(l, g, background) {
               underline: !!l.detailUnderline,
               linethrough: !!l.detailStrike,
               /* Each subject or quote shrinks on its own card, as in print. */
-              fontSize: planner.detailFont(l, geo, detailText).size * 0.3528,
+              fontSize: planner.detailFont(l, cardGeo, detailText).size * 0.3528,
               lineHeight: l.detailLineHeight || 1.25,
               charSpacing: (Number(l.detailLetterSpacing) || 0) * 10,
               textAlign: l.detailAlign || 'center',
@@ -351,10 +368,10 @@ async function vignetteChildren(l, g, background) {
       if (detailBox) applyTextSkew(detailBox, l.detailSkew);
       /* Captions of one zone hug each other; over the photo they rest on its bottom edge, beside it they stand at the
          set height by the text they really have, so «низ» puts the last line at the photo foot (as in master_layout). */
-      const floor = py + geo.photoH - pad,
+      const floor = py + photoH - pad,
         beside = zone => zone === 'left' || zone === 'right',
         height = clamp(Number(l.sideAlign ?? 0.5) || 0, 0, 1),
-        stand = h => py + Math.max(0, (geo.photoH - h) * height);
+        stand = h => py + Math.max(0, (photoH - h) * height);
       if (beside(part.name.zone))
         nameBox.set(
           'top',
@@ -376,9 +393,10 @@ async function vignetteChildren(l, g, background) {
       children.push(nameBox);
       if (detailBox) children.push(detailBox);
       cards.push({
+        lead: !!item.lead,
         x,
         y,
-        photo: { x: px, y: py, w: geo.photoW, h: geo.photoH },
+        photo: { x: px, y: py, w: photoW, h: photoH },
         name: { x: nameBox.left, y: nameBox.top, w: part.name.w, h: nameBox.height, zone: part.name.zone },
         detail: detailBox
           ? { x: detailBox.left, y: detailBox.top, w: part.detail.w, h: detailBox.height, zone: part.detail.zone }
@@ -836,6 +854,8 @@ function syncSelection() {
   if (next.join() !== selected.join()) {
     focusCell = null;
     cellMenu = null;
+    cardPart = null;
+    cardHover = null;
     selectedAt = performance.now();
   }
   selected = next;
@@ -851,6 +871,7 @@ canvas.on('selection:cleared', () => {
   if (!changing) {
     selected = [];
     focusCell = null;
+    cardPart = null;
     cellMenu = null;
     renderInspector();
     $('.right-panel').classList.remove('mobile-open');

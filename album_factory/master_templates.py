@@ -189,10 +189,10 @@ def validate(document):
         if v2 and not section.get('cover'):
             if section['kind'] == 'flow':
                 block_list = section.get('list')
-                check(isinstance(block_list, dict) and set(block_list) <= {'source', 'min', 'max', 'strictMin', 'excludeLead'}, 'Нужны настройки списка блока')
+                check(isinstance(block_list, dict) and set(block_list) <= {'source', 'min', 'max', 'strictMin', 'excludeLead', 'fill'}, 'Нужны настройки списка блока')
                 check(block_list.get('source') in {'students', 'teachers'}, 'Неверный список блока')
                 check(number(block_list.get('min'), 1, 100) and number(block_list.get('max'), 1, 100) and block_list['min'] <= block_list['max'], 'Неверные границы карточек на странице')
-                check(all(isinstance(block_list.get(k, False), bool) for k in ('strictMin', 'excludeLead')), 'Неверные настройки списка блока')
+                check(all(isinstance(block_list.get(k, False), bool) for k in ('strictMin', 'excludeLead')) and block_list.get('fill', 'grow') in {'grow', 'spreads'}, 'Неверные настройки списка блока')
                 check(sum(s.get('role') == 'last' for s in spreads if isinstance(s, dict)) <= 1, 'В блоке может быть один последний неполный разворот')
             if section['kind'] == 'repeat':
                 check(section.get('people', 'all') in {'all', 'others', 'owner', 'off'}, 'Неверный выбор, для кого личные развороты')
@@ -361,6 +361,7 @@ def validate(document):
                             if shadow is not None:
                                 check(isinstance(shadow, dict) and color(shadow.get('color')) and number(shadow.get('offsetX', 0), -5, 5) and number(shadow.get('offsetY', 0), -5, 5) and number(shadow.get('blur', 0), 0, 5) and number(shadow.get('opacity', 50), 0, 100), 'Неверная тень подписи')
                         check(layer.get('anchor', 'center') in CARD_ANCHORS, 'Неверное выравнивание карточек')
+                        check(layer.get('lead', 'card') in {'card', 'big'} and number(layer.get('leadRatio', .75), .5, 1.5), 'Неверная карточка классного руководителя')
                         check(layer.get('textCase', '') in ('', *auto_text.CASES) and layer.get('detailTextCase', '') in ('', *auto_text.CASES), 'Неверный регистр подписей')
         check(len(grid_sources) <= 1, 'В одном разделе нужен один источник виньеток')
     return document

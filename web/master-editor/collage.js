@@ -593,28 +593,29 @@ function vignetteHandles(l) {
     oy = l.box.y,
     gx = vignetteGap(l, 'gap'),
     gy = gx,
-    cols = Math.min(geo.cols, cards.length),
-    rows = Math.ceil(cards.length / geo.cols),
-    left = cards[0].x,
-    top = cards[0].y,
-    right = left + cols * geo.cellW + (cols - 1) * gx,
-    bottom = top + rows * geo.cellH + (rows - 1) * gy,
+    /* Rows follow the real cards: a squeezed row or a short one has its own gaps, the first row shows the column gaps. */
+    rowsY = [...new Set(cards.map(c => c.y))].sort((a, b) => a - b),
+    first = cards.filter(c => c.y === rowsY[0]),
+    left = geo.offsetX,
+    top = rowsY[0],
+    right = left + geo.blockW,
+    bottom = rowsY.at(-1) + geo.cellH,
     out = [];
-  for (let c = 1; c < cols; c++)
+  for (let c = 1; c < first.length; c++)
     out.push({
       key: 'gap',
       axis: 'x',
-      x: ox + left + c * geo.cellW + (c - 1) * gx,
+      x: ox + first[c].x - gx,
       y: oy + top,
       w: gx,
       h: bottom - top,
     });
-  for (let r = 1; r < rows; r++)
+  for (let r = 1; r < rowsY.length; r++)
     out.push({
       key: 'gap',
       axis: 'y',
       x: ox + left,
-      y: oy + top + r * geo.cellH + (r - 1) * gy,
+      y: oy + rowsY[r] - gy,
       w: right - left,
       h: gy,
     });
@@ -685,7 +686,7 @@ function placeVignetteUi() {
     return;
   }
   const drag = vignetteDrag,
-    handles = vignetteHandles(l).concat(cardPart === 'photo' ? [] : cardHandles(l)),
+    handles = vignetteHandles(l).concat(cardPart === 'name' || cardPart === 'detail' ? cardHandles(l) : []),
     dragged = drag ? Math.min(drag.index, handles.length - 1) : -1;
   host.hidden = false;
   host.innerHTML = handles

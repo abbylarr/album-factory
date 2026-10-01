@@ -639,6 +639,8 @@ function property(key, value) {
         'sideAlign',
         'anchor',
         'centerLastRow',
+        'lead',
+        'leadRatio',
         'textCase',
         'detailTextCase',
         'skew',

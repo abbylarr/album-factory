@@ -71,6 +71,8 @@ function blockSummary(s) {
   if (continuation(s)) return `${who} · первые ${plural(s.limit || 1, 'разворот', 'разворота', 'разворотов')}`;
   if (s.kind === 'flow') {
     const l = blockList(s);
+    /* A block kept to its spreads says how many people it takes at most. */
+    if (l.fill === 'spreads' && planner) return `${who} · до ${spreadsCapacity(s)} в блоке`;
     return `${who} · ${l.min}–${l.max} на странице`;
   }
   return who;
@@ -128,7 +130,18 @@ function blockSettings(s) {
         ['students', 'Учеников'],
         ['teachers', 'Учителей'],
       ]);
-    body +=
+    body += blockQuestion(
+      'Сколько разворотов',
+      'fill',
+      l.fill === 'spreads' ? 'spreads' : 'grow',
+      [
+        ['grow', 'Сколько нужно'],
+        ['spreads', 'Только эти'],
+      ],
+      'Только эти — весь список на развороты блока, по одному разу. Кто не поместится — ошибка в заказе.',
+    );
+    if (l.fill !== 'spreads')
+      body +=
       blockQuestion(
         'Если людей немного',
         'density',
@@ -318,6 +331,11 @@ function blockSet(key, value) {
     if (key === 'max') {
       list.max = clamp(Math.round(value) || 1, 1, 100);
       if (list.min > list.max) list.min = list.max;
+      return;
+    }
+    if (key === 'fill') {
+      if (value === 'spreads') list.fill = 'spreads';
+      else delete list.fill;
       return;
     }
     if (key === 'strictMin') list.strictMin = value === 'stop';
