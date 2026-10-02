@@ -229,7 +229,7 @@ $('#inspector').onchange = async e => {
     cardsPreview = 0;
     if (el.dataset.list === 'max' && el.value === '') return blockSet('max', 100);
     if (el.value === '' || !el.validity.valid) return el.reportValidity();
-    return blockSet(el.dataset.list, value);
+    return blockSet(el.dataset.list, Number(el.value));
   }
   if (el.dataset.flex) {
     const l = selectedLayer();
